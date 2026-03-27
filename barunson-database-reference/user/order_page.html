@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>발주관리</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'맑은 고딕','Malgun Gothic',sans-serif;font-size:12px;background:#f5f5f5}
+.header{background:#1a3a5c;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:15px}
+.header .sub{font-size:11px;color:#aaccee}
+.toolbar{background:#fff;border-bottom:1px solid #ddd;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.toolbar label{font-weight:bold;font-size:11px;color:#555}
+.toolbar select,.toolbar input[type=text]{padding:3px 6px;border:1px solid #aaa;font-size:11px;border-radius:3px}
+.toolbar input[type=text]{width:140px}
+.btn{padding:5px 14px;border:none;border-radius:3px;font-size:11px;cursor:pointer;font-weight:bold}
+.btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#16a34a;color:#fff}.btn-success:hover{background:#15803d}
+.btn-outline{background:#fff;color:#333;border:1px solid #aaa}.btn-outline:hover{background:#f0f0f0}
+.btn-danger{background:#dc2626;color:#fff}.btn-danger:hover{background:#b91c1c}
+
+/* 업로드 영역 */
+.upload-zone{border:2px dashed #aaa;border-radius:8px;padding:20px;text-align:center;margin:12px 16px;background:#fafafa;cursor:pointer;transition:all .2s}
+.upload-zone.drag-over{border-color:#2563eb;background:#eff6ff}
+.upload-zone.loaded{border-color:#16a34a;background:#f0fdf4;border-style:solid}
+.upload-zone p{color:#666;font-size:12px;margin:4px 0}
+.upload-zone .icon{font-size:28px;margin-bottom:4px}
+.upload-zone .filename{font-weight:bold;color:#16a34a}
+
+/* 요약 */
+.summary{background:#fff;margin:0 16px;padding:10px 16px;border:1px solid #ddd;border-radius:6px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px}
+.summary .item{display:flex;gap:4px}.summary .item .label{color:#888}.summary .item .val{font-weight:bold;color:#1a3a5c}
+.summary .item .val.danger{color:#dc2626}
+
+/* 테이블 */
+.table-wrap{margin:10px 16px;overflow:auto;max-height:calc(100vh - 280px);border:1px solid #ddd;border-radius:6px;background:#fff}
+table{width:100%;border-collapse:collapse}
+thead{position:sticky;top:0;z-index:10}
+th{background:#374151;color:#fff;padding:6px 8px;border:1px solid #4b5563;font-size:10px;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{background:#4b5563}
+th.sa::after{content:' \u25B2';font-size:8px}
+th.sd::after{content:' \u25BC';font-size:8px}
+td{padding:4px 8px;border:1px solid #e5e7eb;white-space:nowrap;font-size:11px}
+tr:nth-child(even){background:#f9fafb}
+tr:hover{background:#eff6ff}
+tr.checked{background:#fef3c7}
+.n{text-align:right;font-family:Consolas,monospace;font-size:10px}
+.neg{color:#dc2626;font-weight:bold}
+.zero{color:#bbb}
+.bt{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;color:#fff;font-weight:bold}
+.bt-bc{background:#3a7bd5}.bt-bh{background:#e74c3c}.bt-bi{background:#27ae60}
+.bt-pe{background:#f39c12}.bt-dd{background:#16a085}.bt-dg{background:#c0392b}
+.bt-etc{background:#7f8c8d}.bt-b2b{background:#2c3e50}
+
+/* 발주수량 입력 */
+.qty-input{width:60px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;text-align:right;font-size:11px;font-family:Consolas,monospace}
+.qty-input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.2)}
+.qty-input.filled{background:#fef3c7;border-color:#f59e0b}
+
+/* 체크박스 */
+.row-check{width:16px;height:16px;cursor:pointer}
+
+/* 우선순위 뱃지 */
+.priority{display:inline-block;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:bold;color:#fff}
+.p-urgent{background:#dc2626}
+.p-high{background:#ea580c}
+.p-medium{background:#ca8a04}
+.p-low{background:#65a30d}
+
+.footer{position:fixed;bottom:0;width:100%;background:#f3f4f6;border-top:1px solid #ddd;padding:6px 16px;font-size:10px;color:#666;display:flex;justify-content:space-between;z-index:20}
+
+/* 발주서 패널 */
+.order-panel{display:none;position:fixed;bottom:40px;right:16px;width:360px;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:30;max-height:50vh;overflow:auto}
+.order-panel.show{display:block}
+.order-panel .panel-header{background:#1a3a5c;color:#fff;padding:8px 12px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold}
+.order-panel .panel-body{padding:8px 12px;font-size:11px}
+.order-panel table{width:100%}
+.order-panel td,.order-panel th{padding:3px 6px;font-size:10px}
+.order-panel th{background:#f3f4f6;color:#333}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>BARUNN.Company - 발주관리</h1>
+    <div class="sub">물류관리 > 제품관리 > 발주관리</div>
+  </div>
+  <div style="font-size:11px" id="dateInfo"></div>
+</div>
+
+<div class="upload-zone" id="uploadZone">
+  <div class="icon">📂</div>
+  <p>ERP 스마트재고현황 엑셀(.xls)을 여기에 드래그&드롭</p>
+  <p style="font-size:10px;color:#999">또는 클릭하여 파일 선택 | 조건: 생산지 한국, 상태 정상판매</p>
+  <input type="file" id="fileInput" accept=".xls,.xlsx" style="display:none">
+</div>
+
+<div class="toolbar">
+  <label>브랜드</label>
+  <select id="brandFilter"><option value="">전체</option></select>
+  <label>검색</label>
+  <input type="text" id="searchInput" placeholder="품목코드 검색">
+  <label>보기</label>
+  <select id="viewFilter">
+    <option value="negative">가용재고 마이너스</option>
+    <option value="low">가용재고 0~100</option>
+    <option value="all">전체</option>
+  </select>
+  <div style="flex:1"></div>
+  <button class="btn btn-outline" onclick="checkAll()">전체선택</button>
+  <button class="btn btn-outline" onclick="uncheckAll()">선택해제</button>
+  <button class="btn btn-success" onclick="showOrderPanel()">발주서 확인 (<span id="orderCount">0</span>)</button>
+  <button class="btn btn-primary" onclick="exportOrderCSV()">발주서 CSV</button>
+</div>
+
+<div class="summary" id="summaryBar"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr id="hdr"></tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+</div>
+
+<div class="order-panel" id="orderPanel">
+  <div class="panel-header">
+    <span>발주서 미리보기</span>
+    <span style="cursor:pointer" onclick="hideOrderPanel()">✕</span>
+  </div>
+  <div class="panel-body" id="orderPanelBody"></div>
+</div>
+
+<div class="footer">
+  <div id="statusBar">데이터를 로드하세요</div>
+  <div>발주관리 | ERP 스마트재고현황 기반</div>
+</div>
+
+<script>
+let RAW=[], FILTERED=[], sortK='가용재고', sortD='asc', orderQty={}, checkedItems=new Set();
+
+const COLS=[
+  {k:'chk',w:30,special:'check'},
+  {k:'우선순위',w:55,special:'priority'},
+  {k:'품목코드',w:140},
+  {k:'브랜드',w:100,brand:1},
+  {k:'상태코드',w:50},
+  {k:'카드구분',w:55},
+  {k:'현재고',w:65,num:1},
+  {k:'요청량',w:60,num:1},
+  {k:'가용재고',w:70,num:1,hl:'#8b0000'},
+  {k:'부족수량',w:70,num:1,special:'shortage'},
+  {k:'발주수량',w:75,special:'orderInput'},
+  {k:'마감단가',w:65,num:1},
+  {k:'예상금액',w:80,special:'estCost'},
+  {k:'중국재고',w:60,num:1},
+  {k:'이동재고',w:60,num:1},
+  {k:'미생산량',w:60,num:1},
+];
+
+// 헤더 생성
+const hdr=document.getElementById('hdr');
+COLS.forEach(c=>{
+  const th=document.createElement('th');
+  th.textContent=c.special==='check'?'☑':c.special==='priority'?'우선순위':c.special==='shortage'?'부족수량':c.special==='orderInput'?'발주수량':c.special==='estCost'?'예상금액':c.k;
+  if(c.hl)th.style.background=c.hl;
+  if(c.w)th.style.minWidth=c.w+'px';
+  if(!c.special||c.special==='priority'||c.special==='shortage'){
+    th.dataset.k=c.special==='priority'?'_priority':c.special==='shortage'?'_shortage':c.k;
+    th.onclick=()=>{
+      const key=th.dataset.k;
+      if(sortK===key)sortD=sortD==='asc'?'desc':'asc';
+      else{sortK=key;sortD='asc';}
+      render();
+    };
+  }
+  hdr.appendChild(th);
+});
+
+function brandCls(b){
+  if(!b)return'bt-etc';
+  if(b.includes('바른손카드'))return'bt-bc';if(b.includes('비핸즈'))return'bt-bh';
+  if(b.includes('프리미어'))return'bt-pe';if(b.includes('더카드'))return'bt-dd';
+  if(b.includes('초대장'))return'bt-bi';if(b.includes('B2B'))return'bt-b2b';
+  if(b.includes('더기프트'))return'bt-dg';return'bt-etc';
+}
+
+function fN(v){
+  if(v===0||v===''||v==null)return'<span class="zero">0</span>';
+  if(typeof v==='number')return v.toLocaleString();
+  return String(v);
+}
+
+function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
+
+function getPriority(p){
+  const av=p['가용재고']||0;
+  if(av<=-1000)return{level:1,label:'긴급',cls:'p-urgent'};
+  if(av<=-100)return{level:2,label:'높음',cls:'p-high'};
+  if(av<=-10)return{level:3,label:'중간',cls:'p-medium'};
+  return{level:4,label:'낮음',cls:'p-low'};
+}
+
+function getShortage(p){
+  const av=p['가용재고']||0;
+  return av<0?Math.abs(av):0;
+}
+
+function processData(products){
+  // D_ 브랜드 제외
+  RAW=products.filter(p=>{
+    const b=p['브랜드']||'';
+    return !b.includes('D_')&&!b.includes('(D');
+  });
+
+  // 우선순위, 부족수량 계산
+  RAW.forEach(p=>{
+    p._priority=getPriority(p).level;
+    p._shortage=getShortage(p);
+  });
+
+  // 브랜드 필터 옵션
+  const brands={};
+  RAW.forEach(p=>{const b=p['브랜드']||'';brands[b]=(brands[b]||0)+1;});
+  const sel=document.getElementById('brandFilter');
+  sel.innerHTML='<option value="">전체</option>';
+  Object.entries(brands).sort((a,b)=>b[1]-a[1]).forEach(([b,n])=>{
+    const o=document.createElement('option');o.value=b;o.textContent=`${b||'(없음)'}(${n})`;
+    sel.appendChild(o);
+  });
+
+  render();
+}
+
+function render(){
+  const q=document.getElementById('searchInput').value.toLowerCase();
+  const brand=document.getElementById('brandFilter').value;
+  const view=document.getElementById('viewFilter').value;
+
+  FILTERED=RAW.filter(p=>{
+    if(brand&&(p['브랜드']||'')!==brand)return false;
+    if(q&&!(p['품목코드']||'').toLowerCase().includes(q))return false;
+    const av=p['가용재고']||0;
+    if(view==='negative'&&av>=0)return false;
+    if(view==='low'&&(av<0||av>100))return false;
+    return true;
+  });
+
+  // 정렬
+  FILTERED.sort((a,b)=>{
+    let va=a[sortK]??'',vb=b[sortK]??'';
+    if(typeof va==='number'&&typeof vb==='number')return sortD==='asc'?va-vb:vb-va;
+    va=String(va).toLowerCase();vb=String(vb).toLowerCase();
+    return sortD==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+  });
+
+  // 헤더 정렬 표시
+  document.querySelectorAll('th').forEach(th=>{
+    th.classList.remove('sa','sd');
+    if(th.dataset.k===sortK)th.classList.add(sortD==='asc'?'sa':'sd');
+  });
+
+  const tb=document.getElementById('tb');
+  tb.innerHTML=FILTERED.map((p,i)=>{
+    const code=p['품목코드']||'';
+    const isChecked=checkedItems.has(code);
+    const pr=getPriority(p);
+    const shortage=getShortage(p);
+    const oq=orderQty[code]||'';
+    const cost=oq?(Number(oq)*(p['마감단가']||0)):0;
+
+    return`<tr class="${isChecked?'checked':''}">`+COLS.map(c=>{
+      if(c.special==='check')return`<td style="text-align:center"><input type="checkbox" class="row-check" data-code="${esc(code)}" ${isChecked?'checked':''} onchange="toggleCheck(this)"></td>`;
+      if(c.special==='priority')return`<td style="text-align:center"><span class="priority ${pr.cls}">${pr.label}</span></td>`;
+      if(c.special==='shortage')return`<td class="n${shortage>0?' neg':' zero'}">${shortage?shortage.toLocaleString():'<span class=\"zero\">0</span>'}</td>`;
+      if(c.special==='orderInput')return`<td><input type="number" class="qty-input${oq?' filled':''}" data-code="${esc(code)}" value="${oq}" min="0" step="50" placeholder="${shortage||''}" onchange="setQty(this)" onfocus="this.select()"></td>`;
+      if(c.special==='estCost')return`<td class="n">${cost?cost.toLocaleString():''}</td>`;
+      const v=p[c.k];
+      if(c.brand)return`<td><span class="bt ${brandCls(v||'')}">${esc(v)}</span></td>`;
+      if(c.num){
+        const n=typeof v==='number'?v:0;
+        const cls=n<0?'n neg':n===0?'n zero':'n';
+        return`<td class="${cls}">${fN(v)}</td>`;
+      }
+      return`<td>${esc(v)}</td>`;
+    }).join('')+'</tr>';
+  }).join('');
+
+  // 요약
+  const totalShortage=FILTERED.reduce((s,p)=>s+getShortage(p),0);
+  const totalOrdered=Object.entries(orderQty).filter(([k,v])=>v>0).length;
+  const totalQty=Object.values(orderQty).reduce((s,v)=>s+(Number(v)||0),0);
+  const totalCost=FILTERED.reduce((s,p)=>{
+    const q=orderQty[p['품목코드']]||0;
+    return s+q*(p['마감단가']||0);
+  },0);
+
+  document.getElementById('summaryBar').innerHTML=
+    `<div class="item"><span class="label">대상품목:</span><span class="val">${FILTERED.length}개</span></div>`+
+    `<div class="item"><span class="label">총 부족수량:</span><span class="val danger">${totalShortage.toLocaleString()}</span></div>`+
+    `<div class="item"><span class="label">발주입력:</span><span class="val">${totalOrdered}개 품목</span></div>`+
+    `<div class="item"><span class="label">발주수량합계:</span><span class="val">${totalQty.toLocaleString()}</span></div>`+
+    `<div class="item"><span class="label">예상금액:</span><span class="val">${totalCost.toLocaleString()}원</span></div>`;
+
+  document.getElementById('orderCount').textContent=totalOrdered;
+  document.getElementById('statusBar').textContent=`${FILTERED.length}/${RAW.length} Items | 마지막 로드: ${loadTime||'-'}`;
+}
+
+function toggleCheck(el){
+  const code=el.dataset.code;
+  if(el.checked){checkedItems.add(code);if(!orderQty[code]){const p=RAW.find(x=>x['품목코드']===code);if(p)orderQty[code]=getShortage(p);}}
+  else{checkedItems.delete(code);}
+  render();
+}
+function checkAll(){FILTERED.forEach(p=>{const c=p['품목코드'];checkedItems.add(c);if(!orderQty[c])orderQty[c]=getShortage(p);});render();}
+function uncheckAll(){checkedItems.clear();render();}
+
+function setQty(el){
+  const code=el.dataset.code;
+  const v=parseInt(el.value)||0;
+  if(v>0){orderQty[code]=v;checkedItems.add(code);}
+  else{delete orderQty[code];}
+  render();
+}
+
+function showOrderPanel(){
+  const panel=document.getElementById('orderPanel');
+  const body=document.getElementById('orderPanelBody');
+  const items=RAW.filter(p=>orderQty[p['품목코드']]>0);
+  if(!items.length){body.innerHTML='<p style="padding:10px;color:#999">발주수량을 입력한 품목이 없습니다.</p>';panel.classList.add('show');return;}
+  let total=0;
+  body.innerHTML='<table><tr><th>품목코드</th><th>브랜드</th><th>부족</th><th>발주</th><th>단가</th><th>금액</th></tr>'+
+    items.map(p=>{
+      const q=orderQty[p['품목코드']];
+      const cost=q*(p['마감단가']||0);total+=cost;
+      return`<tr><td>${esc(p['품목코드'])}</td><td>${esc(p['브랜드'])}</td><td class="n neg">${getShortage(p).toLocaleString()}</td><td class="n">${q.toLocaleString()}</td><td class="n">${(p['마감단가']||0).toLocaleString()}</td><td class="n">${cost.toLocaleString()}</td></tr>`;
+    }).join('')+
+    `<tr style="font-weight:bold;background:#f3f4f6"><td colspan="3">합계</td><td class="n">${Object.values(orderQty).reduce((s,v)=>s+(v||0),0).toLocaleString()}</td><td></td><td class="n">${total.toLocaleString()}</td></tr>`+
+    '</table>';
+  panel.classList.add('show');
+}
+function hideOrderPanel(){document.getElementById('orderPanel').classList.remove('show');}
+
+function exportOrderCSV(){
+  const items=RAW.filter(p=>orderQty[p['품목코드']]>0);
+  if(!items.length){alert('발주수량을 입력한 품목이 없습니다.');return;}
+  const ks=['품목코드','브랜드','카드구분','현재고','요청량','가용재고','부족수량','발주수량','마감단가','예상금액'];
+  let csv='\uFEFF'+ks.join(',')+'\n';
+  items.forEach(p=>{
+    const q=orderQty[p['품목코드']];
+    const vals=[p['품목코드'],p['브랜드'],p['카드구분'],p['현재고']||0,p['요청량']||0,p['가용재고']||0,getShortage(p),q,p['마감단가']||0,q*(p['마감단가']||0)];
+    csv+=vals.map(v=>typeof v==='string'?'"'+v.replace(/"/g,'""')+'"':v).join(',')+'\n';
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=`발주서_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+}
+
+// === 엑셀(HTML) 업로드 파싱 ===
+const uploadZone=document.getElementById('uploadZone');
+const fileInput=document.getElementById('fileInput');
+
+uploadZone.addEventListener('click',()=>fileInput.click());
+uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('drag-over');});
+uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');if(e.dataTransfer.files[0])parseFile(e.dataTransfer.files[0]);});
+fileInput.addEventListener('change',e=>{if(e.target.files[0])parseFile(e.target.files[0]);});
+
+let loadTime='';
+
+function parseFile(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const html=e.target.result;
+    const parser=new DOMParser();
+    const doc=parser.parseFromString(html,'text/html');
+    const tables=doc.querySelectorAll('table');
+    if(!tables.length){alert('테이블을 찾을 수 없습니다.');return;}
+
+    // 가장 큰 테이블
+    let mainTable=tables[0];
+    for(const t of tables)if(t.rows.length>mainTable.rows.length)mainTable=t;
+
+    // 헤더 찾기
+    let headerIdx=0;
+    for(let i=0;i<Math.min(10,mainTable.rows.length);i++){
+      const cells=[...mainTable.rows[i].cells].map(c=>c.textContent.trim());
+      if(cells.some(c=>c.includes('품목코드'))){headerIdx=i;break;}
+    }
+
+    const headers=[...mainTable.rows[headerIdx].cells].map(c=>c.textContent.trim());
+    const numCols=['마감단가','ERP소가','shop세트','매출량','현재고','요청량','가용재고','미생산량','중국재고','이동재고','1개월매출','3개월매출','6개월매출','12개월매출'];
+
+    const products=[];
+    for(let r=headerIdx+1;r<mainTable.rows.length;r++){
+      const row=mainTable.rows[r];
+      const item={};
+      for(let c=0;c<headers.length&&c<row.cells.length;c++){
+        const h=headers[c];
+        if(!h)continue;
+        let val=row.cells[c].textContent.trim();
+        if(numCols.includes(h)){
+          try{val=parseFloat(val.replace(/,/g,''))||0;if(val===Math.floor(val))val=Math.floor(val);}catch(e){}
+        }
+        item[h]=val;
+      }
+      if(item['품목코드'])products.push(item);
+    }
+
+    loadTime=new Date().toLocaleString('ko-KR');
+    uploadZone.classList.add('loaded');
+    uploadZone.innerHTML=`<div class="icon">✅</div><p class="filename">${esc(file.name)}</p><p>${products.length}개 품목 로드 | ${loadTime}</p><p style="font-size:10px;color:#999">다른 파일을 드래그하여 교체 가능</p>`;
+
+    // 발주 상태 초기화
+    orderQty={};checkedItems.clear();
+    processData(products);
+  };
+  reader.readAsText(file,'utf-8');
+}
+
+// 필터 이벤트
+document.getElementById('searchInput').addEventListener('input',render);
+document.getElementById('brandFilter').addEventListener('change',render);
+document.getElementById('viewFilter').addEventListener('change',render);
+
+// 날짜 표시
+document.getElementById('dateInfo').textContent=`${new Date().toLocaleDateString('ko-KR')} 발주`;
+
+// 기존 JSON 데이터 자동 로드
+fetch('/data.json').then(r=>r.json()).then(d=>{
+  loadTime=new Date().toLocaleString('ko-KR');
+  uploadZone.classList.add('loaded');
+  uploadZone.innerHTML=`<div class="icon">✅</div><p class="filename">기존 데이터 (서버)</p><p>${d.products.length}개 품목 로드 | ${loadTime}</p><p style="font-size:10px;color:#999">새 엑셀을 드래그하여 갱신 가능</p>`;
+  processData(d.products);
+}).catch(()=>{});
+</script>
+</body>
+</html>

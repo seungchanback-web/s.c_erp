@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>스마트재고현황 - 생산지:한국 / 정상판매</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+.header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: #fff; padding: 24px 32px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+.header h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.header .sub { font-size: 13px; color: #a8b2d1; }
+.header .filters { display: flex; gap: 16px; margin-top: 8px; }
+.header .filter-tag {
+  background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px;
+  font-size: 12px; color: #e0e6ff;
+}
+
+.controls {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 14px 32px; background: #fff; border-bottom: 1px solid #e0e0e0;
+  position: sticky; top: 0; z-index: 99;
+}
+.controls label { font-size: 13px; font-weight: 600; color: #555; }
+.controls input, .controls select {
+  padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px;
+  font-size: 13px; background: #fff; outline: none;
+}
+.controls input:focus, .controls select:focus { border-color: #0f3460; }
+.search-box { position: relative; }
+.search-box input { padding-left: 28px; width: 220px; }
+.search-box::before { content: '\1F50D'; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 13px; }
+
+.summary-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; padding: 16px 32px;
+}
+.card {
+  background: #fff; border-radius: 10px; padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.card .label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.card .value { font-size: 22px; font-weight: 700; color: #1a1a2e; margin-top: 4px; }
+.card .unit { font-size: 12px; color: #888; }
+
+.table-wrap { padding: 0 32px 32px; overflow-x: auto; }
+table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  background: #fff; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.06); font-size: 12px;
+}
+thead th {
+  background: #1a1a2e; color: #fff; padding: 10px 8px;
+  font-weight: 600; font-size: 11px; text-align: center;
+  position: sticky; top: 46px; z-index: 10; white-space: nowrap;
+  cursor: pointer; user-select: none;
+}
+thead th:hover { background: #2a2a4e; }
+thead th.asc::after { content: ' ▲'; }
+thead th.desc::after { content: ' ▼'; }
+tbody td { padding: 7px 8px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+tbody tr:hover td { background: #f8f9ff; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.code { font-family: 'Consolas', monospace; font-size: 12px; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600;
+}
+.badge-stock { background: #e8f5e9; color: #2e7d32; }
+.badge-nostock { background: #fce4ec; color: #c62828; }
+.badge-cate { background: #e3f2fd; color: #1565c0; }
+
+.pagination {
+  display: flex; justify-content: center; gap: 4px; padding: 16px;
+}
+.pagination button {
+  padding: 6px 12px; border: 1px solid #ccc; border-radius: 4px;
+  background: #fff; cursor: pointer; font-size: 12px;
+}
+.pagination button.active { background: #0f3460; color: #fff; border-color: #0f3460; }
+.pagination button:hover:not(.active) { background: #f0f0f0; }
+
+.info-bar {
+  padding: 8px 32px; font-size: 12px; color: #666;
+  display: flex; justify-content: space-between;
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>스마트재고현황</h1>
+  <div class="sub">XERP mmInventory + bar_shop1 CARD/CARD_JAEGO</div>
+  <div class="filters">
+    <span class="filter-tag">생산지: 한국</span>
+    <span class="filter-tag">상태: 정상판매</span>
+    <span class="filter-tag" id="dateTag"></span>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="search-box">
+    <input id="searchInput" type="text" placeholder="제품코드/제품명 검색">
+  </div>
+  <label>카테고리</label>
+  <select id="filterCate"><option value="">전체</option></select>
+  <label>재고</label>
+  <select id="filterStock">
+    <option value="">전체</option>
+    <option value="has">재고 있음</option>
+    <option value="no">재고 없음</option>
+  </select>
+  <label>정렬</label>
+  <select id="sortField">
+    <option value="card_seq_desc">최신순</option>
+    <option value="shop_jaego_desc">쇼핑몰재고 많은순</option>
+    <option value="shop_jaego_asc">쇼핑몰재고 적은순</option>
+    <option value="card_price_desc">가격 높은순</option>
+    <option value="card_price_asc">가격 낮은순</option>
+    <option value="erp_code_asc">ERP코드순</option>
+  </select>
+</div>
+
+<div class="summary-cards" id="summaryCards"></div>
+<div class="info-bar" id="infoBar"></div>
+<div class="table-wrap"><table id="dataTable"></table></div>
+<div class="pagination" id="pagination"></div>
+
+<script>
+const DATA = __DATA__;
+const PAGE_SIZE = 50;
+let currentPage = 1;
+let searchTerm = '';
+let filterCate = '';
+let filterStock = '';
+let sortField = 'card_seq_desc';
+
+function fmt(n) {
+  if (n == null || n === 0) return '-';
+  return n.toLocaleString('ko-KR');
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function getFiltered() {
+  let d = DATA.products;
+  if (searchTerm) {
+    const q = searchTerm.toLowerCase();
+    d = d.filter(p => p.erp_code.toLowerCase().includes(q) ||
+      p.card_code.toLowerCase().includes(q) ||
+      (p.card_name||'').toLowerCase().includes(q));
+  }
+  if (filterCate) d = d.filter(p => p.card_cate === filterCate);
+  if (filterStock === 'has') d = d.filter(p => p.shop_jaego > 0);
+  if (filterStock === 'no') d = d.filter(p => p.shop_jaego === 0);
+
+  // sort
+  const [field, dir] = sortField.split('_');
+  const dirMul = dir === 'desc' ? -1 : 1;
+  if (field === 'card' && sortField.includes('seq')) {
+    d.sort((a,b) => (b.card_seq - a.card_seq));
+  } else if (sortField === 'shop_jaego_desc') {
+    d.sort((a,b) => b.shop_jaego - a.shop_jaego);
+  } else if (sortField === 'shop_jaego_asc') {
+    d.sort((a,b) => a.shop_jaego - b.shop_jaego);
+  } else if (sortField === 'card_price_desc') {
+    d.sort((a,b) => b.card_price - a.card_price);
+  } else if (sortField === 'card_price_asc') {
+    d.sort((a,b) => a.card_price - b.card_price);
+  } else if (sortField === 'erp_code_asc') {
+    d.sort((a,b) => a.erp_code.localeCompare(b.erp_code));
+  }
+  return d;
+}
+
+function renderSummary(filtered) {
+  const cards = document.getElementById('summaryCards');
+  const totalShop = filtered.reduce((a,p) => a + p.shop_jaego, 0);
+  const hasStock = filtered.filter(p => p.shop_jaego > 0).length;
+  const noStock = filtered.filter(p => p.shop_jaego === 0).length;
+  const avgPrice = filtered.length ? Math.round(filtered.reduce((a,p) => a + p.card_price, 0) / filtered.length) : 0;
+  cards.innerHTML = `
+    <div class="card"><div class="label">총 제품수</div><div class="value">${filtered.length}<span class="unit">개</span></div></div>
+    <div class="card"><div class="label">쇼핑몰 총재고</div><div class="value">${fmt(totalShop)}<span class="unit">개</span></div></div>
+    <div class="card"><div class="label">재고 보유</div><div class="value">${hasStock}<span class="unit">개 제품</span></div></div>
+    <div class="card"><div class="label">재고 없음</div><div class="value">${noStock}<span class="unit">개 제품</span></div></div>
+    <div class="card"><div class="label">평균 판매가</div><div class="value">${fmt(avgPrice)}<span class="unit">원</span></div></div>
+  `;
+}
+
+function renderTable(filtered) {
+  const table = document.getElementById('dataTable');
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const page = filtered.slice(start, start + PAGE_SIZE);
+
+  let html = `<thead><tr>
+    <th style="width:40px">No</th>
+    <th>ERP코드</th>
+    <th>카드코드</th>
+    <th>제품명</th>
+    <th>카테고리</th>
+    <th>생산지</th>
+    <th>판매가</th>
+    <th>원가</th>
+    <th>쇼핑몰재고</th>
+    <th>ERP재고</th>
+    <th>상태</th>
+  </tr></thead><tbody>`;
+
+  page.forEach((p, i) => {
+    const stockBadge = p.shop_jaego > 0
+      ? `<span class="badge badge-stock">${fmt(p.shop_jaego)}</span>`
+      : `<span class="badge badge-nostock">0</span>`;
+    html += `<tr>
+      <td class="num">${start + i + 1}</td>
+      <td class="code">${escapeHtml(p.erp_code)}</td>
+      <td class="code">${escapeHtml(p.card_code)}</td>
+      <td>${escapeHtml(p.card_name) || '-'}</td>
+      <td><span class="badge badge-cate">${escapeHtml(p.cate_name)}</span></td>
+      <td>${escapeHtml(p.produce_place)}</td>
+      <td class="num">${fmt(p.card_price)}</td>
+      <td class="num">${fmt(p.src_price)}</td>
+      <td class="num">${stockBadge}</td>
+      <td class="num">${fmt(p.erp_qty)}</td>
+      <td>${p.ishave === '1' ? '보유' : '미보유'}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+
+  document.getElementById('infoBar').innerHTML =
+    `<span>총 ${filtered.length}건 중 ${start+1}-${Math.min(start+PAGE_SIZE, filtered.length)}건 표시</span>
+     <span>조회일: ${DATA.generated}</span>`;
+}
+
+function renderPagination(filtered) {
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const pag = document.getElementById('pagination');
+  if (totalPages <= 1) { pag.innerHTML = ''; return; }
+  let html = '';
+  const maxShow = 10;
+  let s = Math.max(1, currentPage - Math.floor(maxShow/2));
+  let e = Math.min(totalPages, s + maxShow - 1);
+  if (e - s < maxShow - 1) s = Math.max(1, e - maxShow + 1);
+
+  if (s > 1) html += `<button data-page="1">1</button><button disabled>...</button>`;
+  for (let i = s; i <= e; i++) {
+    html += `<button data-page="${i}" class="${i===currentPage?'active':''}">${i}</button>`;
+  }
+  if (e < totalPages) html += `<button disabled>...</button><button data-page="${totalPages}">${totalPages}</button>`;
+  pag.innerHTML = html;
+  pag.querySelectorAll('button[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => { currentPage = +btn.dataset.page; refresh(); });
+  });
+}
+
+function refresh() {
+  const filtered = getFiltered();
+  renderSummary(filtered);
+  renderTable(filtered);
+  renderPagination(filtered);
+}
+
+// Init category filter
+const cates = [...new Set(DATA.products.map(p => p.card_cate))].filter(Boolean).sort();
+const cateSel = document.getElementById('filterCate');
+cates.forEach(c => {
+  const opt = document.createElement('option');
+  opt.value = c;
+  const cateMap = {WI:'청첩장',SN:'시즌카드',EN:'봉투',AC:'부속',BB:'돌잔치',GR:'감사장',FS:'식권',EV:'이벤트',FP:'인쇄물',PH:'포토',ST:'스티커',PA:'보관함'};
+  opt.textContent = `${cateMap[c]||c} (${DATA.products.filter(p=>p.card_cate===c).length})`;
+  cateSel.appendChild(opt);
+});
+
+document.getElementById('searchInput').addEventListener('input', e => { searchTerm = e.target.value; currentPage = 1; refresh(); });
+document.getElementById('filterCate').addEventListener('change', e => { filterCate = e.target.value; currentPage = 1; refresh(); });
+document.getElementById('filterStock').addEventListener('change', e => { filterStock = e.target.value; currentPage = 1; refresh(); });
+document.getElementById('sortField').addEventListener('change', e => { sortField = e.target.value; currentPage = 1; refresh(); });
+document.getElementById('dateTag').textContent = `조회일: ${DATA.generated}`;
+
+refresh();
+</script>
+</body>
+</html>

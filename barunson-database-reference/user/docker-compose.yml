@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "12026:12026"
+    env_file:
+      - .env
+    environment:
+      - PORT=12026
+      - DATA_DIR=/app/data
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - app-data:/app/data
+      - app-uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  app-uploads:

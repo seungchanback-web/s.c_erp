@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>데이터 수신 중...</title></head>
+<body>
+<h3 id="status">데이터 저장 중...</h3>
+<script>
+(async () => {
+  const hash = window.location.hash;
+  const statusEl = document.getElementById('status');
+  if (!hash || !hash.startsWith('#data=')) {
+    statusEl.textContent = '데이터 없음';
+    return;
+  }
+  try {
+    const b64 = hash.substring(6);
+    const json = decodeURIComponent(escape(atob(b64)));
+    statusEl.textContent = `데이터 수신: ${json.length}자, 서버 저장 중...`;
+    const resp = await fetch('/api/save-product-info', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: json
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      statusEl.textContent = `저장 완료! (${result.size} bytes)`;
+    } else {
+      statusEl.textContent = '저장 실패: ' + JSON.stringify(result);
+    }
+  } catch(e) {
+    statusEl.textContent = '오류: ' + e.message;
+  }
+})();
+</script>
+</body></html>

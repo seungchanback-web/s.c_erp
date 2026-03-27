@@ -1,0 +1,16 @@
+node_modules
+*.db
+*.db-wal
+*.db-shm
+data/
+uploads/
+backups/
+*.pyc
+__pycache__
+.env
+.git
+.claude/
+wedding-planner/
+*.log
+*.xlsx
+apps-script/
