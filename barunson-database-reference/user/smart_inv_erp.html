@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>스마트재고현황</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'맑은 고딕','Malgun Gothic',sans-serif;font-size:12px;background:#f0f0f0}
+.header{background:#1a3a5c;color:#fff;padding:8px 16px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:14px}
+.header .path{font-size:11px;color:#aaccee}
+.filter-bar{background:#e8ecf0;border-bottom:1px solid #ccc;padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fg{display:flex;align-items:center;gap:4px}
+.fg label{font-weight:bold;color:#333;white-space:nowrap;font-size:11px}
+.fg input,.fg select{padding:2px 5px;border:1px solid #999;font-size:11px}
+.fg input[type=text]{width:120px}
+.btn{padding:3px 10px;border:1px solid #666;background:linear-gradient(#fff,#ddd);cursor:pointer;font-size:11px;border-radius:2px}
+.btn:hover{background:linear-gradient(#eee,#bbb)}
+.summary-bar{background:#fff;border-bottom:1px solid #ddd;padding:6px 12px;display:flex;gap:16px;font-size:11px;flex-wrap:wrap}
+.si{display:flex;gap:3px}.si .l{color:#666}.si .v{font-weight:bold;color:#1a3a5c}
+.table-wrap{overflow:auto;height:calc(100vh - 165px)}
+table{width:100%;border-collapse:collapse}
+thead{position:sticky;top:0;z-index:10}
+th{background:#4a6a8a;color:#fff;padding:4px 6px;border:1px solid #3a5a7a;white-space:nowrap;font-size:10px;cursor:pointer;user-select:none}
+th:hover{background:#5a7a9a}
+th.sa::after{content:' \u25B2';font-size:8px}
+th.sd::after{content:' \u25BC';font-size:8px}
+td{padding:3px 6px;border:1px solid #ddd;white-space:nowrap;font-size:11px}
+tr:nth-child(even){background:#f8f8f8}
+tr:hover{background:#e0e8f0}
+.n{text-align:right;font-family:Consolas,monospace;font-size:10px}
+.neg{color:#c00;font-weight:bold}
+.zero{color:#bbb}
+.pos{color:#006}
+.bt{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;color:#fff;font-weight:bold}
+.bt-bc{background:#3a7bd5}.bt-bh{background:#e74c3c}.bt-bi{background:#27ae60}
+.bt-bs{background:#8e44ad}.bt-pe{background:#f39c12}.bt-dd{background:#16a085}
+.bt-fs{background:#95a5a6}.bt-be{background:#d35400}.bt-b2b{background:#2c3e50}
+.bt-etc{background:#7f8c8d}.bt-dg{background:#c0392b}
+.ch-on{color:#0066cc;font-weight:bold}.ch-off{color:#999}.ch-x{color:#cc0000}
+.footer{position:fixed;bottom:0;width:100%;background:#e8ecf0;border-top:1px solid #ccc;padding:3px 12px;font-size:10px;color:#666;display:flex;justify-content:space-between;z-index:20}
+.chip{display:inline-block;padding:1px 7px;margin:1px;border-radius:10px;font-size:10px;cursor:pointer;border:1px solid #aaa;background:#fff}
+.chip.active{background:#4a7ab5;color:#fff;border-color:#365d8c}
+.chip:hover{background:#dde}.chip.active:hover{background:#5a8ac5}
+</style>
+</head>
+<body>
+<div class="header">
+<div><h1>BARUNN.Company - 스마트재고현황</h1><div class="path">물류관리 > 제품관리 > 수불현황 > 스마트재고현황</div></div>
+<div style="font-size:11px" id="info">생산지: 한국 | 상태: 정상판매</div>
+</div>
+<div class="filter-bar">
+<div class="fg"><label>브랜드</label><div id="brandChips"></div></div>
+<div class="fg"><label>검색</label><input type="text" id="q" placeholder="품목코드"></div>
+<div class="fg"><label>가용재고</label>
+<select id="af"><option value="">전체</option><option value="neg">음수(부족)</option><option value="z">0</option><option value="low">1~100</option><option value="pos">양수</option></select></div>
+<div class="fg"><label>현재고</label>
+<select id="cf"><option value="">전체</option><option value="has">있음</option><option value="none">없음</option></select></div>
+<button class="btn" onclick="exportCSV()">CSV</button>
+</div>
+<div class="summary-bar" id="sum"></div>
+<div class="table-wrap">
+<table><thead><tr id="hdr"></tr></thead><tbody id="tb"></tbody></table>
+</div>
+<div class="footer"><div id="cnt">0</div><div>데이터: ERP 스마트재고현황 엑셀 (생산지:한국, 상태:정상판매)</div></div>
+
+<script>
+let D=[],sortK='',sortD='desc',AB=new Set();
+const COLS=[
+  {k:'품목코드',w:130},{k:'상태코드',w:50},{k:'카드구분',w:55},{k:'브랜드',w:90,brand:1},
+  {k:'계정',w:40},{k:'상태',w:60},{k:'마감단가',w:65,num:1},{k:'ERP소가',w:55,num:1},
+  {k:'shop세트',w:55,num:1},{k:'매출량',w:55,num:1,hl:'#2c5f2d'},{k:'현재고',w:60,num:1,hl:'#8b4513'},
+  {k:'요청량',w:55,num:1},{k:'가용재고',w:65,num:1,hl:'#8b0000'},{k:'미생산량',w:60,num:1},
+  {k:'중국재고',w:60,num:1,hl:'#c4a000'},{k:'이동재고',w:60,num:1,hl:'#4a148c'},
+  {k:'바른손',w:40,ch:1},{k:'비핸즈',w:40,ch:1},{k:'더카드',w:40,ch:1},{k:'프리미어',w:45,ch:1},{k:'바른손몰',w:45,ch:1},
+  {k:'1개월매출',w:60,num:1},{k:'3개월매출',w:60,num:1},{k:'6개월매출',w:60,num:1},{k:'12개월매출',w:65,num:1}
+];
+
+// 헤더
+const hdr=document.getElementById('hdr');
+COLS.forEach(c=>{
+  const th=document.createElement('th');
+  th.textContent=c.k;th.dataset.k=c.k;
+  if(c.hl)th.style.background=c.hl;
+  if(c.w)th.style.minWidth=c.w+'px';
+  th.onclick=()=>{if(sortK===c.k)sortD=sortD==='asc'?'desc':'asc';else{sortK=c.k;sortD='desc';}render();};
+  hdr.appendChild(th);
+});
+
+function brandCls(b){
+  if(b.includes('바른손카드'))return'bt-bc';if(b.includes('비핸즈'))return'bt-bh';
+  if(b.includes('프리미어'))return'bt-pe';if(b.includes('더카드'))return'bt-dd';
+  if(b.includes('초대장'))return'bt-bi';if(b.includes('B2B'))return'bt-b2b';
+  if(b.includes('더기프트'))return'bt-dg';return'bt-etc';
+}
+function fN(v){if(v===0||v===''||v==null)return'<span class="zero">0</span>';if(typeof v==='number')return v.toLocaleString();return String(v)}
+function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+function chFmt(v){
+  v=String(v||'').trim();
+  if(v==='●'||v==='O')return'<span class="ch-on">●</span>';
+  if(v==='○')return'<span class="ch-off">○</span>';
+  if(v==='X')return'<span class="ch-x">X</span>';
+  return esc(v);
+}
+
+function buildChips(){
+  const bm={};D.forEach(p=>{const b=p['브랜드']||'';bm[b]=(bm[b]||0)+1;});
+  const sorted=Object.entries(bm).sort((a,b)=>b[1]-a[1]);
+  const c=document.getElementById('brandChips');
+  const all=document.createElement('span');all.className='chip active';all.textContent=`전체(${D.length})`;
+  all.onclick=()=>{AB.clear();document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));all.classList.add('active');render();};
+  c.appendChild(all);
+  sorted.slice(0,10).forEach(([b,n])=>{
+    const ch=document.createElement('span');ch.className='chip';ch.textContent=`${b||'(없음)'}(${n})`;ch.dataset.b=b;
+    ch.onclick=()=>{if(AB.has(b)){AB.delete(b);ch.classList.remove('active')}else{AB.add(b);ch.classList.add('active')}all.classList.toggle('active',AB.size===0);render();};
+    c.appendChild(ch);
+  });
+}
+
+function render(){
+  const q=document.getElementById('q').value.toLowerCase();
+  const af=document.getElementById('af').value;
+  const cf=document.getElementById('cf').value;
+  let f=D.filter(p=>{
+    if(AB.size>0&&!AB.has(p['브랜드']||''))return false;
+    if(q&&!(p['품목코드']||'').toLowerCase().includes(q))return false;
+    const av=p['가용재고']||0;
+    if(af==='neg'&&av>=0)return false;if(af==='z'&&av!==0)return false;
+    if(af==='low'&&(av<1||av>100))return false;if(af==='pos'&&av<=0)return false;
+    const cv=p['현재고']||0;
+    if(cf==='has'&&cv<=0)return false;if(cf==='none'&&cv>0)return false;
+    return true;
+  });
+  if(sortK){
+    f.sort((a,b)=>{
+      let va=a[sortK]??'',vb=b[sortK]??'';
+      if(typeof va==='number'&&typeof vb==='number')return sortD==='asc'?va-vb:vb-va;
+      va=String(va).toLowerCase();vb=String(vb).toLowerCase();
+      return sortD==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    });
+  }
+  // 헤더 표시
+  document.querySelectorAll('th').forEach(th=>{th.classList.remove('sa','sd');if(th.dataset.k===sortK)th.classList.add(sortD==='asc'?'sa':'sd');});
+
+  const tb=document.getElementById('tb');
+  const MAX=200;const show=f.slice(0,MAX);
+  tb.innerHTML=show.map(p=>{
+    return'<tr>'+COLS.map(c=>{
+      const v=p[c.k];
+      if(c.brand)return`<td><span class="bt ${brandCls(v||'')}">${esc(v)}</span></td>`;
+      if(c.ch)return`<td style="text-align:center">${chFmt(v)}</td>`;
+      if(c.num){
+        const n=typeof v==='number'?v:0;
+        const cls=n<0?'n neg':n===0?'n zero':'n';
+        return`<td class="${cls}">${fN(v)}</td>`;
+      }
+      return`<td>${esc(v)}</td>`;
+    }).join('')+'</tr>';
+  }).join('');
+
+  document.getElementById('cnt').textContent=f.length>MAX?`${MAX}/${f.length} Items (상위 ${MAX}개)`:
+    `${f.length}/${D.length} Items`;
+  // 요약
+  const ts=f.reduce((s,p)=>s+(p['매출량']||0),0);
+  const tc=f.reduce((s,p)=>s+(p['현재고']||0),0);
+  const ta=f.reduce((s,p)=>s+(p['가용재고']||0),0);
+  const tcn=f.reduce((s,p)=>s+(p['중국재고']||0),0);
+  const tt=f.reduce((s,p)=>s+(p['이동재고']||0),0);
+  const tr=f.reduce((s,p)=>s+(p['요청량']||0),0);
+  document.getElementById('sum').innerHTML=
+    `<div class="si"><span class="l">품목:</span><span class="v">${f.length.toLocaleString()}개</span></div>`+
+    `<div class="si"><span class="l">매출량:</span><span class="v">${ts.toLocaleString()}</span></div>`+
+    `<div class="si"><span class="l">현재고:</span><span class="v">${tc.toLocaleString()}</span></div>`+
+    `<div class="si"><span class="l">요청량:</span><span class="v">${tr.toLocaleString()}</span></div>`+
+    `<div class="si"><span class="l">가용재고:</span><span class="v">${ta.toLocaleString()}</span></div>`+
+    `<div class="si"><span class="l">중국재고:</span><span class="v">${tcn.toLocaleString()}</span></div>`+
+    `<div class="si"><span class="l">이동재고:</span><span class="v">${tt.toLocaleString()}</span></div>`;
+}
+
+document.getElementById('q').addEventListener('input',render);
+document.getElementById('af').addEventListener('change',render);
+document.getElementById('cf').addEventListener('change',render);
+
+function exportCSV(){
+  if(!D.length)return;
+  const ks=COLS.map(c=>c.k);
+  let csv='\uFEFF'+ks.join(',')+'\n';
+  D.forEach(p=>{csv+=ks.map(k=>{let v=p[k];return typeof v==='string'?'"'+v.replace(/"/g,'""')+'"':v??0}).join(',')+'\n';});
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=`스마트재고현황_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+}
+
+// 데이터 로드 (will be replaced by build script)
+fetch('/data.json').then(r=>r.json()).then(d=>{D=d.products;buildChips();render();}).catch(e=>{
+  document.getElementById('tb').innerHTML=`<tr><td colspan="${COLS.length}" style="text-align:center;padding:30px;color:red">데이터 로드 실패: ${e.message}</td></tr>`;
+});
+</script>
+</body>
+</html>

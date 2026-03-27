@@ -1,0 +1,30 @@
+node_modules/
+.claude/
+
+# Binary files
+ngrok.exe
+ngrok.zip
+
+# Database
+*.db
+
+# Server logs
+srv_err.txt
+srv_out.txt
+srv2_err.txt
+srv2_out.txt
+srv3_err.txt
+srv3_out.txt
+srv4_err.txt
+srv4_out.txt
+
+# Temp files
+tmp/
+tmp_*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Package lock in subdirectories
+**/node_modules/

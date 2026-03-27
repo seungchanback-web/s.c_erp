@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>스마트재고현황</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: '맑은 고딕', 'Malgun Gothic', sans-serif; font-size: 12px; background: #f0f0f0; }
+
+.header { background: #1a3a5c; color: white; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 14px; font-weight: bold; }
+.header .path { font-size: 11px; color: #aaccee; }
+
+.filter-bar { background: #e8ecf0; border-bottom: 1px solid #ccc; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filter-group { display: flex; align-items: center; gap: 4px; }
+.filter-group label { font-weight: bold; white-space: nowrap; color: #333; }
+.filter-group input, .filter-group select { padding: 3px 6px; border: 1px solid #999; font-size: 12px; }
+.btn { padding: 4px 12px; border: 1px solid #666; background: linear-gradient(#fff, #ddd); cursor: pointer; font-size: 12px; border-radius: 2px; }
+.btn:hover { background: linear-gradient(#eee, #bbb); }
+.btn-primary { background: linear-gradient(#4a7ab5, #365d8c); color: white; border-color: #2a4a6c; }
+.btn-primary:hover { background: linear-gradient(#5a8ac5, #46709c); }
+
+.summary-bar { background: #fff; border-bottom: 1px solid #ddd; padding: 8px 16px; display: flex; gap: 20px; font-size: 12px; flex-wrap: wrap; }
+.summary-item { display: flex; gap: 4px; }
+.summary-item .label { color: #666; }
+.summary-item .value { font-weight: bold; color: #1a3a5c; }
+
+.table-wrapper { overflow: auto; height: calc(100vh - 180px); }
+table { width: 100%; border-collapse: collapse; }
+thead { position: sticky; top: 0; z-index: 10; }
+th { background: #4a6a8a; color: white; padding: 6px 8px; border: 1px solid #3a5a7a; white-space: nowrap; font-size: 11px; cursor: pointer; user-select: none; position: relative; }
+th:hover { background: #5a7a9a; }
+th.sorted-asc::after { content: ' \u25B2'; font-size: 9px; }
+th.sorted-desc::after { content: ' \u25BC'; font-size: 9px; }
+td { padding: 4px 8px; border: 1px solid #ddd; white-space: nowrap; font-size: 11px; }
+tr:nth-child(even) { background: #f8f8f8; }
+tr:hover { background: #e0e8f0; }
+
+.num { text-align: right; font-family: 'Consolas', monospace; }
+.neg { color: #cc0000; font-weight: bold; }
+.zero { color: #bbb; }
+.matched { }
+.brand-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; color: white; font-weight: bold; }
+.bt-bc { background: #3a7bd5; }
+.bt-bh { background: #e74c3c; }
+.bt-bi { background: #27ae60; }
+.bt-bs { background: #8e44ad; }
+.bt-pe { background: #f39c12; }
+.bt-dd { background: #16a085; }
+.bt-fs { background: #95a5a6; }
+.bt-be { background: #d35400; }
+.bt-tg { background: #2c3e50; }
+.bt-etc { background: #7f8c8d; }
+
+.loading { text-align: center; padding: 40px; color: #666; font-size: 14px; }
+.footer { position: fixed; bottom: 0; width: 100%; background: #e8ecf0; border-top: 1px solid #ccc; padding: 4px 16px; font-size: 11px; color: #666; display: flex; justify-content: space-between; z-index: 20; }
+
+.chip { display: inline-block; padding: 2px 8px; margin: 1px 2px; border-radius: 10px; font-size: 11px; cursor: pointer; border: 1px solid #aaa; background: #fff; }
+.chip.active { background: #4a7ab5; color: white; border-color: #365d8c; }
+.chip:hover { background: #dde; }
+.chip.active:hover { background: #5a8ac5; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>BARUNN.Company - 스마트재고현황</h1>
+        <div class="path">물류관리 > 제품관리 > 수불현황 > 스마트재고현황</div>
+    </div>
+    <div style="font-size:11px;" id="genTime"></div>
+</div>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>브랜드</label>
+        <div id="brandChips"></div>
+    </div>
+    <div class="filter-group" style="margin-left:10px;">
+        <label>검색</label>
+        <input type="text" id="searchInput" placeholder="품목코드" style="width:120px;">
+    </div>
+    <div class="filter-group">
+        <label>가용재고</label>
+        <select id="availFilter">
+            <option value="">전체</option>
+            <option value="neg">음수 (부족)</option>
+            <option value="zero">0</option>
+            <option value="low">1~100</option>
+            <option value="pos">양수</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>매출</label>
+        <select id="salesFilter">
+            <option value="">전체</option>
+            <option value="has">매출 있음</option>
+            <option value="none">매출 없음</option>
+        </select>
+    </div>
+    <button class="btn" onclick="exportCSV()">CSV 내보내기</button>
+</div>
+
+<div class="summary-bar" id="summaryBar"></div>
+
+<div class="table-wrapper">
+    <table id="mainTable">
+        <thead>
+            <tr>
+                <th data-col="ic" style="min-width:100px">품목코드</th>
+                <th data-col="brand">브랜드</th>
+                <th data-col="cate">카드구분</th>
+                <th data-col="status">상태</th>
+                <th data-col="src_price">마감단가</th>
+                <th data-col="price">ERP소가</th>
+                <th data-col="shop_jaego">Shop재고</th>
+                <th data-col="sales" style="background:#2c5f2d">매출량</th>
+                <th data-col="cur" style="background:#8b4513">현재고</th>
+                <th data-col="req">요청량</th>
+                <th data-col="avail" style="background:#8b0000">가용재고</th>
+                <th data-col="cn" style="background:#c4a000">중국재고</th>
+                <th data-col="transit" style="background:#4a148c">이동재고</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            <tr><td colspan="13" class="loading">데이터 로딩 중...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="footer">
+    <div id="itemCount">0 Items</div>
+    <div>매출일: <span id="salesRange"></span> | 데이터: XERP mmInventory + mmInoutItem + mmRequisitItem + bar_shop1 CARD</div>
+</div>
+
+<script>
+let allProducts = [];
+let sortCol = 'sales';
+let sortDir = 'desc';
+let activeBrands = new Set();
+
+// 데이터 로드
+fetch('/data.json')
+    .then(r => r.json())
+    .then(data => {
+        allProducts = data.products;
+        document.getElementById('genTime').textContent = data.filter.generated || '';
+        document.getElementById('salesRange').textContent =
+            `${data.filter.sales_from} ~ ${data.filter.sales_to}`;
+        buildBrandChips();
+        renderSummary(data.summary);
+        renderTable();
+    })
+    .catch(err => {
+        document.getElementById('tableBody').innerHTML =
+            `<tr><td colspan="13" class="loading" style="color:red;">데이터 로드 실패: ${err.message}</td></tr>`;
+    });
+
+function buildBrandChips() {
+    const brands = {};
+    allProducts.forEach(p => {
+        brands[p.brand] = (brands[p.brand] || 0) + 1;
+    });
+    const sorted = Object.entries(brands).sort((a,b) => b[1] - a[1]);
+    const container = document.getElementById('brandChips');
+    // 전체 chip
+    const allChip = document.createElement('span');
+    allChip.className = 'chip active';
+    allChip.textContent = `전체 (${allProducts.length})`;
+    allChip.onclick = () => {
+        activeBrands.clear();
+        document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        allChip.classList.add('active');
+        renderTable();
+    };
+    container.appendChild(allChip);
+
+    sorted.slice(0, 12).forEach(([brand, cnt]) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = `${brand} (${cnt})`;
+        chip.dataset.brand = brand;
+        chip.onclick = () => {
+            if (activeBrands.has(brand)) {
+                activeBrands.delete(brand);
+                chip.classList.remove('active');
+            } else {
+                activeBrands.add(brand);
+                chip.classList.add('active');
+            }
+            allChip.classList.toggle('active', activeBrands.size === 0);
+            renderTable();
+        };
+        container.appendChild(chip);
+    });
+}
+
+function renderSummary(s) {
+    document.getElementById('summaryBar').innerHTML = `
+        <div class="summary-item"><span class="label">품목:</span><span class="value">${s.product_count.toLocaleString()}개</span></div>
+        <div class="summary-item"><span class="label">bar_shop1 매칭:</span><span class="value">${s.matched_count}개</span></div>
+        <div class="summary-item"><span class="label">현재고:</span><span class="value">${s.total_cur_stock.toLocaleString()}</span></div>
+        <div class="summary-item"><span class="label">중국재고:</span><span class="value">${s.total_cn_stock.toLocaleString()}</span></div>
+        <div class="summary-item"><span class="label">이동재고:</span><span class="value">${s.total_transit_stock.toLocaleString()}</span></div>
+        <div class="summary-item"><span class="label">매출량:</span><span class="value">${s.total_sales.toLocaleString()}</span></div>
+        <div class="summary-item"><span class="label">요청량:</span><span class="value">${s.total_req.toLocaleString()}</span></div>
+    `;
+}
+
+function renderTable() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const availF = document.getElementById('availFilter').value;
+    const salesF = document.getElementById('salesFilter').value;
+
+    let filtered = allProducts.filter(p => {
+        if (activeBrands.size > 0 && !activeBrands.has(p.brand)) return false;
+        if (search && !p.item_code.toLowerCase().includes(search)) return false;
+        if (availF === 'neg' && p.avail_stock >= 0) return false;
+        if (availF === 'zero' && p.avail_stock !== 0) return false;
+        if (availF === 'low' && (p.avail_stock < 1 || p.avail_stock > 100)) return false;
+        if (availF === 'pos' && p.avail_stock <= 0) return false;
+        if (salesF === 'has' && p.sales_qty === 0) return false;
+        if (salesF === 'none' && p.sales_qty > 0) return false;
+        return true;
+    });
+
+    // 정렬
+    const colMap = {
+        ic: 'item_code', brand: 'brand', cate: 'cate_name', status: 'status',
+        src_price: 'src_price', price: 'card_price', shop_jaego: 'shop_jaego',
+        sales: 'sales_qty', cur: 'cur_stock', req: 'req_qty',
+        avail: 'avail_stock', cn: 'cn_stock', transit: 'transit_stock'
+    };
+    const key = colMap[sortCol] || sortCol;
+
+    filtered.sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (typeof va === 'string') { va = va.toLowerCase(); vb = (vb||'').toLowerCase(); }
+        if (va < vb) return sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const tbody = document.getElementById('tableBody');
+
+    // Virtual rendering for performance (show max 500)
+    const MAX = 500;
+    const shown = filtered.slice(0, MAX);
+
+    tbody.innerHTML = shown.map(p => `
+        <tr>
+            <td><b>${esc(p.item_code)}</b></td>
+            <td><span class="brand-tag ${brandClass(p.brand)}">${esc(p.brand)}</span></td>
+            <td>${esc(p.cate_name)}</td>
+            <td>${esc(p.status)}</td>
+            <td class="num">${fmtN(p.src_price)}</td>
+            <td class="num">${fmtN(p.card_price)}</td>
+            <td class="num">${fmtN(p.shop_jaego)}</td>
+            <td class="num" style="font-weight:bold;color:#2c5f2d">${fmtN(p.sales_qty)}</td>
+            <td class="num ${p.cur_stock < 0 ? 'neg' : ''}">${fmtN(p.cur_stock)}</td>
+            <td class="num">${fmtN(p.req_qty)}</td>
+            <td class="num ${p.avail_stock < 0 ? 'neg' : ''}" style="font-weight:bold">${fmtN(p.avail_stock)}</td>
+            <td class="num" style="color:#8b6914">${fmtN(p.cn_stock)}</td>
+            <td class="num" style="color:#6a1b9a">${fmtN(p.transit_stock)}</td>
+        </tr>
+    `).join('');
+
+    const countText = filtered.length > MAX
+        ? `${MAX} / ${filtered.length} Items (상위 ${MAX}개 표시)`
+        : `${filtered.length} / ${allProducts.length} Items`;
+    document.getElementById('itemCount').textContent = countText;
+
+    // 헤더 정렬 표시
+    document.querySelectorAll('th[data-col]').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (th.dataset.col === sortCol) {
+            th.classList.add(sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+        }
+    });
+}
+
+function brandClass(b) {
+    const map = {'바른손카드':'bt-bc','비헨즈':'bt-bh','초대장':'bt-bi','바른손':'bt-bs',
+        '프리미어':'bt-pe','더카드':'bt-dd','식권':'bt-fs','봉투':'bt-be','TG':'bt-tg'};
+    return map[b] || 'bt-etc';
+}
+
+function fmtN(n) {
+    if (n === 0 || n === null || n === undefined) return '<span class="zero">0</span>';
+    return n.toLocaleString();
+}
+
+function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// 헤더 클릭 정렬
+document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+        else { sortCol = col; sortDir = 'desc'; }
+        renderTable();
+    });
+});
+
+// 필터 실시간
+document.getElementById('searchInput').addEventListener('input', renderTable);
+document.getElementById('availFilter').addEventListener('change', renderTable);
+document.getElementById('salesFilter').addEventListener('change', renderTable);
+
+// CSV 내보내기
+function exportCSV() {
+    if (!allProducts.length) return alert('데이터가 없습니다');
+    const headers = ['품목코드','브랜드','카드구분','상태','마감단가','ERP소가','Shop재고','매출량','현재고','요청량','가용재고','중국재고','이동재고'];
+    const keys = ['item_code','brand','cate_name','status','src_price','card_price','shop_jaego','sales_qty','cur_stock','req_qty','avail_stock','cn_stock','transit_stock'];
+    const bom = '\uFEFF';
+    let csv = bom + headers.join(',') + '\n';
+    allProducts.forEach(p => {
+        csv += keys.map(k => {
+            let v = p[k];
+            if (typeof v === 'string') return '"' + v.replace(/"/g, '""') + '"';
+            return v;
+        }).join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `스마트재고현황_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+}
+</script>
+</body>
+</html>
