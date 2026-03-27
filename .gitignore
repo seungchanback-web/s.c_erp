@@ -5,6 +5,10 @@ node_modules/
 ngrok.exe
 ngrok.zip
 
+# Environment (DB 접속정보 등 민감정보)
+.env
+**/.env
+
 # Database
 *.db
 
