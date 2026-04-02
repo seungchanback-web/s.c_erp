@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>더기프트 생산재고</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Malgun Gothic',-apple-system,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh}
+.header{background:linear-gradient(135deg,#7c3aed,#8b5cf6);color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
+.header h1{font-size:18px;font-weight:700;letter-spacing:-0.5px}
+.header .user-info{font-size:12px;display:flex;align-items:center;gap:8px}
+.header .user-info img{width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.3)}
+.container{max-width:480px;margin:0 auto;padding:16px}
+.login-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;padding:40px 20px;text-align:center}
+.login-wrap h2{font-size:24px;margin-bottom:8px}
+.login-wrap p{color:#64748b;margin-bottom:32px;font-size:14px}
+#g_id_onload,.g-signin{display:inline-block}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px}
+.card-title{font-size:16px;font-weight:700;margin-bottom:2px}
+.card-sub{font-size:12px;color:#94a3b8}
+.card-desc{font-size:12px;color:#64748b;margin:6px 0 12px}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.stat{text-align:center;padding:10px 6px;border-radius:8px}
+.stat-label{font-size:10px;color:#64748b;margin-bottom:4px}
+.stat-value{font-size:26px;font-weight:800;line-height:1}
+.stat-note{font-size:9px;color:#94a3b8;margin-top:3px}
+.btn{display:block;width:100%;padding:12px;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;text-align:center}
+.btn-green{background:#059669;color:#fff}
+.btn-red{background:#ef4444;color:#fff}
+.btn-gray{background:#f1f5f9;border:1px solid #e2e8f0;color:#334155}
+.btn-row{display:flex;gap:8px}
+.btn-row .btn{flex:1}
+.section-title{font-size:13px;font-weight:600;color:#64748b;margin:20px 0 10px;display:flex;justify-content:space-between;align-items:center}
+.tx-list{background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}
+.tx-row{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;gap:10px}
+.tx-row:last-child{border-bottom:none}
+.tx-badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+.tx-time{font-size:11px;color:#94a3b8;width:40px;flex-shrink:0}
+.tx-qty{font-weight:700;width:60px;text-align:right;flex-shrink:0}
+.tx-memo{color:#64748b;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 바텀시트 */
+.sheet-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;justify-content:center;align-items:flex-end}
+.sheet-bg.show{display:flex}
+.sheet{background:#fff;width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:24px 20px 32px;animation:slideUp .2s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.sheet h3{font-size:18px;margin-bottom:16px}
+.sheet input[type=number]{width:100%;padding:16px;font-size:28px;text-align:center;border:2px solid #e2e8f0;border-radius:10px;font-weight:700;outline:none}
+.sheet input[type=number]:focus{border-color:#8b5cf6}
+.quick-btns{display:flex;gap:6px;margin-top:10px}
+.quick-btns button{flex:1;padding:10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+.quick-btns button:active{background:#e2e8f0}
+.sheet .memo-input{width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-top:12px;font-size:14px}
+.sheet .confirm-btn{margin-top:16px}
+.empty{text-align:center;padding:60px 20px;color:#94a3b8}
+.empty-icon{font-size:48px;margin-bottom:12px}
+/* 세트 등록 */
+.register-section{margin-top:24px}
+.form-group{margin-bottom:12px}
+.form-group label{font-size:12px;color:#64748b;display:block;margin-bottom:4px}
+.form-group input{width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px}
+.bom-row{display:grid;grid-template-columns:80px 1fr 1fr 60px 30px;gap:6px;margin-bottom:6px;align-items:center}
+.bom-row select,.bom-row input{padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
+.bom-row button{background:none;border:none;font-size:18px;color:#ef4444;cursor:pointer}
+.logout-btn{background:none;border:1px solid rgba(255,255,255,0.3);color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer}
+.tab-bar{display:flex;gap:4px;margin-bottom:16px;background:#f1f5f9;padding:3px;border-radius:8px}
+.tab-bar .tab{flex:1;text-align:center;padding:8px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;color:#64748b}
+.tab-bar .tab.active{background:#fff;color:#7c3aed;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.mat-table{width:100%;border-collapse:collapse;font-size:12px}
+.mat-table th{background:#f8fafc;padding:8px;text-align:left;border-bottom:2px solid #e2e8f0;color:#64748b;font-weight:600}
+.mat-table td{padding:8px;border-bottom:1px solid #f1f5f9}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="login-wrap">
+  <div style="font-size:48px;margin-bottom:16px">🎁</div>
+  <h2>더기프트 생산재고</h2>
+  <p>Google 계정으로 로그인하세요</p>
+  <div id="googleBtn"></div>
+  <div id="loginError" style="color:#ef4444;font-size:13px;margin-top:16px;display:none"></div>
+</div>
+
+<div id="appScreen" style="display:none">
+  <div class="header">
+    <h1>🎁 더기프트 생산재고</h1>
+    <div class="user-info">
+      <img id="userPic" src="" alt="" onerror="this.style.display='none'">
+      <span id="userName"></span>
+      <button class="logout-btn" onclick="doLogout()">로그아웃</button>
+    </div>
+  </div>
+  <div class="container">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('stock')">세트재고</div>
+      <div class="tab" onclick="switchTab('materials')">원부재료</div>
+      <div class="tab" onclick="switchTab('manage')">관리</div>
+    </div>
+
+    <!-- 세트재고 탭 -->
+    <div id="tabStock">
+      <div id="setCards"></div>
+      <div id="setEmpty" class="empty" style="display:none">
+        <div class="empty-icon">📦</div>
+        <div>등록된 세트가 없습니다</div>
+        <div style="font-size:12px;margin-top:4px">관리 탭에서 세트를 등록하세요</div>
+      </div>
+      <div class="section-title">
+        <span>오늘 거래내역</span>
+        <span id="txCount" style="font-size:12px;color:#94a3b8">0건</span>
+      </div>
+      <div class="tx-list" id="txList">
+        <div style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">거래내역 없음</div>
+      </div>
+    </div>
+
+    <!-- 원부재료 현황 탭 -->
+    <div id="tabMaterials" style="display:none">
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">세트 구성품의 현재 재고 현황 (읽기 전용)</div>
+      <div id="matContent"></div>
+    </div>
+
+    <!-- 관리 탭 -->
+    <div id="tabManage" style="display:none">
+      <div class="section-title"><span>세트 등록/수정</span></div>
+      <div class="card">
+        <div class="form-group">
+          <label>세트코드 *</label>
+          <input type="text" id="regCode" placeholder="SET-001">
+        </div>
+        <div class="form-group">
+          <label>세트명 *</label>
+          <input type="text" id="regName" placeholder="프리미엄 선물세트 A">
+        </div>
+        <div class="form-group">
+          <label>구성 설명</label>
+          <input type="text" id="regDesc" placeholder="카드x2 + 봉투x2 + 박스x1">
+        </div>
+        <div class="form-group">
+          <label>기초재고</label>
+          <input type="number" id="regBase" value="0" min="0">
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px">
+          <label style="font-size:13px;font-weight:600;color:#334155">구성품 (BOM)</label>
+          <button onclick="addRegBomRow()" style="font-size:12px;padding:4px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer">+ 추가</button>
+        </div>
+        <div id="regBomRows"></div>
+        <button onclick="registerSet()" class="btn btn-green" style="margin-top:12px;background:#8b5cf6">저장</button>
+      </div>
+      <div class="section-title"><span>등록된 세트 목록</span></div>
+      <div id="managedSetList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 바텀시트 -->
+<div class="sheet-bg" id="sheetBg" onclick="if(event.target===this)closeSheet()">
+  <div class="sheet">
+    <h3 id="sheetTitle">조립입고</h3>
+    <input type="hidden" id="sheetSetId">
+    <input type="hidden" id="sheetTxType">
+    <input type="number" id="sheetQty" min="1" placeholder="0" inputmode="numeric">
+    <div class="quick-btns">
+      <button onclick="addQty(1)">+1</button>
+      <button onclick="addQty(5)">+5</button>
+      <button onclick="addQty(10)">+10</button>
+      <button onclick="addQty(50)">+50</button>
+    </div>
+    <input type="text" class="memo-input" id="sheetMemo" placeholder="메모 (선택)">
+    <button class="btn confirm-btn" id="sheetConfirmBtn" onclick="confirmTx()">확인</button>
+    <button class="btn btn-gray" style="margin-top:8px" onclick="closeSheet()">취소</button>
+  </div>
+</div>
+
+<script>
+const API = '';
+let authToken = localStorage.getItem('gs_token') || '';
+let currentUser = null;
+let giftSets = [];
+let capacityData = [];
+
+// ── Auth ──
+async function initApp() {
+  const config = await apiFetch('/api/auth/config');
+  if (config && config.google_client_id) {
+    loadGoogleSignIn(config.google_client_id);
+  }
+  if (authToken) {
+    const me = await apiFetch('/api/auth/me');
+    if (me && me.user) {
+      currentUser = me.user;
+      showApp();
+    } else {
+      authToken = '';
+      localStorage.removeItem('gs_token');
+    }
+  }
+}
+
+function loadGoogleSignIn(clientId) {
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.onload = () => {
+    google.accounts.id.initialize({
+      client_id: clientId,
+      callback: handleGoogleLogin,
+      auto_select: true
+    });
+    google.accounts.id.renderButton(document.getElementById('googleBtn'), {
+      theme: 'outline', size: 'large', width: 280, text: 'signin_with', locale: 'ko'
+    });
+  };
+  document.head.appendChild(s);
+}
+
+async function handleGoogleLogin(response) {
+  const err = document.getElementById('loginError');
+  err.style.display = 'none';
+  const result = await apiFetch('/api/auth/google', { method: 'POST', body: JSON.stringify({ credential: response.credential }) });
+  if (result && result.token) {
+    authToken = result.token;
+    localStorage.setItem('gs_token', authToken);
+    currentUser = result.user;
+    showApp();
+  } else {
+    err.textContent = (result && result.error) || '로그인 실패';
+    err.style.display = '';
+  }
+}
+
+function doLogout() {
+  authToken = '';
+  localStorage.removeItem('gs_token');
+  currentUser = null;
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+
+function showApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = '';
+  document.getElementById('userName').textContent = currentUser.display_name || currentUser.username;
+  if (currentUser.profile_picture) {
+    document.getElementById('userPic').src = currentUser.profile_picture;
+    document.getElementById('userPic').style.display = '';
+  }
+  loadAll();
+}
+
+// ── API helper ──
+async function apiFetch(url, opts = {}) {
+  if (!opts.headers) opts.headers = {};
+  opts.headers['Content-Type'] = 'application/json';
+  if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
+  try {
+    const r = await fetch(API + url, opts);
+    const d = await r.json();
+    return d.data !== undefined ? d.data : d;
+  } catch { return null; }
+}
+
+// ── Data load ──
+async function loadAll() {
+  const [sets, cap] = await Promise.all([
+    apiFetch('/api/gift-sets'),
+    apiFetch('/api/gift-sets/production-capacity')
+  ]);
+  giftSets = Array.isArray(sets) ? sets : [];
+  capacityData = Array.isArray(cap) ? cap : [];
+  renderSetCards();
+  loadTodayTx();
+  loadMaterials();
+  loadManagedList();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function renderSetCards() {
+  const c = document.getElementById('setCards');
+  const e = document.getElementById('setEmpty');
+  if (!giftSets.length) { c.innerHTML = ''; e.style.display = ''; return; }
+  e.style.display = 'none';
+  c.innerHTML = giftSets.map(s => {
+    const cap = capacityData.find(x => x.id === s.id) || {};
+    const stockColor = s.current_stock > 0 ? '#059669' : '#ef4444';
+    const capColor = cap.max_production > 0 ? '#2563eb' : '#94a3b8';
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="card-title">${esc(s.set_name)}</div><div class="card-sub">${esc(s.set_code)}</div></div>
+      </div>
+      ${s.description ? `<div class="card-desc">${esc(s.description)}</div>` : '<div style="height:8px"></div>'}
+      <div class="stats">
+        <div class="stat" style="background:#f0fdf4">
+          <div class="stat-label">현재고</div>
+          <div class="stat-value" style="color:${stockColor}">${s.current_stock.toLocaleString()}</div>
+        </div>
+        <div class="stat" style="background:#eff6ff">
+          <div class="stat-label">최대생산</div>
+          <div class="stat-value" style="color:${capColor}">${(cap.max_production || 0).toLocaleString()}</div>
+          <div class="stat-note">병목: ${esc(cap.bottleneck || '-')}</div>
+        </div>
+        <div class="stat" style="background:#faf5ff">
+          <div class="stat-label">오늘</div>
+          <div style="font-size:14px;font-weight:700;color:#059669;margin-top:4px">+${s.today_assembled || 0}</div>
+          <div style="font-size:14px;font-weight:700;color:#ef4444">-${s.today_shipped || 0}</div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="openSheet(${s.id},'assembly','${esc(s.set_name)}')">+ 조립입고</button>
+        <button class="btn btn-red" onclick="openSheet(${s.id},'shipment','${esc(s.set_name)}')">- 출고</button>
+        <button class="btn btn-gray" onclick="openSheet(${s.id},'base','${esc(s.set_name)}')" style="flex:0;padding:12px 14px" title="기초재고">📋</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 바텀시트 ──
+function openSheet(setId, txType, setName) {
+  document.getElementById('sheetSetId').value = setId;
+  document.getElementById('sheetTxType').value = txType;
+  document.getElementById('sheetQty').value = '';
+  document.getElementById('sheetMemo').value = '';
+  const labels = { assembly: '조립입고', shipment: '출고', base: '기초재고 설정' };
+  const colors = { assembly: '#059669', shipment: '#ef4444', base: '#8b5cf6' };
+  document.getElementById('sheetTitle').textContent = `${setName} — ${labels[txType]}`;
+  document.getElementById('sheetConfirmBtn').style.background = colors[txType];
+  document.getElementById('sheetConfirmBtn').className = 'btn confirm-btn';
+  document.getElementById('sheetBg').classList.add('show');
+  setTimeout(() => document.getElementById('sheetQty').focus(), 200);
+}
+
+function closeSheet() { document.getElementById('sheetBg').classList.remove('show'); }
+
+function addQty(n) {
+  const el = document.getElementById('sheetQty');
+  el.value = (parseInt(el.value) || 0) + n;
+}
+
+async function confirmTx() {
+  const setId = document.getElementById('sheetSetId').value;
+  const txType = document.getElementById('sheetTxType').value;
+  const qty = parseInt(document.getElementById('sheetQty').value);
+  const memo = document.getElementById('sheetMemo').value;
+  if (!qty || qty <= 0) { alert('수량을 입력하세요'); return; }
+  const operator = currentUser ? (currentUser.display_name || currentUser.username) : '';
+  const resp = await apiFetch(`/api/gift-sets/${setId}/transaction`, {
+    method: 'POST', body: JSON.stringify({ tx_type: txType, qty, operator, memo })
+  });
+  if (resp && resp.new_stock !== undefined) {
+    closeSheet();
+    loadAll();
+  } else {
+    alert((resp && resp.error) || '저장 실패');
+  }
+}
+
+// ── 오늘 거래내역 ──
+async function loadTodayTx() {
+  let allTx = [];
+  for (const s of giftSets) {
+    const rows = await apiFetch(`/api/gift-sets/${s.id}/transactions`);
+    if (Array.isArray(rows)) allTx = allTx.concat(rows.map(r => ({ ...r, _name: s.set_name })));
+  }
+  allTx.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  document.getElementById('txCount').textContent = allTx.length + '건';
+  const badges = { base: ['기초', '#3b82f6', '#eff6ff'], assembly: ['조립', '#059669', '#f0fdf4'], shipment: ['출고', '#ef4444', '#fef2f2'], adjust: ['조정', '#64748b', '#f1f5f9'] };
+  document.getElementById('txList').innerHTML = allTx.length ? allTx.map(tx => {
+    const [label, color, bg] = badges[tx.tx_type] || ['?', '#999', '#f5f5f5'];
+    const sign = tx.tx_type === 'shipment' ? '-' : (tx.tx_type === 'base' ? '=' : '+');
+    return `<div class="tx-row">
+      <div class="tx-time">${(tx.created_at || '').slice(11, 16)}</div>
+      <span class="tx-badge" style="background:${bg};color:${color}">${label}</span>
+      <div class="tx-qty" style="color:${color}">${sign}${tx.qty}</div>
+      <div class="tx-memo">${esc(tx._name)}${tx.memo ? ' · ' + esc(tx.memo) : ''}</div>
+    </div>`;
+  }).join('') : '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:13px">거래내역 없음</div>';
+}
+
+// ── 원부재료 현황 ──
+async function loadMaterials() {
+  const c = document.getElementById('matContent');
+  if (!giftSets.length) { c.innerHTML = '<div class="empty"><div class="empty-icon">📊</div>세트를 먼저 등록하세요</div>'; return; }
+  let html = '';
+  for (const s of giftSets) {
+    if (!s.bom || !s.bom.length) continue;
+    const cap = capacityData.find(x => x.id === s.id) || {};
+    const comps = cap.components || [];
+    html += `<div class="card"><div class="card-title" style="font-size:14px;margin-bottom:10px">${esc(s.set_name)}</div>
+      <table class="mat-table"><thead><tr><th>유형</th><th>품목</th><th>소요량</th><th>가용재고</th><th>생산가능</th></tr></thead><tbody>`;
+    for (const b of s.bom) {
+      const comp = comps.find(c => c.item_code === b.item_code) || {};
+      const avail = comp.available || 0;
+      const canMake = comp.can_make || 0;
+      const isBottleneck = cap.bottleneck === (b.item_name || b.item_code);
+      html += `<tr${isBottleneck ? ' style="background:#fef2f2"' : ''}>
+        <td><span style="padding:1px 6px;border-radius:3px;font-size:10px;background:${b.item_type === 'material' ? '#eff6ff' : '#faf5ff'};color:${b.item_type === 'material' ? '#3b82f6' : '#8b5cf6'}">${b.item_type === 'material' ? '원재료' : '부재료'}</span></td>
+        <td>${esc(b.item_name || b.item_code)}</td>
+        <td>${b.qty_per}</td>
+        <td style="font-weight:700;color:${avail > 0 ? '#059669' : '#ef4444'}">${avail.toLocaleString()}</td>
+        <td style="font-weight:700">${canMake.toLocaleString()}${isBottleneck ? ' <span style="color:#ef4444;font-size:10px">병목</span>' : ''}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+  c.innerHTML = html || '<div class="empty">구성품이 없습니다</div>';
+}
+
+// ── 관리: 세트 등록 ──
+function addRegBomRow(data) {
+  const div = document.createElement('div');
+  div.className = 'bom-row';
+  div.innerHTML = `
+    <select style="font-size:12px"><option value="material"${data && data.item_type === 'accessory' ? '' : ' selected'}>원재료</option><option value="accessory"${data && data.item_type === 'accessory' ? ' selected' : ''}>부재료</option></select>
+    <input placeholder="품목코드" value="${data ? esc(data.item_code || '') : ''}">
+    <input placeholder="품목명" value="${data ? esc(data.item_name || '') : ''}">
+    <input type="number" value="${data ? data.qty_per : 1}" min="0.1" step="0.1" style="text-align:center">
+    <button onclick="this.parentElement.remove()">✕</button>`;
+  document.getElementById('regBomRows').appendChild(div);
+}
+
+async function registerSet() {
+  const code = document.getElementById('regCode').value.trim();
+  const name = document.getElementById('regName').value.trim();
+  const desc = document.getElementById('regDesc').value.trim();
+  const base = parseInt(document.getElementById('regBase').value) || 0;
+  if (!code || !name) { alert('세트코드와 이름은 필수입니다'); return; }
+  const bom = [];
+  for (const row of document.getElementById('regBomRows').children) {
+    const inputs = row.querySelectorAll('input');
+    const sel = row.querySelector('select');
+    if (inputs[0].value.trim() || inputs[1].value.trim()) {
+      bom.push({ item_type: sel.value, item_code: inputs[0].value.trim(), item_name: inputs[1].value.trim(), qty_per: parseFloat(inputs[2].value) || 1 });
+    }
+  }
+  const operator = currentUser ? (currentUser.display_name || currentUser.username) : '';
+  const resp = await apiFetch('/api/gift-sets', { method: 'POST', body: JSON.stringify({ set_code: code, set_name: name, description: desc, base_stock: base, bom, operator }) });
+  if (resp && resp.id) {
+    document.getElementById('regCode').value = '';
+    document.getElementById('regName').value = '';
+    document.getElementById('regDesc').value = '';
+    document.getElementById('regBase').value = '0';
+    document.getElementById('regBomRows').innerHTML = '';
+    loadAll();
+    switchTab('stock');
+    alert('세트가 등록되었습니다');
+  } else {
+    alert((resp && resp.error) || '등록 실패');
+  }
+}
+
+function loadManagedList() {
+  const c = document.getElementById('managedSetList');
+  if (!giftSets.length) { c.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">등록된 세트 없음</div>'; return; }
+  c.innerHTML = giftSets.map(s => `<div class="card" style="padding:12px 16px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:700;font-size:14px">${esc(s.set_name)}</div>
+        <div style="font-size:11px;color:#94a3b8">${esc(s.set_code)} · 구성품 ${(s.bom || []).length}개 · 현재고 ${s.current_stock}</div>
+      </div>
+      <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.status === 'active' ? '#f0fdf4' : '#fef2f2'};color:${s.status === 'active' ? '#16a34a' : '#ef4444'}">${s.status === 'active' ? '활성' : '비활성'}</span>
+    </div>
+  </div>`).join('');
+}
+
+// ── 탭 전환 ──
+function switchTab(tab) {
+  document.querySelectorAll('.tab-bar .tab').forEach((t, i) => {
+    const tabs = ['stock', 'materials', 'manage'];
+    t.classList.toggle('active', tabs[i] === tab);
+  });
+  document.getElementById('tabStock').style.display = tab === 'stock' ? '' : 'none';
+  document.getElementById('tabMaterials').style.display = tab === 'materials' ? '' : 'none';
+  document.getElementById('tabManage').style.display = tab === 'manage' ? '' : 'none';
+  if (tab === 'materials') loadMaterials();
+}
+
+// ── Init ──
+initApp();
+</script>
+</body>
+</html>
