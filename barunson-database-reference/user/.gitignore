@@ -5,5 +5,4 @@ orders.db-shm
 *.log
 .env
 erp_smart_inventory.json
-product_info.json
 uploads/
