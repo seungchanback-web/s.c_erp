@@ -1340,7 +1340,8 @@ var _megaData = {
       {icon:'🧾',bg:'#f5f5f4',fg:'#78716c',name:'거래명세서',desc:'월별 명세서',page:'invoices'},
       {icon:'📊',bg:'#fff1f2',fg:'#e11d48',name:'원재료 매입',desc:'매입 현황 분석',page:'mat-purchase'},
       {icon:'👥',bg:'#fef3c7',fg:'#b45309',name:'거래처 관리',desc:'업체 정보 + 포털',page:'vendors',badgeId:'qmVendors'},
-      {icon:'📦',bg:'#f5f3ff',fg:'#7c3aed',name:'품목관리',desc:'마스터 + BOM',page:'product-mgmt',badgeId:'qmProducts'},
+      {icon:'📦',bg:'#f5f3ff',fg:'#7c3aed',name:'품목관리',desc:'품목 마스터',page:'product-mgmt',badgeId:'qmProducts'},
+      {icon:'🧩',bg:'#ede9fe',fg:'#6d28d9',name:'BOM 관리',desc:'자재명세서 관리',page:'bom'},
       {icon:'💰',bg:'#fff7ed',fg:'#c2410c',name:'후공정 단가',desc:'단가 관리',page:'post-process'},
       {icon:'🔍',bg:'#fef2f2',fg:'#ef4444',name:'불량관리',desc:'접수 + 대응',page:'defects',badgeId:'qmDefects'},
       {icon:'📊',bg:'#eff6ff',fg:'#2563eb',name:'대시보드',desc:'현황 집계 + 통계',page:'analytics'},
@@ -1596,8 +1597,12 @@ function closeMegaMenu() {
       </div>
       <div class="hm-item" data-page="product-mgmt" onclick="showPage('product-mgmt')">
         <div class="hm-icon" style="background:#f5f3ff;color:#7c3aed">📦</div>
-        <div><div class="hm-name">품목관리</div><div class="hm-desc">마스터 + BOM</div></div>
+        <div><div class="hm-name">품목관리</div><div class="hm-desc">품목 마스터</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#f5f3ff;color:#7c3aed" id="qmProducts">-</span></div>
+      </div>
+      <div class="hm-item" data-page="bom" onclick="showPage('bom')">
+        <div class="hm-icon" style="background:#ede9fe;color:#6d28d9">🧩</div>
+        <div><div class="hm-name">BOM 관리</div><div class="hm-desc">자재명세서 관리</div></div>
       </div>
       <div class="hm-item" data-page="post-process" onclick="showPage('post-process')">
         <div class="hm-icon" style="background:#fff7ed;color:#c2410c">💰</div>
@@ -2834,50 +2839,51 @@ function closeMegaMenu() {
 </div>
 
 <!-- ============================================================ -->
+<!-- PAGE: BOM 관리 (독립 페이지) -->
+<!-- ============================================================ -->
+<div class="page" id="page-bom">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" id="bomSearch" placeholder="제품코드 검색..." onkeyup="filterBomList()" style="padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px;outline:none">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="downloadBomTemplate()">엑셀양식 다운로드</button>
+      <button class="btn btn-success" onclick="document.getElementById('bomFileInput').click()">엑셀 업로드</button>
+      <input type="file" id="bomFileInput" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadBomFile(this)">
+      <button class="btn" onclick="importBom()">product_info 가져오기</button>
+      <button class="btn btn-primary" onclick="openBomModal()">+ BOM 등록</button>
+    </div>
+  </div>
+  <div class="table-container">
+    <div class="table-wrap" style="max-height:calc(100vh - 250px)">
+      <table id="bomTable">
+        <thead><tr>
+          <th>제품코드</th><th>품명</th><th>브랜드</th><th>원재료</th><th>후공정수</th><th>버전</th><th>관리</th>
+        </tr></thead>
+        <tbody id="bomTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="bomEmpty" class="notes-empty" style="display:none">
+    <div class="empty-icon">🏭</div>
+    BOM이 등록되지 않았습니다.<br>
+    <span style="font-size:12px">'product_info 가져오기' 버튼으로 기존 데이터를 불러오세요.</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
 <!-- PAGE: MRP -->
 <!-- ============================================================ -->
 <div class="page" id="page-mrp">
   <!-- MRP Tab Bar -->
   <div class="tab-bar" id="mrpTabs">
-    <div class="tab active" onclick="switchMrpTab('bom')">BOM 관리</div>
-    <div class="tab" onclick="switchMrpTab('plan')">생산계획</div>
+    <div class="tab active" onclick="switchMrpTab('plan')">생산계획</div>
     <div class="tab" onclick="switchMrpTab('run')">MRP 실행</div>
     <div class="tab" onclick="switchMrpTab('history')">발주이력 <span id="historyCount" style="font-size:11px;color:var(--text-muted)"></span></div>
   </div>
 
-  <!-- TAB 1: BOM 관리 -->
-  <div class="mrp-tab active" id="mrp-bom">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="text" id="bomSearch" placeholder="제품코드 검색..." onkeyup="filterBomList()" style="padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px;outline:none">
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn" onclick="downloadBomTemplate()">엑셀양식 다운로드</button>
-        <button class="btn btn-success" onclick="document.getElementById('bomFileInput').click()">엑셀 업로드</button>
-        <input type="file" id="bomFileInput" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadBomFile(this)">
-        <button class="btn" onclick="importBom()">product_info 가져오기</button>
-        <button class="btn btn-primary" onclick="openBomModal()">+ BOM 등록</button>
-      </div>
-    </div>
-    <div class="table-container">
-      <div class="table-wrap" style="max-height:calc(100vh - 300px)">
-        <table id="bomTable">
-          <thead><tr>
-            <th>제품코드</th><th>품명</th><th>브랜드</th><th>원재료</th><th>후공정수</th><th>버전</th><th>관리</th>
-          </tr></thead>
-          <tbody id="bomTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div id="bomEmpty" class="notes-empty" style="display:none">
-      <div class="empty-icon">🏭</div>
-      BOM이 등록되지 않았습니다.<br>
-      <span style="font-size:12px">'product_info 가져오기' 버튼으로 기존 데이터를 불러오세요.</span>
-    </div>
-  </div>
-
-  <!-- TAB 2: 생산계획 -->
-  <div class="mrp-tab" id="mrp-plan" style="display:none">
+  <!-- TAB 1: 생산계획 -->
+  <div class="mrp-tab active" id="mrp-plan">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center">
         <label style="font-size:13px;color:var(--text-secondary)">계획월</label>
@@ -4471,6 +4477,11 @@ async function doRegister() {
       authToken = d.data.token;
       currentAuthUser = d.data.user;
       localStorage.setItem('authToken', authToken);
+      // permissions 로드
+      try {
+        var meResp2 = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + authToken } }).then(rr=>rr.json());
+        if (meResp2.ok && meResp2.data) userPermissions = meResp2.data.permissions || [];
+      } catch(e) {}
       showApp();
     } else {
       errEl.textContent = d.error || '가입 실패';
@@ -4610,7 +4621,16 @@ function canAccess(pageId) {
   if (!currentAuthUser) return false;
   if (currentAuthUser.role === 'admin') return true;
   if (userPermissions.includes('*')) return true;
-  return userPermissions.includes(pageId);
+  if (userPermissions.length > 0) return userPermissions.includes(pageId);
+  // fallback: role 기본 권한
+  var roleDefaults = {
+    purchase: ['dashboard','inventory','shipments','auto-order','create-po','po-list','os-register',
+      'delivery-schedule','receipts','invoices','notes','product-mgmt','bom','mrp','post-process','defects',
+      'closing','report','po-mgmt','china-shipment','mat-purchase','tasks','meeting-log'],
+    production: ['dashboard','inventory','shipments','production-req','mrp','bom','post-process','defects','product-mgmt','notes','production-stock','tasks'],
+    viewer: ['dashboard','inventory','shipments','po-list','notes']
+  };
+  return (roleDefaults[currentAuthUser.role] || []).includes(pageId);
 }
 
 function showApp() {
@@ -5518,6 +5538,7 @@ const pageTitles={
   'china-shipment':'중국 선적',
   'vendors':'거래처 관리',
   'notes':'미팅일지',
+  'bom':'BOM 관리',
   'mrp':'MRP',
   'auto-order':'필수 자동발주',
   'product-mgmt':'품목관리',
@@ -5557,7 +5578,7 @@ function showPage(page, opts){
     'delivery-schedule':'inbound','receipts':'inbound','os-register':'inbound',
     'production-req':'production','production-stock':'production','mrp':'production',
     'tasks':'work','notes':'work',
-    'invoices':'mgmt','mat-purchase':'mgmt','vendors':'mgmt','product-mgmt':'mgmt',
+    'invoices':'mgmt','mat-purchase':'mgmt','vendors':'mgmt','product-mgmt':'mgmt','bom':'mgmt',
     'post-process':'mgmt','defects':'mgmt','report':'mgmt','settings':'mgmt','user-mgmt':'mgmt'
   };
   var activeCat = pageCatMap[page] || '';
@@ -5591,6 +5612,7 @@ function showPage(page, opts){
   if(page==='mat-purchase') loadMatPurchase();
   if(page==='po-mgmt') loadPODrafts();
   if(page==='notes') loadNotes();
+  if(page==='bom') loadBomList();
   if(page==='mrp') loadMRP();
   if(page==='auto-order') { loadAutoOrder(); if(currentOriginContext) setTimeout(()=>switchAOOrigin(currentOriginContext),100); }
   if(page==='china-shipment') loadChinaShipment();
@@ -10763,17 +10785,16 @@ async function deleteNote(noteId){
 }
 
 // ===== MRP =====
-function loadMRP(){ loadBomList(); }
+function loadMRP(){ loadPlanList(); }
 
 function switchMrpTab(tab){
   document.querySelectorAll('#mrpTabs .tab').forEach((t,i)=>{
-    const tabs=['bom','plan','run','history'];
+    const tabs=['plan','run','history'];
     t.classList.toggle('active', tabs[i]===tab);
   });
   document.querySelectorAll('.mrp-tab').forEach(t=>t.style.display='none');
   const el = document.getElementById('mrp-'+tab);
   if(el){ el.style.display='block'; el.classList.add('active'); }
-  if(tab==='bom') loadBomList();
   if(tab==='plan') loadPlanList();
   if(tab==='run') loadMrpResults();
   if(tab==='history') loadOrderHistory();
@@ -10787,9 +10808,9 @@ async function loadBomList(){
     const list = json.data || json;
     const tbody = document.getElementById('bomTableBody');
     const empty = document.getElementById('bomEmpty');
-    if(!list.length){ tbody.innerHTML=''; empty.style.display='block'; document.querySelector('#mrp-bom .table-container').style.display='none'; return; }
+    if(!list.length){ tbody.innerHTML=''; empty.style.display='block'; document.querySelector('#page-bom .table-container').style.display='none'; return; }
     empty.style.display='none';
-    document.querySelector('#mrp-bom .table-container').style.display='';
+    document.querySelector('#page-bom .table-container').style.display='';
     tbody.innerHTML = list.filter(b=>{
       const q = (document.getElementById('bomSearch').value||'').toLowerCase();
       return !q || b.product_code.toLowerCase().includes(q);

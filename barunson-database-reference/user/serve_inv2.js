@@ -1664,6 +1664,7 @@ const ALL_PAGES = [
   { id: 'mat-purchase', name: '원재료 매입', group: '관리' },
   { id: 'notes', name: '거래처 관리', group: '관리' },
   { id: 'product-mgmt', name: '품목관리', group: '관리' },
+  { id: 'bom', name: 'BOM 관리', group: '관리' },
   { id: 'post-process', name: '후공정 단가', group: '관리' },
   { id: 'defects', name: '불량관리', group: '관리' },
   { id: 'analytics', name: '대시보드', group: '관리' },
@@ -1674,9 +1675,9 @@ const ALL_PAGES = [
 const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
   purchase: ['dashboard', 'inventory', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
-    'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'mrp', 'post-process', 'defects',
+    'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log'],
-  production: ['dashboard', 'inventory', 'shipments', 'production-req', 'mrp', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
+  production: ['dashboard', 'inventory', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
   viewer: ['dashboard', 'inventory', 'shipments', 'po-list', 'notes'],
 };
 
