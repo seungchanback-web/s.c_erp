@@ -22,6 +22,9 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+# 캐시 무효화 (빌드마다 다른 값)
+ARG CACHE_BUST=1
+
 # 앱 파일 복사
 COPY . .
 
