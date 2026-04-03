@@ -33,6 +33,19 @@ AI가 쿼리/애플리케이션 작성 시 이 문서들을 참고합니다.
 - 목적별 테이블 위치는 **[HELP.md](HELP.md)** 참조 (사용자, CS/문의, 주문, 상품, 배송, XERP 등)
 - **XERP는 활성 상태** (2026년 3월 기준 최신 데이터 확인됨, "2023년 비활성" 아님)
 
+### XERP 접근 제한
+- **`.env`에 3개 계정 정보(DB, XERP, DD)가 모두 포함된 경우**: 재무 데이터 전체 접근 권한 보유 → 회계(gl), 매출/매입(rp), 판매(ERP_SalesData) 등 제한 없이 접근 가능
+- **`.env`에 XERP 계정이 없는 경우** (2개 이하): 재고/자재(mm) 관련 테이블만 접근 가능, 재무 관련 테이블은 접근 불가
+- 재무 데이터 접근이 필요하나 권한이 없는 경우 **조휘열**에게 별도 접속 정보를 요청해야 함
+
+### BHC (디얼디어 재고)
+- **용도**: 디얼디어(Dear Dear)의 재고 관리 데이터베이스
+- **테이블 구조**: XERP와 동일 (mm 계열 테이블 전체 동일 구조)
+- **주요 테이블**: mmInventory(1,564건), mmInoutHeader, mmInoutItem 등
+- **코드페이지**: 949 (EUC-KR / 한국어 완성형), Collation: `Korean_Wansung_CI_AS`
+- **쿼리 방법**: XERP와 동일한 패턴, DB명만 `BHC`로 변경
+- **스키마 참조**: [xerp/INVENTORY.md](xerp/INVENTORY.md) 동일 적용
+
 ### 개인정보 마스킹 (PII)
 - 화면 표시, 보고서, API 응답 시 **반드시 마스킹** (데이터 추출/ETL은 예외)
 - **이름**: 첫 글자와 끝글자만 → `홍*임`
@@ -51,17 +64,29 @@ AI가 쿼리/애플리케이션 작성 시 이 문서들을 참고합니다.
 - 모든 DB에 외래키 제약조건 없음
 
 ### 접속 정보
-- 서버/포트/자격증명: `.env` 파일에서 로드 (CONNECTION.md 참조)
+- 서버/포트/자격증명: `.env` / `.env-all` 파일에서 로드 (CONNECTION.md 참조)
 - 로그인 사용자: `.env`의 `DB_USER` 참조 (스키마: dbo)
 - barunson DB: `python3 python/query.py "SQL"`
 - bar_shop1 DB: `python3 python/db-query-bar_shop1.py "SQL"`
+- DD wedding DB (MySQL): `python3 python/db-query-dd.py "SQL"`
 
 ### 파일 생성 규칙
 - 사용자가 애플리케이션/스크립트 생성을 요청하면 반드시 `./user/` 디렉토리 내부에 생성
 - 기존 프로젝트 디렉토리(python/, queries/ 등)를 오염시키지 않도록 주의
 - 웹 애플리케이션 생성 시 포트는 반드시 **10000 이상** 사용 (macOS AirPlay 등 시스템 서비스 충돌 방지)
 
+### DD (wedding) 데이터베이스
+- **엔진**: MySQL (MSSQL이 아님에 주의)
+- **접속정보**: `.env-all`의 `DD_DB_*` 변수 사용
+- **용도**: 뚜비뚜비 웨딩 카드 쇼핑몰 (실물 카드 + 모바일 청첩장)
+- **테이블 수**: 약 170개, Laravel 기반
+- **주요 테이블**: orders, order_items, products, users, mobile_cards, sample_orders
+- **바른손 연동**: orders.barunson_order_seq → bar_shop1.custom_order.order_seq
+- **인덱스 확인**: `SHOW INDEX FROM 테이블명` (MySQL 방식, sys.indexes 아님)
+- **참조 문서**: [dd/SCHEMA.md](dd/SCHEMA.md), [dd/ERD.md](dd/ERD.md), [dd/INDEXES.md](dd/INDEXES.md)
+
 ### 명명 규칙
 - barunson: TB_ 접두어 (TB_Order, TB_Product)
 - bar_shop1: 혼합 (S2_, S4_, custom_, DELIVERY_)
-- 스키마: 모두 dbo
+- DD wedding: snake_case (orders, order_items, mobile_cards)
+- 스키마: MSSQL은 모두 dbo, DD는 MySQL (스키마 없음)

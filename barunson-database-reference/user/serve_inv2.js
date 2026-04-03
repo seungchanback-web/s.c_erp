@@ -19,6 +19,14 @@ let xerpInventoryCache = null;
 let xerpInventoryCacheTime = 0;
 let giftSetShipmentCache = {};    // { xerp_code: total_qty }
 let giftSetShipmentCacheTime = 0;
+// ── 매출관리 캐시 ──
+let salesKpiCache = null, salesKpiCacheTime = 0;
+const SALES_CACHE_TTL = 30 * 60 * 1000; // 30분
+// ── 원가관리 캐시 ──
+let costSummaryCache = null, costSummaryCacheTime = 0;
+const COST_CACHE_TTL = 30 * 60 * 1000; // 30분
+const DEPT_GUBUN_LABELS = {'SB':'쇼핑몰B','BR':'바른손','ST':'스토어','SS':'쇼핑몰S','SA':'쇼핑몰A','OB':'기타B','DE':'기타'};
+const BRAND_LABELS = {'B':'바른손카드','S':'비핸즈','C':'더카드','X':'디얼디어','W':'W카드','N':'네이처','I':'이니스','H':'비핸즈프리미엄','F':'플라워','D':'디자인카드','P':'프리미어','M':'모바일','G':'글로벌','U':'유니세프','Y':'유니크','K':'BK','T':'프리미어더카드','A':'기타'};
 // .env를 여러 위치에서 탐색
 const dotenvCandidates = [
   path.join(__dirname, '.env'),
@@ -1609,6 +1617,64 @@ db.exec(`CREATE TABLE IF NOT EXISTS gift_set_transactions (
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_set ON gift_set_transactions(set_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_created ON gift_set_transactions(created_at)");
 
+// ── 매출관리 캐시 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS sales_daily_cache (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_date       TEXT NOT NULL,
+  source          TEXT NOT NULL,
+  channel         TEXT NOT NULL DEFAULT '',
+  total_orders    INTEGER DEFAULT 0,
+  total_qty       INTEGER DEFAULT 0,
+  total_sales     INTEGER DEFAULT 0,
+  total_supply    INTEGER DEFAULT 0,
+  total_vat       INTEGER DEFAULT 0,
+  total_fee       INTEGER DEFAULT 0,
+  cached_at       TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(sale_date, source, channel)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_sdc_date ON sales_daily_cache(sale_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_sdc_source ON sales_daily_cache(source)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS sales_monthly_cache (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_month      TEXT NOT NULL,
+  source          TEXT NOT NULL,
+  channel         TEXT NOT NULL DEFAULT '',
+  total_orders    INTEGER DEFAULT 0,
+  total_qty       INTEGER DEFAULT 0,
+  total_sales     INTEGER DEFAULT 0,
+  total_supply    INTEGER DEFAULT 0,
+  total_vat       INTEGER DEFAULT 0,
+  total_fee       INTEGER DEFAULT 0,
+  cached_at       TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(sale_month, source, channel)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_smc_month ON sales_monthly_cache(sale_month)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS sales_product_cache (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_month      TEXT NOT NULL,
+  source          TEXT NOT NULL,
+  product_code    TEXT NOT NULL,
+  product_name    TEXT DEFAULT '',
+  brand           TEXT DEFAULT '',
+  total_orders    INTEGER DEFAULT 0,
+  total_qty       INTEGER DEFAULT 0,
+  total_sales     INTEGER DEFAULT 0,
+  cached_at       TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(sale_month, source, product_code)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_spc_month ON sales_product_cache(sale_month)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_spc_product ON sales_product_cache(product_code)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS sales_settings (
+  key             TEXT PRIMARY KEY,
+  value           TEXT NOT NULL,
+  updated_at      TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("INSERT OR IGNORE INTO sales_settings (key, value) VALUES ('default_range_days', '30')");
+db.exec("INSERT OR IGNORE INTO sales_settings (key, value) VALUES ('cache_ttl_minutes', '30')");
+
 // ── 다중 창고 재고 관리 테이블 ──
 db.exec(`CREATE TABLE IF NOT EXISTS warehouses (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1676,6 +1742,35 @@ if (whCount.cnt === 0) {
   insertWh.run('WH-04', '제4창고', '', '', 0);
   console.log('[DB] 기본 창고 4개 초기화 완료');
 }
+
+// ── 공지/게시판 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS notices (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  content     TEXT DEFAULT '',
+  category    TEXT DEFAULT 'notice',
+  is_popup    INTEGER DEFAULT 0,
+  popup_start TEXT DEFAULT NULL,
+  popup_end   TEXT DEFAULT NULL,
+  is_pinned   INTEGER DEFAULT 0,
+  author_id   INTEGER,
+  author_name TEXT DEFAULT '',
+  view_count  INTEGER DEFAULT 0,
+  status      TEXT DEFAULT 'active',
+  created_at  TEXT DEFAULT (datetime('now','localtime')),
+  updated_at  TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_notices_status ON notices(status, created_at)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_notices_popup ON notices(is_popup, popup_start, popup_end)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS notice_reads (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  notice_id  INTEGER NOT NULL,
+  user_id    INTEGER NOT NULL,
+  read_at    TEXT DEFAULT (datetime('now','localtime')),
+  popup_dismissed INTEGER DEFAULT 0
+)`);
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nr_unique ON notice_reads(notice_id, user_id)");
 
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
@@ -1775,6 +1870,12 @@ const ALL_PAGES = [
   { id: 'analytics', name: '대시보드', group: '관리' },
   { id: 'user-mgmt', name: '사용자 관리', group: '관리' },
   { id: 'warehouse', name: '창고관리', group: '재고' },
+  { id: 'sales', name: '통합매출', group: '매출' },
+  { id: 'sales-barun', name: '바른손매출', group: '매출' },
+  { id: 'sales-dd', name: 'DD매출', group: '매출' },
+  { id: 'sales-gift', name: '더기프트매출', group: '매출' },
+  { id: 'cost-mgmt', name: '원가관리', group: '매출' },
+  { id: 'board', name: '공지/게시판', group: '업무' },
 ];
 
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
@@ -1782,9 +1883,9 @@ const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
   purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
-    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log'],
+    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board'],
   production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
-  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes'],
+  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board'],
 };
 
 function hasPermission(role, page, userPermissions) {
@@ -8162,16 +8263,73 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // GET /api/warehouses/transfers — 이동 이력
+  // GET /api/warehouses/transfers — 이동 이력 (필터 지원)
   if (pathname === '/api/warehouses/transfers' && method === 'GET') {
-    const days = parseInt(parsed.searchParams.get('days') || '30');
-    const rows = db.prepare(`SELECT t.*, fw.name as from_name, tw.name as to_name
+    const sp = parsed.searchParams;
+    const from_date = sp.get('from_date') || '';
+    const to_date = sp.get('to_date') || '';
+    const from_wh = sp.get('from_wh') || '';
+    const to_wh = sp.get('to_wh') || '';
+    const search = sp.get('search') || '';
+    const operator = sp.get('operator') || '';
+    const days = parseInt(sp.get('days') || '30');
+
+    let where = [];
+    let args = [];
+    if (from_date) { where.push("t.created_at >= ?"); args.push(from_date + ' 00:00:00'); }
+    else { where.push(`t.created_at >= datetime('now','localtime','-${days} days')`); }
+    if (to_date) { where.push("t.created_at <= ?"); args.push(to_date + ' 23:59:59'); }
+    if (from_wh) { where.push("t.from_warehouse = ?"); args.push(parseInt(from_wh)); }
+    if (to_wh) { where.push("t.to_warehouse = ?"); args.push(parseInt(to_wh)); }
+    if (search) { where.push("(t.product_code LIKE ? OR t.product_name LIKE ?)"); args.push(`%${search}%`, `%${search}%`); }
+    if (operator) { where.push("t.operator LIKE ?"); args.push(`%${operator}%`); }
+
+    const sql = `SELECT t.*, fw.name as from_name, tw.name as to_name
       FROM warehouse_transfers t
       JOIN warehouses fw ON t.from_warehouse=fw.id
       JOIN warehouses tw ON t.to_warehouse=tw.id
-      WHERE t.created_at >= datetime('now','localtime','-${days} days')
-      ORDER BY t.created_at DESC`).all();
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.created_at DESC`;
+    const rows = db.prepare(sql).all(...args);
     ok(res, rows);
+    return;
+  }
+
+  // GET /api/warehouses/transfers/stats — 이동 통계
+  if (pathname === '/api/warehouses/transfers/stats' && method === 'GET') {
+    const sp = parsed.searchParams;
+    const from_date = sp.get('from_date') || '';
+    const to_date = sp.get('to_date') || '';
+    const days = parseInt(sp.get('days') || '30');
+
+    let dateFilter;
+    const args = [];
+    if (from_date) {
+      dateFilter = "t.created_at >= ?";
+      args.push(from_date + ' 00:00:00');
+      if (to_date) { dateFilter += " AND t.created_at <= ?"; args.push(to_date + ' 23:59:59'); }
+    } else {
+      dateFilter = `t.created_at >= datetime('now','localtime','-${days} days')`;
+    }
+
+    // 총 건수/수량
+    const total = db.prepare(`SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as total_qty FROM warehouse_transfers t WHERE ${dateFilter}`).get(...args);
+    // 오늘 건수
+    const today = db.prepare(`SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as total_qty FROM warehouse_transfers t WHERE date(t.created_at)=date('now','localtime')`).get();
+    // 최다 이동 품목
+    const topItem = db.prepare(`SELECT product_code, product_name, SUM(quantity) as total_qty, COUNT(*) as cnt FROM warehouse_transfers t WHERE ${dateFilter} GROUP BY product_code ORDER BY total_qty DESC LIMIT 1`).get(...args);
+    // 창고 간 흐름 TOP5
+    const flows = db.prepare(`SELECT fw.name as from_name, tw.name as to_name, COUNT(*) as cnt, SUM(t.quantity) as total_qty
+      FROM warehouse_transfers t
+      JOIN warehouses fw ON t.from_warehouse=fw.id
+      JOIN warehouses tw ON t.to_warehouse=tw.id
+      WHERE ${dateFilter}
+      GROUP BY t.from_warehouse, t.to_warehouse
+      ORDER BY total_qty DESC LIMIT 5`).all(...args);
+    // 담당자별
+    const operators = db.prepare(`SELECT operator, COUNT(*) as cnt, SUM(quantity) as total_qty FROM warehouse_transfers t WHERE ${dateFilter} AND operator!='' GROUP BY operator ORDER BY cnt DESC LIMIT 5`).all(...args);
+
+    ok(res, { total, today, topItem, flows, operators });
     return;
   }
 
@@ -8202,13 +8360,27 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // GET /api/warehouses/adjustments — 조정 이력
+  // GET /api/warehouses/adjustments — 조정 이력 (필터 지원)
   if (pathname === '/api/warehouses/adjustments' && method === 'GET') {
-    const days = parseInt(parsed.searchParams.get('days') || '30');
+    const sp = parsed.searchParams;
+    const from_date = sp.get('from_date') || '';
+    const to_date = sp.get('to_date') || '';
+    const wh = sp.get('warehouse_id') || '';
+    const search = sp.get('search') || '';
+    const days = parseInt(sp.get('days') || '30');
+
+    let where = [];
+    let args = [];
+    if (from_date) { where.push("a.created_at >= ?"); args.push(from_date + ' 00:00:00'); }
+    else { where.push(`a.created_at >= datetime('now','localtime','-${days} days')`); }
+    if (to_date) { where.push("a.created_at <= ?"); args.push(to_date + ' 23:59:59'); }
+    if (wh) { where.push("a.warehouse_id = ?"); args.push(parseInt(wh)); }
+    if (search) { where.push("(a.product_code LIKE ? OR a.product_name LIKE ?)"); args.push(`%${search}%`, `%${search}%`); }
+
     const rows = db.prepare(`SELECT a.*, w.name as warehouse_name
       FROM warehouse_adjustments a JOIN warehouses w ON a.warehouse_id=w.id
-      WHERE a.created_at >= datetime('now','localtime','-${days} days')
-      ORDER BY a.created_at DESC`).all();
+      WHERE ${where.join(' AND ')}
+      ORDER BY a.created_at DESC`).all(...args);
     ok(res, rows);
     return;
   }
@@ -8248,6 +8420,1608 @@ async function handleRequest(req, res) {
       fail(res, 500, 'XERP 동기화 실패: ' + e.message);
     }
     return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  매출관리 API (Sales Management)
+  // ════════════════════════════════════════════════════════════════════
+
+  // 헬퍼: bar_shop1 임시 풀 (연결 누수 방지)
+  async function withBarShop1Pool(callback) {
+    let pool = null;
+    try {
+      pool = new sql.ConnectionPool({ ...xerpConfig, database: 'bar_shop1' });
+      await pool.connect();
+      return await callback(pool);
+    } finally {
+      if (pool) { try { await pool.close(); } catch (_) {} }
+    }
+  }
+
+  // 헬퍼: YYYYMMDD 포맷
+  function toYMD(d) {
+    return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  }
+
+  // 헬퍼: 월별 청크 분할
+  function getMonthChunks(startYMD, endYMD) {
+    const chunks = [];
+    const sy = parseInt(startYMD.slice(0, 4)), sm = parseInt(startYMD.slice(4, 6)) - 1;
+    const ey = parseInt(endYMD.slice(0, 4)), em = parseInt(endYMD.slice(4, 6)) - 1, ed = parseInt(endYMD.slice(6, 8));
+    let cur = new Date(sy, sm, 1);
+    const endDate = new Date(ey, em, ed);
+    while (cur <= endDate) {
+      const mStart = toYMD(cur);
+      const lastDay = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+      const mEnd = toYMD(lastDay);
+      chunks.push({ start: mStart < startYMD ? startYMD : mStart, end: mEnd > endYMD ? endYMD : mEnd });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    return chunks;
+  }
+
+  // 헬퍼: XERP 매출 쿼리 (기간별)
+  async function queryXerpSales(pool, startYMD, endYMD) {
+    const r = await pool.request()
+      .input('startDate', sql.NVarChar(16), startYMD)
+      .input('endDate', sql.NVarChar(16), endYMD)
+      .query(`SELECT COUNT(DISTINCT h_orderid) AS order_count,
+                     ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                     ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                     ISNULL(SUM(h_superTax),0) AS total_vat,
+                     ISNULL(SUM(FeeAmnt),0) AS total_fee
+              FROM ERP_SalesData WITH (NOLOCK)
+              WHERE h_date >= @startDate AND h_date <= @endDate`);
+    return r.recordset[0] || { order_count: 0, total_sales: 0, total_supply: 0, total_vat: 0, total_fee: 0 };
+  }
+
+  // 헬퍼: DD 매출 쿼리 (기간별)
+  async function queryDdSales(pool, startDate, endDate) {
+    const [rows] = await pool.query(
+      `SELECT COUNT(*) AS order_count, IFNULL(SUM(paid_money),0) AS total_sales
+       FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'`,
+      [startDate, endDate]);
+    return rows[0] || { order_count: 0, total_sales: 0 };
+  }
+
+  // 헬퍼: 더기프트 매출 쿼리 (mmInoutItem 출고 기반, 기간별)
+  // 더기프트 = XERP mmInoutItem에서 SiteCode='BK10', InoutGubun='SO', 등록된 gift_sets의 xerp_code 매칭
+  async function queryGiftSales(pool, startYMD, endYMD) {
+    // gift_sets에서 등록된 xerp_code 목록
+    const giftSets = db.prepare("SELECT xerp_code, set_name FROM gift_sets WHERE status='active' AND xerp_code != ''").all();
+    if (!giftSets.length) return { order_count: 0, total_sales: 0, total_qty: 0, items: 0 };
+    const xerpCodes = giftSets.map(g => g.xerp_code.trim()).filter(Boolean);
+    if (!xerpCodes.length) return { order_count: 0, total_sales: 0, total_qty: 0, items: 0 };
+    const req = pool.request();
+    req.input('startDate', sql.NVarChar(16), startYMD);
+    req.input('endDate', sql.NVarChar(16), endYMD);
+    const placeholders = xerpCodes.map((c, i) => { req.input(`gc${i}`, sql.VarChar(50), c); return `@gc${i}`; }).join(',');
+    const r = await req.query(`
+      SELECT COUNT(DISTINCT InoutNo) AS order_count,
+             ISNULL(SUM(InoutAmnt),0) AS total_sales,
+             ISNULL(SUM(InoutQty),0) AS total_qty,
+             COUNT(DISTINCT RTRIM(ItemCode)) AS items
+      FROM mmInoutItem WITH (NOLOCK)
+      WHERE SiteCode='BK10' AND InoutGubun='SO'
+        AND InoutDate >= @startDate AND InoutDate <= @endDate
+        AND RTRIM(ItemCode) IN (${placeholders})`);
+    const row = r.recordset[0] || {};
+    return { order_count: row.order_count || 0, total_sales: Number(row.total_sales || 0), total_qty: Number(row.total_qty || 0), items: row.items || 0 };
+  }
+
+  // 헬퍼: 더기프트 일별 매출
+  async function queryGiftDailySales(pool, startYMD, endYMD) {
+    const giftSets = db.prepare("SELECT xerp_code FROM gift_sets WHERE status='active' AND xerp_code != ''").all();
+    const xerpCodes = giftSets.map(g => g.xerp_code.trim()).filter(Boolean);
+    if (!xerpCodes.length) return [];
+    const req = pool.request();
+    req.input('startDate', sql.NVarChar(16), startYMD);
+    req.input('endDate', sql.NVarChar(16), endYMD);
+    const placeholders = xerpCodes.map((c, i) => { req.input(`gc${i}`, sql.VarChar(50), c); return `@gc${i}`; }).join(',');
+    const r = await req.query(`
+      SELECT RTRIM(InoutDate) AS inout_date,
+             COUNT(DISTINCT InoutNo) AS order_count,
+             ISNULL(SUM(InoutAmnt),0) AS total_sales,
+             ISNULL(SUM(InoutQty),0) AS total_qty
+      FROM mmInoutItem WITH (NOLOCK)
+      WHERE SiteCode='BK10' AND InoutGubun='SO'
+        AND InoutDate >= @startDate AND InoutDate <= @endDate
+        AND RTRIM(ItemCode) IN (${placeholders})
+      GROUP BY RTRIM(InoutDate) ORDER BY RTRIM(InoutDate)`);
+    return r.recordset.map(row => ({
+      date: (row.inout_date || '').trim(),
+      sales: Number(row.total_sales || 0),
+      orders: row.order_count || 0,
+      qty: Number(row.total_qty || 0)
+    }));
+  }
+
+  // 헬퍼: 더기프트 상품별 매출
+  async function queryGiftProductSales(pool, startYMD, endYMD) {
+    const giftSets = db.prepare("SELECT xerp_code, set_name FROM gift_sets WHERE status='active' AND xerp_code != ''").all();
+    const xerpCodes = giftSets.map(g => g.xerp_code.trim()).filter(Boolean);
+    if (!xerpCodes.length) return [];
+    const codeNameMap = {};
+    giftSets.forEach(g => { codeNameMap[g.xerp_code.trim()] = g.set_name; });
+    const req = pool.request();
+    req.input('startDate', sql.NVarChar(16), startYMD);
+    req.input('endDate', sql.NVarChar(16), endYMD);
+    const placeholders = xerpCodes.map((c, i) => { req.input(`gc${i}`, sql.VarChar(50), c); return `@gc${i}`; }).join(',');
+    const r = await req.query(`
+      SELECT RTRIM(ItemCode) AS item_code, RTRIM(ItemName) AS item_name,
+             COUNT(DISTINCT InoutNo) AS order_count,
+             ISNULL(SUM(InoutAmnt),0) AS total_sales,
+             ISNULL(SUM(InoutQty),0) AS total_qty
+      FROM mmInoutItem WITH (NOLOCK)
+      WHERE SiteCode='BK10' AND InoutGubun='SO'
+        AND InoutDate >= @startDate AND InoutDate <= @endDate
+        AND RTRIM(ItemCode) IN (${placeholders})
+      GROUP BY RTRIM(ItemCode), RTRIM(ItemName)
+      ORDER BY SUM(InoutAmnt) DESC`);
+    return r.recordset.map((row, i) => ({
+      rank: i + 1,
+      code: (row.item_code || '').trim(),
+      name: codeNameMap[(row.item_code || '').trim()] || (row.item_name || '').trim(),
+      sales: Number(row.total_sales || 0),
+      orders: row.order_count || 0,
+      qty: Number(row.total_qty || 0)
+    }));
+  }
+
+  // ── GET /api/sales/kpi ──
+  if (pathname === '/api/sales/kpi' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const forceRefresh = parsed.searchParams.get('refresh') === '1';
+    if (!forceRefresh && salesKpiCache && Date.now() - salesKpiCacheTime < SALES_CACHE_TTL) {
+      ok(res, salesKpiCache); return;
+    }
+    const result = { today: {}, thisMonth: {}, lastMonth: {}, sameMonthLastYear: {}, momChange: {}, yoyChange: {}, sources: {} };
+    const now = new Date();
+    const todayYMD = toYMD(now);
+    const monthStart = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + '01';
+    const monthEnd = todayYMD;
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lmStart = toYMD(lastMonthDate);
+    const lmEnd = toYMD(new Date(now.getFullYear(), now.getMonth(), 0));
+    const sylyDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    const sylyStart = toYMD(sylyDate);
+    const sylyEnd = toYMD(new Date(now.getFullYear() - 1, now.getMonth() + 1, 0));
+
+    // XERP
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const [xToday, xThisMonth, xLastMonth, xSameLY] = await Promise.all([
+        queryXerpSales(pool, todayYMD, todayYMD),
+        queryXerpSales(pool, monthStart, monthEnd),
+        queryXerpSales(pool, lmStart, lmEnd),
+        queryXerpSales(pool, sylyStart, sylyEnd)
+      ]);
+      // XERP 데이터 1-2일 지연 → 오늘 데이터 없으면 어제 시도
+      let xTodayFinal = xToday;
+      if (xToday.order_count === 0) {
+        const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+        const yYMD = toYMD(yesterday);
+        xTodayFinal = await queryXerpSales(pool, yYMD, yYMD);
+        xTodayFinal._dateUsed = yYMD;
+      }
+      result.today.xerp = { sales: Number(xTodayFinal.total_sales), orders: xTodayFinal.order_count, dateUsed: xTodayFinal._dateUsed || todayYMD };
+      result.thisMonth.xerp = { sales: Number(xThisMonth.total_sales), orders: xThisMonth.order_count, supply: Number(xThisMonth.total_supply), vat: Number(xThisMonth.total_vat), fee: Number(xThisMonth.total_fee) };
+      result.lastMonth.xerp = { sales: Number(xLastMonth.total_sales), orders: xLastMonth.order_count };
+      result.sameMonthLastYear.xerp = { sales: Number(xSameLY.total_sales), orders: xSameLY.order_count };
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      console.error('Sales KPI XERP error:', e.message);
+      logError('warn', 'Sales KPI XERP: ' + e.message, e.stack, req.url, req.method);
+      result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied') || e.number === 229) ? 'access_denied' : 'error';
+      result.today.xerp = { sales: 0, orders: 0 };
+      result.thisMonth.xerp = { sales: 0, orders: 0, supply: 0, vat: 0, fee: 0 };
+      result.lastMonth.xerp = { sales: 0, orders: 0 };
+      result.sameMonthLastYear.xerp = { sales: 0, orders: 0 };
+    }
+
+    // DD
+    const todayISO = now.toISOString().slice(0, 10);
+    const tomorrowISO = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10);
+    const mStartISO = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01';
+    const lmStartISO = lastMonthDate.toISOString().slice(0, 10);
+    const lmEndISO = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const sylyStartISO = sylyDate.toISOString().slice(0, 10);
+    const sylyEndISO = new Date(now.getFullYear() - 1, now.getMonth() + 1, 1).toISOString().slice(0, 10);
+    try {
+      const pool = await ensureDdPool();
+      if (!pool) throw new Error('DD pool unavailable');
+      const [dToday, dThisMonth, dLastMonth, dSameLY] = await Promise.all([
+        queryDdSales(pool, todayISO, tomorrowISO),
+        queryDdSales(pool, mStartISO, tomorrowISO),
+        queryDdSales(pool, lmStartISO, lmEndISO),
+        queryDdSales(pool, sylyStartISO, sylyEndISO)
+      ]);
+      result.today.dd = { sales: Number(dToday.total_sales), orders: dToday.order_count };
+      result.thisMonth.dd = { sales: Number(dThisMonth.total_sales), orders: dThisMonth.order_count };
+      result.lastMonth.dd = { sales: Number(dLastMonth.total_sales), orders: dLastMonth.order_count };
+      result.sameMonthLastYear.dd = { sales: Number(dSameLY.total_sales), orders: dSameLY.order_count };
+      result.sources.dd = 'connected';
+    } catch (e) {
+      console.error('Sales KPI DD error:', e.message);
+      logError('warn', 'Sales KPI DD: ' + e.message, e.stack, req.url, req.method);
+      result.sources.dd = 'error';
+      result.today.dd = { sales: 0, orders: 0 };
+      result.thisMonth.dd = { sales: 0, orders: 0 };
+      result.lastMonth.dd = { sales: 0, orders: 0 };
+      result.sameMonthLastYear.dd = { sales: 0, orders: 0 };
+    }
+
+    // 더기프트 (XERP mmInoutItem 출고)
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const [gToday, gThisMonth, gLastMonth, gSameLY] = await Promise.all([
+        queryGiftSales(pool, todayYMD, todayYMD),
+        queryGiftSales(pool, monthStart, monthEnd),
+        queryGiftSales(pool, lmStart, lmEnd),
+        queryGiftSales(pool, sylyStart, sylyEnd)
+      ]);
+      let gTodayFinal = gToday;
+      if (gToday.order_count === 0) {
+        const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+        gTodayFinal = await queryGiftSales(pool, toYMD(yesterday), toYMD(yesterday));
+      }
+      result.today.gift = { sales: gTodayFinal.total_sales, orders: gTodayFinal.order_count, qty: gTodayFinal.total_qty };
+      result.thisMonth.gift = { sales: gThisMonth.total_sales, orders: gThisMonth.order_count, qty: gThisMonth.total_qty };
+      result.lastMonth.gift = { sales: gLastMonth.total_sales, orders: gLastMonth.order_count, qty: gLastMonth.total_qty };
+      result.sameMonthLastYear.gift = { sales: gSameLY.total_sales, orders: gSameLY.order_count, qty: gSameLY.total_qty };
+      result.sources.gift = 'connected';
+    } catch (e) {
+      console.error('Sales KPI Gift error:', e.message);
+      logError('warn', 'Sales KPI Gift: ' + e.message, e.stack, req.url, req.method);
+      result.sources.gift = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+      result.today.gift = { sales: 0, orders: 0, qty: 0 };
+      result.thisMonth.gift = { sales: 0, orders: 0, qty: 0 };
+      result.lastMonth.gift = { sales: 0, orders: 0, qty: 0 };
+      result.sameMonthLastYear.gift = { sales: 0, orders: 0, qty: 0 };
+    }
+
+    // 합산 + MoM/YoY (XERP + DD + 더기프트)
+    result.today.total = { sales: (result.today.xerp.sales || 0) + (result.today.dd.sales || 0) + (result.today.gift.sales || 0), orders: (result.today.xerp.orders || 0) + (result.today.dd.orders || 0) + (result.today.gift.orders || 0) };
+    result.thisMonth.total = { sales: (result.thisMonth.xerp.sales || 0) + (result.thisMonth.dd.sales || 0) + (result.thisMonth.gift.sales || 0), orders: (result.thisMonth.xerp.orders || 0) + (result.thisMonth.dd.orders || 0) + (result.thisMonth.gift.orders || 0) };
+    result.lastMonth.total = { sales: (result.lastMonth.xerp.sales || 0) + (result.lastMonth.dd.sales || 0) + (result.lastMonth.gift.sales || 0), orders: (result.lastMonth.xerp.orders || 0) + (result.lastMonth.dd.orders || 0) + (result.lastMonth.gift.orders || 0) };
+    result.sameMonthLastYear.total = { sales: (result.sameMonthLastYear.xerp.sales || 0) + (result.sameMonthLastYear.dd.sales || 0) + (result.sameMonthLastYear.gift.sales || 0), orders: (result.sameMonthLastYear.xerp.orders || 0) + (result.sameMonthLastYear.dd.orders || 0) + (result.sameMonthLastYear.gift.orders || 0) };
+    const tmSales = result.thisMonth.total.sales, lmSales = result.lastMonth.total.sales;
+    const sylySales = result.sameMonthLastYear.total.sales;
+    result.momChange = { salesPct: lmSales > 0 ? Math.round((tmSales - lmSales) / lmSales * 1000) / 10 : 0, salesDiff: tmSales - lmSales };
+    result.yoyChange = { salesPct: sylySales > 0 ? Math.round((tmSales - sylySales) / sylySales * 1000) / 10 : 0, salesDiff: tmSales - sylySales };
+    // 일평균
+    const daysInMonth = now.getDate();
+    result.dailyAvg = daysInMonth > 0 ? Math.round(tmSales / daysInMonth) : 0;
+    result.cachedAt = new Date().toISOString();
+    salesKpiCache = result; salesKpiCacheTime = Date.now();
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/daily ──
+  if (pathname === '/api/sales/daily' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const source = parsed.searchParams.get('source') || 'all';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    if (parseInt(endParam) - parseInt(startParam) > 3660000) { fail(res, 400, '최대 366일 범위'); return; }
+
+    const dateMap = {};
+    const result = { rows: [], summary: {}, sources: {} };
+
+    // XERP
+    if (source === 'all' || source === 'xerp') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const chunks = getMonthChunks(startParam, endParam);
+        for (const chunk of chunks) {
+          const r = await pool.request()
+            .input('s', sql.NVarChar(16), chunk.start)
+            .input('e', sql.NVarChar(16), chunk.end)
+            .query(`SELECT h_date,
+                           COUNT(DISTINCT h_orderid) AS order_count,
+                           ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                           ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                           ISNULL(SUM(h_superTax),0) AS total_vat,
+                           ISNULL(SUM(FeeAmnt),0) AS total_fee
+                    FROM ERP_SalesData WITH (NOLOCK)
+                    WHERE h_date >= @s AND h_date <= @e
+                    GROUP BY h_date ORDER BY h_date`);
+          for (const row of r.recordset) {
+            const d = (row.h_date || '').trim();
+            if (!d) continue;
+            const isoDate = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
+            if (!dateMap[isoDate]) dateMap[isoDate] = { date: isoDate, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+            dateMap[isoDate].xerp_sales = Number(row.total_sales);
+            dateMap[isoDate].xerp_orders = row.order_count;
+            dateMap[isoDate].xerp_supply = Number(row.total_supply);
+            dateMap[isoDate].xerp_vat = Number(row.total_vat);
+            dateMap[isoDate].xerp_fee = Number(row.total_fee);
+          }
+        }
+        result.sources.xerp = 'connected';
+      } catch (e) {
+        console.error('Sales daily XERP error:', e.message);
+        logError('warn', 'Sales daily XERP: ' + e.message, e.stack, req.url, req.method);
+        result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+      }
+    }
+
+    // DD
+    if (source === 'all' || source === 'dd') {
+      try {
+        const pool = await ensureDdPool();
+        if (!pool) throw new Error('DD pool unavailable');
+        const startISO = startParam.slice(0, 4) + '-' + startParam.slice(4, 6) + '-' + startParam.slice(6, 8);
+        const endD = new Date(parseInt(endParam.slice(0, 4)), parseInt(endParam.slice(4, 6)) - 1, parseInt(endParam.slice(6, 8)) + 1);
+        const endISO = endD.toISOString().slice(0, 10);
+        const [rows] = await pool.query(
+          `SELECT DATE(created_at) AS sale_date, COUNT(*) AS order_count, IFNULL(SUM(paid_money),0) AS total_sales
+           FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'
+           GROUP BY DATE(created_at) ORDER BY sale_date`, [startISO, endISO]);
+        for (const row of rows) {
+          const d = typeof row.sale_date === 'string' ? row.sale_date : row.sale_date.toISOString().slice(0, 10);
+          if (!dateMap[d]) dateMap[d] = { date: d, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+          dateMap[d].dd_sales = Number(row.total_sales);
+          dateMap[d].dd_orders = row.order_count;
+        }
+        result.sources.dd = 'connected';
+      } catch (e) {
+        console.error('Sales daily DD error:', e.message);
+        logError('warn', 'Sales daily DD: ' + e.message, e.stack, req.url, req.method);
+        result.sources.dd = 'error';
+      }
+    }
+
+    // 더기프트
+    if (source === 'all' || source === 'gift') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const gRows = await queryGiftDailySales(pool, startParam, endParam);
+        for (const row of gRows) {
+          const d = row.date;
+          if (!d) continue;
+          const isoDate = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
+          if (!dateMap[isoDate]) dateMap[isoDate] = { date: isoDate, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+          dateMap[isoDate].gift_sales = row.sales;
+          dateMap[isoDate].gift_orders = row.orders;
+          dateMap[isoDate].gift_qty = row.qty;
+        }
+        result.sources.gift = 'connected';
+      } catch (e) {
+        console.error('Sales daily Gift error:', e.message);
+        logError('warn', 'Sales daily Gift: ' + e.message, e.stack, req.url, req.method);
+        result.sources.gift = 'error';
+      }
+    }
+
+    // 합산 + 정렬
+    result.rows = Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
+    result.rows.forEach(r => { r.total_sales = (r.xerp_sales||0) + (r.dd_sales||0) + (r.gift_sales||0); r.total_orders = (r.xerp_orders||0) + (r.dd_orders||0) + (r.gift_orders||0); });
+    const totalSales = result.rows.reduce((s, r) => s + r.total_sales, 0);
+    const totalOrders = result.rows.reduce((s, r) => s + r.total_orders, 0);
+    result.summary = { total_sales: totalSales, total_orders: totalOrders, avg_daily_sales: result.rows.length > 0 ? Math.round(totalSales / result.rows.length) : 0, days: result.rows.length };
+    result.cachedAt = new Date().toISOString();
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/monthly ──
+  if (pathname === '/api/sales/monthly' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const months = parseInt(parsed.searchParams.get('months') || '12');
+    const source = parsed.searchParams.get('source') || 'all';
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    const startYMD = toYMD(startDate);
+    const endYMD = toYMD(now);
+    const monthMap = {};
+    const result = { rows: [], sources: {} };
+
+    if (source === 'all' || source === 'xerp') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const chunks = getMonthChunks(startYMD, endYMD);
+        for (const chunk of chunks) {
+          const r = await pool.request()
+            .input('s', sql.NVarChar(16), chunk.start)
+            .input('e', sql.NVarChar(16), chunk.end)
+            .query(`SELECT LEFT(h_date,6) AS sale_month,
+                           COUNT(DISTINCT h_orderid) AS order_count,
+                           ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                           ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                           ISNULL(SUM(h_superTax),0) AS total_vat,
+                           ISNULL(SUM(FeeAmnt),0) AS total_fee
+                    FROM ERP_SalesData WITH (NOLOCK)
+                    WHERE h_date >= @s AND h_date <= @e
+                    GROUP BY LEFT(h_date,6) ORDER BY sale_month`);
+          for (const row of r.recordset) {
+            const m = (row.sale_month || '').trim();
+            if (!m) continue;
+            const key = m.slice(0, 4) + '-' + m.slice(4, 6);
+            if (!monthMap[key]) monthMap[key] = { month: key, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+            monthMap[key].xerp_sales += Number(row.total_sales);
+            monthMap[key].xerp_orders += row.order_count;
+            monthMap[key].xerp_supply += Number(row.total_supply);
+            monthMap[key].xerp_vat += Number(row.total_vat);
+            monthMap[key].xerp_fee += Number(row.total_fee);
+          }
+        }
+        result.sources.xerp = 'connected';
+      } catch (e) {
+        console.error('Sales monthly XERP error:', e.message);
+        result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+      }
+    }
+
+    if (source === 'all' || source === 'dd') {
+      try {
+        const pool = await ensureDdPool();
+        if (!pool) throw new Error('DD pool unavailable');
+        const startISO = startDate.toISOString().slice(0, 10);
+        const endISO = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10);
+        const [rows] = await pool.query(
+          `SELECT DATE_FORMAT(created_at, '%Y-%m') AS sale_month, COUNT(*) AS order_count, IFNULL(SUM(paid_money),0) AS total_sales
+           FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'
+           GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY sale_month`, [startISO, endISO]);
+        for (const row of rows) {
+          const m = row.sale_month;
+          if (!monthMap[m]) monthMap[m] = { month: m, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+          monthMap[m].dd_sales = Number(row.total_sales);
+          monthMap[m].dd_orders = row.order_count;
+        }
+        result.sources.dd = 'connected';
+      } catch (e) {
+        console.error('Sales monthly DD error:', e.message);
+        result.sources.dd = 'error';
+      }
+    }
+
+    // 더기프트
+    if (source === 'all' || source === 'gift') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const giftSets = db.prepare("SELECT xerp_code FROM gift_sets WHERE status='active' AND xerp_code != ''").all();
+        const xerpCodes = giftSets.map(g => g.xerp_code.trim()).filter(Boolean);
+        if (xerpCodes.length) {
+          const req2 = pool.request();
+          req2.input('s', sql.NVarChar(16), startYMD);
+          req2.input('e', sql.NVarChar(16), endYMD);
+          const ph = xerpCodes.map((c, i) => { req2.input(`gc${i}`, sql.VarChar(50), c); return `@gc${i}`; }).join(',');
+          const r = await req2.query(`
+            SELECT LEFT(RTRIM(InoutDate),6) AS sale_month,
+                   COUNT(DISTINCT InoutNo) AS order_count,
+                   ISNULL(SUM(InoutAmnt),0) AS total_sales,
+                   ISNULL(SUM(InoutQty),0) AS total_qty
+            FROM mmInoutItem WITH (NOLOCK)
+            WHERE SiteCode='BK10' AND InoutGubun='SO'
+              AND InoutDate >= @s AND InoutDate <= @e
+              AND RTRIM(ItemCode) IN (${ph})
+            GROUP BY LEFT(RTRIM(InoutDate),6) ORDER BY sale_month`);
+          for (const row of r.recordset) {
+            const m0 = (row.sale_month || '').trim();
+            if (!m0) continue;
+            const key = m0.slice(0, 4) + '-' + m0.slice(4, 6);
+            if (!monthMap[key]) monthMap[key] = { month: key, xerp_sales: 0, xerp_orders: 0, xerp_supply: 0, xerp_vat: 0, xerp_fee: 0, dd_sales: 0, dd_orders: 0, gift_sales: 0, gift_orders: 0, gift_qty: 0 };
+            monthMap[key].gift_sales += Number(row.total_sales);
+            monthMap[key].gift_orders += row.order_count;
+            monthMap[key].gift_qty += Number(row.total_qty);
+          }
+        }
+        result.sources.gift = 'connected';
+      } catch (e) {
+        console.error('Sales monthly Gift error:', e.message);
+        result.sources.gift = 'error';
+      }
+    }
+
+    result.rows = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month));
+    result.rows.forEach(r => { r.total_sales = (r.xerp_sales||0) + (r.dd_sales||0) + (r.gift_sales||0); r.total_orders = (r.xerp_orders||0) + (r.dd_orders||0) + (r.gift_orders||0); });
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/by-channel ──
+  if (pathname === '/api/sales/by-channel' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    const result = { channels: [], total: {}, sources: {} };
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const r = await pool.request()
+        .input('s', sql.NVarChar(16), startParam)
+        .input('e', sql.NVarChar(16), endParam)
+        .query(`SELECT RTRIM(DeptGubun) AS channel,
+                       COUNT(DISTINCT h_orderid) AS order_count,
+                       ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                       ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                       ISNULL(SUM(FeeAmnt),0) AS total_fee
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                GROUP BY RTRIM(DeptGubun) ORDER BY SUM(h_sumPrice) DESC`);
+      const grandTotal = r.recordset.reduce((s, row) => s + Number(row.total_sales), 0);
+      result.channels = r.recordset.map(row => ({
+        code: (row.channel || '').trim(),
+        name: DEPT_GUBUN_LABELS[(row.channel || '').trim()] || (row.channel || '').trim(),
+        orders: row.order_count,
+        sales: Number(row.total_sales),
+        supply: Number(row.total_supply),
+        fee: Number(row.total_fee),
+        pct: grandTotal > 0 ? Math.round(Number(row.total_sales) / grandTotal * 1000) / 10 : 0
+      }));
+      result.total = { orders: r.recordset.reduce((s, row) => s + row.order_count, 0), sales: grandTotal };
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      console.error('Sales by-channel error:', e.message);
+      result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+    }
+    result.period = { start: startParam, end: endParam };
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/by-product ──
+  if (pathname === '/api/sales/by-product' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const limit = parseInt(parsed.searchParams.get('limit') || '50');
+    const source = parsed.searchParams.get('source') || 'all';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    const products = [];
+    const result = { products: [], total: {}, sources: {} };
+
+    // XERP
+    if (source === 'all' || source === 'xerp') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const r = await pool.request()
+          .input('s', sql.NVarChar(16), startParam)
+          .input('e', sql.NVarChar(16), endParam)
+          .input('lim', sql.Int, limit)
+          .query(`SELECT TOP (@lim) RTRIM(b_goodCode) AS product_code,
+                         COUNT(DISTINCT h_orderid) AS order_count,
+                         ISNULL(SUM(b_OrderNum),0) AS total_qty,
+                         ISNULL(SUM(b_sumPrice),0) AS total_sales
+                  FROM ERP_SalesData WITH (NOLOCK)
+                  WHERE h_date >= @s AND h_date <= @e
+                    AND b_goodCode IS NOT NULL AND LTRIM(RTRIM(b_goodCode)) != ''
+                  GROUP BY RTRIM(b_goodCode) ORDER BY SUM(b_sumPrice) DESC`);
+        // bar_shop1에서 품목명 매핑
+        const codes = r.recordset.map(row => (row.product_code || '').trim()).filter(Boolean);
+        let nameMap = {};
+        if (codes.length > 0) {
+          try {
+            nameMap = await withBarShop1Pool(async (bar1) => {
+              const map = {};
+              for (let i = 0; i < codes.length; i += 500) {
+                const batch = codes.slice(i, i + 500);
+                const safeCodes = batch.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => "'" + c + "'").join(',');
+                if (!safeCodes) continue;
+                const nr = await bar1.request().query(`SELECT RTRIM(Card_Code) AS Card_Code, Card_Name, RTRIM(CardBrand) AS CardBrand FROM S2_Card WHERE RTRIM(Card_Code) IN (${safeCodes})`);
+                nr.recordset.forEach(n => { map[(n.Card_Code || '').trim()] = { name: (n.Card_Name || '').trim(), brand: (n.CardBrand || '').trim() }; });
+              }
+              return map;
+            });
+          } catch (_) {}
+        }
+        for (const row of r.recordset) {
+          const code = (row.product_code || '').trim();
+          const info = nameMap[code] || {};
+          products.push({ code, name: info.name || code, brand: BRAND_LABELS[info.brand] || info.brand || '', orders: row.order_count, qty: Number(row.total_qty), sales: Number(row.total_sales), source: 'xerp' });
+        }
+        result.sources.xerp = 'connected';
+        result.sources.bar_shop1 = Object.keys(nameMap).length > 0 ? 'connected' : 'no_data';
+      } catch (e) {
+        console.error('Sales by-product XERP error:', e.message);
+        result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+      }
+    }
+
+    // DD
+    if (source === 'all' || source === 'dd') {
+      try {
+        const pool = await ensureDdPool();
+        if (!pool) throw new Error('DD pool unavailable');
+        const startISO = startParam.slice(0, 4) + '-' + startParam.slice(4, 6) + '-' + startParam.slice(6, 8);
+        const endD = new Date(parseInt(endParam.slice(0, 4)), parseInt(endParam.slice(4, 6)) - 1, parseInt(endParam.slice(6, 8)) + 1);
+        const endISO = endD.toISOString().slice(0, 10);
+        const [rows] = await pool.query(
+          `SELECT oi.product_code, oi.product_name, COUNT(DISTINCT oi.order_id) AS order_count,
+                  SUM(oi.qty) AS total_qty, SUM(oi.total_money) AS total_sales
+           FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id
+           WHERE o.created_at >= ? AND o.created_at < ? AND o.order_state != 'C'
+             AND oi.product_code IS NOT NULL AND oi.product_code != ''
+           GROUP BY oi.product_code, oi.product_name ORDER BY total_sales DESC LIMIT ?`, [startISO, endISO, limit]);
+        for (const row of rows) {
+          products.push({ code: row.product_code, name: row.product_name || row.product_code, brand: 'DD', orders: row.order_count, qty: Number(row.total_qty), sales: Number(row.total_sales), source: 'dd' });
+        }
+        result.sources.dd = 'connected';
+      } catch (e) {
+        console.error('Sales by-product DD error:', e.message);
+        result.sources.dd = 'error';
+      }
+    }
+
+    products.sort((a, b) => b.sales - a.sales);
+    result.products = products.slice(0, limit).map((p, i) => ({ ...p, rank: i + 1 }));
+    result.total = { count: result.products.length, sales: result.products.reduce((s, p) => s + p.sales, 0) };
+    result.period = { start: startParam, end: endParam };
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/by-brand ──
+  if (pathname === '/api/sales/by-brand' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    const result = { brands: [], total: {}, sources: {} };
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      // 모든 제품별 매출
+      const r = await pool.request()
+        .input('s', sql.NVarChar(16), startParam)
+        .input('e', sql.NVarChar(16), endParam)
+        .query(`SELECT RTRIM(b_goodCode) AS product_code,
+                       COUNT(DISTINCT h_orderid) AS order_count,
+                       ISNULL(SUM(b_OrderNum),0) AS total_qty,
+                       ISNULL(SUM(b_sumPrice),0) AS total_sales
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                  AND b_goodCode IS NOT NULL AND LTRIM(RTRIM(b_goodCode)) != ''
+                GROUP BY RTRIM(b_goodCode)`);
+      // bar_shop1에서 브랜드 매핑
+      const codes = r.recordset.map(row => (row.product_code || '').trim()).filter(Boolean);
+      let brandMap = {};
+      if (codes.length > 0) {
+        try {
+          brandMap = await withBarShop1Pool(async (bar1) => {
+            const map = {};
+            for (let i = 0; i < codes.length; i += 500) {
+              const batch = codes.slice(i, i + 500);
+              const safeCodes = batch.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => "'" + c + "'").join(',');
+              if (!safeCodes) continue;
+              const nr = await bar1.request().query(`SELECT RTRIM(Card_Code) AS Card_Code, RTRIM(CardBrand) AS CardBrand FROM S2_Card WHERE RTRIM(Card_Code) IN (${safeCodes})`);
+              nr.recordset.forEach(n => { map[(n.Card_Code || '').trim()] = (n.CardBrand || '').trim(); });
+            }
+            return map;
+          });
+        } catch (_) {}
+      }
+      // 브랜드별 집계
+      const brandAgg = {};
+      for (const row of r.recordset) {
+        const code = (row.product_code || '').trim();
+        const brand = brandMap[code] || '기타';
+        if (!brandAgg[brand]) brandAgg[brand] = { brand, orders: 0, qty: 0, sales: 0, products: 0 };
+        brandAgg[brand].orders += row.order_count;
+        brandAgg[brand].qty += Number(row.total_qty);
+        brandAgg[brand].sales += Number(row.total_sales);
+        brandAgg[brand].products++;
+      }
+      const grandTotal = Object.values(brandAgg).reduce((s, b) => s + b.sales, 0);
+      result.brands = Object.values(brandAgg)
+        .map(b => ({ ...b, brandName: BRAND_LABELS[b.brand] || b.brand, pct: grandTotal > 0 ? Math.round(b.sales / grandTotal * 1000) / 10 : 0 }))
+        .sort((a, b) => b.sales - a.sales);
+      result.total = { sales: grandTotal };
+      result.sources.xerp = 'connected';
+      result.sources.bar_shop1 = Object.keys(brandMap).length > 0 ? 'connected' : 'no_data';
+    } catch (e) {
+      console.error('Sales by-brand error:', e.message);
+      result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+    }
+    result.period = { start: startParam, end: endParam };
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/trend ──
+  if (pathname === '/api/sales/trend' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const months = parseInt(parsed.searchParams.get('months') || '12');
+    const now = new Date();
+    const result = { thisYear: [], lastYear: [], yoyChanges: [], sources: {} };
+
+    // 올해/작년 범위
+    const tyStart = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    const lyStart = new Date(now.getFullYear() - 1, now.getMonth() - months + 1, 1);
+    const lyEnd = new Date(now.getFullYear() - 1, now.getMonth() + 1, 0);
+
+    // XERP
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const tyChunks = getMonthChunks(toYMD(tyStart), toYMD(now));
+      const lyChunks = getMonthChunks(toYMD(lyStart), toYMD(lyEnd));
+      const tyMap = {}, lyMap = {};
+      for (const chunk of tyChunks) {
+        const r = await pool.request().input('s', sql.NVarChar(16), chunk.start).input('e', sql.NVarChar(16), chunk.end)
+          .query(`SELECT LEFT(h_date,6) AS m, COUNT(DISTINCT h_orderid) AS cnt, ISNULL(SUM(h_sumPrice),0) AS sales FROM ERP_SalesData WITH (NOLOCK) WHERE h_date>=@s AND h_date<=@e GROUP BY LEFT(h_date,6)`);
+        for (const row of r.recordset) { const k = row.m.slice(0,4)+'-'+row.m.slice(4,6); tyMap[k] = { sales: Number(row.sales), orders: row.cnt }; }
+      }
+      for (const chunk of lyChunks) {
+        const r = await pool.request().input('s', sql.NVarChar(16), chunk.start).input('e', sql.NVarChar(16), chunk.end)
+          .query(`SELECT LEFT(h_date,6) AS m, COUNT(DISTINCT h_orderid) AS cnt, ISNULL(SUM(h_sumPrice),0) AS sales FROM ERP_SalesData WITH (NOLOCK) WHERE h_date>=@s AND h_date<=@e GROUP BY LEFT(h_date,6)`);
+        for (const row of r.recordset) { const k = row.m.slice(0,4)+'-'+row.m.slice(4,6); lyMap[k] = { sales: Number(row.sales), orders: row.cnt }; }
+      }
+      // 정리
+      for (let i = 0; i < months; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - months + 1 + i, 1);
+        const tyKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        const lyD = new Date(d.getFullYear() - 1, d.getMonth(), 1);
+        const lyKey = lyD.getFullYear() + '-' + String(lyD.getMonth() + 1).padStart(2, '0');
+        const tyData = tyMap[tyKey] || { sales: 0, orders: 0 };
+        const lyData = lyMap[lyKey] || { sales: 0, orders: 0 };
+        result.thisYear.push({ month: tyKey, sales: tyData.sales, orders: tyData.orders });
+        result.lastYear.push({ month: lyKey, sales: lyData.sales, orders: lyData.orders });
+        result.yoyChanges.push({ monthLabel: String(d.getMonth() + 1).padStart(2, '0'), changePct: lyData.sales > 0 ? Math.round((tyData.sales - lyData.sales) / lyData.sales * 1000) / 10 : 0, changeAmt: tyData.sales - lyData.sales });
+      }
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      console.error('Sales trend error:', e.message);
+      result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+    }
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/order-status ──
+  if (pathname === '/api/sales/order-status' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const result = { bar_shop1: {}, dd: {}, sources: {} };
+
+    // bar_shop1
+    try {
+      const data = await withBarShop1Pool(async (bar1) => {
+        const [byStatus, bySite, byPay] = await Promise.all([
+          bar1.request().input('s', sql.DateTime, startParam).input('e', sql.DateTime, endParam)
+            .query(`SELECT status_seq, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date < @e AND status_seq >= 1 GROUP BY status_seq ORDER BY status_seq`),
+          bar1.request().input('s', sql.DateTime, startParam).input('e', sql.DateTime, endParam)
+            .query(`SELECT RTRIM(site_gubun) AS site_gubun, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date < @e AND status_seq >= 1 GROUP BY RTRIM(site_gubun)`),
+          bar1.request().input('s', sql.DateTime, startParam).input('e', sql.DateTime, endParam)
+            .query(`SELECT RTRIM(pay_Type) AS pay_type, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date < @e AND status_seq >= 1 GROUP BY RTRIM(pay_Type) ORDER BY COUNT(*) DESC`)
+        ]);
+        return {
+          total: byStatus.recordset.reduce((s, r) => s + r.cnt, 0),
+          byStatus: byStatus.recordset.map(r => ({ status_seq: r.status_seq, count: r.cnt })),
+          bySite: bySite.recordset.map(r => ({ site_gubun: r.site_gubun, count: r.cnt })),
+          byPayType: byPay.recordset.map(r => ({ pay_type: r.pay_type, count: r.cnt }))
+        };
+      });
+      result.bar_shop1 = data;
+      result.sources.bar_shop1 = 'connected';
+    } catch (e) {
+      console.error('Sales order-status bar_shop1 error:', e.message);
+      result.sources.bar_shop1 = 'error';
+    }
+
+    // DD
+    try {
+      const pool = await ensureDdPool();
+      if (!pool) throw new Error('DD pool unavailable');
+      const [[byState], [byShipping]] = await Promise.all([
+        pool.query(`SELECT order_state, COUNT(*) AS cnt FROM orders WHERE created_at >= ? AND created_at < ? GROUP BY order_state`, [startParam, endParam]),
+        pool.query(`SELECT shipping_state, COUNT(*) AS cnt FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C' GROUP BY shipping_state`, [startParam, endParam])
+      ]);
+      const stateLabels = { 'B': '대기', 'P': '결제완료', 'D': '배송중', 'C': '취소', 'F': '완료' };
+      result.dd = {
+        total: byState.reduce((s, r) => s + r.cnt, 0),
+        byState: byState.map(r => ({ state: r.order_state, label: stateLabels[r.order_state] || r.order_state, count: r.cnt })),
+        byShipping: byShipping.map(r => ({ state: r.shipping_state, label: stateLabels[r.shipping_state] || r.shipping_state, count: r.cnt }))
+      };
+      result.sources.dd = 'connected';
+    } catch (e) {
+      console.error('Sales order-status DD error:', e.message);
+      result.sources.dd = 'error';
+    }
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/dd ──
+  if (pathname === '/api/sales/dd' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const result = { summary: {}, daily: [], topProducts: [], byPayType: [], sources: {} };
+    try {
+      const pool = await ensureDdPool();
+      if (!pool) throw new Error('DD pool unavailable');
+      const endNext = endParam ? new Date(new Date(endParam).getTime() + 86400000).toISOString().slice(0, 10) : '';
+      const [[summaryRows], [dailyRows], [prodRows], [payRows]] = await Promise.all([
+        pool.query(`SELECT COUNT(*) AS total_orders, IFNULL(SUM(total_money),0) AS total_sales,
+                    IFNULL(SUM(paid_money),0) AS total_paid, IFNULL(SUM(delivery_price),0) AS total_delivery,
+                    IFNULL(SUM(discount_money),0) AS total_discount, ROUND(AVG(paid_money)) AS avg_order
+                    FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'`, [startParam, endNext]),
+        pool.query(`SELECT DATE(created_at) AS sale_date, COUNT(*) AS order_count, IFNULL(SUM(paid_money),0) AS total_sales
+                    FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'
+                    GROUP BY DATE(created_at) ORDER BY sale_date`, [startParam, endNext]),
+        pool.query(`SELECT oi.product_code, oi.product_name, COUNT(DISTINCT oi.order_id) AS order_count,
+                    SUM(oi.qty) AS total_qty, SUM(oi.total_money) AS total_sales
+                    FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id
+                    WHERE o.created_at >= ? AND o.created_at < ? AND o.order_state != 'C'
+                      AND oi.product_code IS NOT NULL AND oi.product_code != ''
+                    GROUP BY oi.product_code, oi.product_name ORDER BY total_sales DESC LIMIT 20`, [startParam, endNext]),
+        pool.query(`SELECT pay_type, pg_name, COUNT(*) AS order_count, IFNULL(SUM(paid_money),0) AS total_sales
+                    FROM orders WHERE created_at >= ? AND created_at < ? AND order_state != 'C'
+                    GROUP BY pay_type, pg_name ORDER BY total_sales DESC`, [startParam, endNext])
+      ]);
+      const s = summaryRows[0] || {};
+      result.summary = { total_orders: s.total_orders || 0, total_sales: Number(s.total_sales || 0), total_paid: Number(s.total_paid || 0), total_delivery: Number(s.total_delivery || 0), total_discount: Number(s.total_discount || 0), avg_order: Number(s.avg_order || 0) };
+      result.daily = dailyRows.map(r => ({ date: typeof r.sale_date === 'string' ? r.sale_date : r.sale_date.toISOString().slice(0, 10), orders: r.order_count, sales: Number(r.total_sales) }));
+      result.topProducts = prodRows.map((r, i) => ({ rank: i + 1, code: r.product_code, name: r.product_name || '', orders: r.order_count, qty: Number(r.total_qty), sales: Number(r.total_sales) }));
+      result.byPayType = payRows.map(r => ({ pay_type: r.pay_type || '', pg_name: r.pg_name || '', orders: r.order_count, sales: Number(r.total_sales) }));
+      result.sources.dd = 'connected';
+    } catch (e) {
+      console.error('Sales DD error:', e.message);
+      result.sources.dd = 'error';
+    }
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/barun ──
+  if (pathname === '/api/sales/barun' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    const result = { summary: {}, daily: [], channels: [], brands: [], orderPipeline: {}, sources: {} };
+
+    // XERP 요약 + 일별 + 채널별
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const [summaryR, dailyR, channelR] = await Promise.all([
+        pool.request().input('s', sql.NVarChar(16), startParam).input('e', sql.NVarChar(16), endParam)
+          .query(`SELECT COUNT(DISTINCT h_orderid) AS order_count, ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                  ISNULL(SUM(h_offerPrice),0) AS total_supply, ISNULL(SUM(h_superTax),0) AS total_vat, ISNULL(SUM(FeeAmnt),0) AS total_fee
+                  FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e`),
+        pool.request().input('s', sql.NVarChar(16), startParam).input('e', sql.NVarChar(16), endParam)
+          .query(`SELECT h_date, COUNT(DISTINCT h_orderid) AS order_count, ISNULL(SUM(h_sumPrice),0) AS total_sales
+                  FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e GROUP BY h_date ORDER BY h_date`),
+        pool.request().input('s', sql.NVarChar(16), startParam).input('e', sql.NVarChar(16), endParam)
+          .query(`SELECT RTRIM(DeptGubun) AS channel, COUNT(DISTINCT h_orderid) AS order_count, ISNULL(SUM(h_sumPrice),0) AS total_sales
+                  FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e GROUP BY RTRIM(DeptGubun) ORDER BY SUM(h_sumPrice) DESC`)
+      ]);
+      const s = summaryR.recordset[0] || {};
+      result.summary = { orders: s.order_count || 0, sales: Number(s.total_sales || 0), supply: Number(s.total_supply || 0), vat: Number(s.total_vat || 0), fee: Number(s.total_fee || 0) };
+      result.daily = dailyR.recordset.map(r => { const d = (r.h_date||'').trim(); return { date: d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8), orders: r.order_count, sales: Number(r.total_sales) }; });
+      const grandTotal = channelR.recordset.reduce((s, r) => s + Number(r.total_sales), 0);
+      result.channels = channelR.recordset.map(r => ({ code: (r.channel||'').trim(), name: DEPT_GUBUN_LABELS[(r.channel||'').trim()] || r.channel, orders: r.order_count, sales: Number(r.total_sales), pct: grandTotal > 0 ? Math.round(Number(r.total_sales) / grandTotal * 1000) / 10 : 0 }));
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      console.error('Sales barun XERP error:', e.message);
+      result.sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+    }
+
+    // bar_shop1 주문 파이프라인
+    try {
+      const startISO = startParam.slice(0,4)+'-'+startParam.slice(4,6)+'-'+startParam.slice(6,8);
+      const endISO = endParam.slice(0,4)+'-'+endParam.slice(4,6)+'-'+endParam.slice(6,8);
+      result.orderPipeline = await withBarShop1Pool(async (bar1) => {
+        const [bySite, byPay] = await Promise.all([
+          bar1.request().input('s', sql.DateTime, startISO).input('e', sql.DateTime, endISO)
+            .query(`SELECT RTRIM(site_gubun) AS site_gubun, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date < DATEADD(day,1,@e) AND status_seq >= 1 GROUP BY RTRIM(site_gubun)`),
+          bar1.request().input('s', sql.DateTime, startISO).input('e', sql.DateTime, endISO)
+            .query(`SELECT RTRIM(pay_Type) AS pay_type, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date < DATEADD(day,1,@e) AND status_seq >= 1 GROUP BY RTRIM(pay_Type) ORDER BY COUNT(*) DESC`)
+        ]);
+        return { bySite: bySite.recordset.map(r => ({ site: r.site_gubun, count: r.cnt })), byPayType: byPay.recordset.map(r => ({ type: r.pay_type, count: r.cnt })) };
+      });
+      result.sources.bar_shop1 = 'connected';
+    } catch (e) {
+      console.error('Sales barun bar_shop1 error:', e.message);
+      result.sources.bar_shop1 = 'error';
+    }
+    result.period = { start: startParam, end: endParam };
+    ok(res, result); return;
+  }
+
+  // ── GET /api/sales/gift ── (더기프트 전용)
+  if (pathname === '/api/sales/gift' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    if (!startParam.match(/^\d{8}$/) || !endParam.match(/^\d{8}$/)) { fail(res, 400, 'start/end는 YYYYMMDD 형식'); return; }
+    const result = { summary: {}, daily: [], products: [], sources: {} };
+
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) throw new Error('XERP pool unavailable');
+      const [summaryData, dailyData, productData] = await Promise.all([
+        queryGiftSales(pool, startParam, endParam),
+        queryGiftDailySales(pool, startParam, endParam),
+        queryGiftProductSales(pool, startParam, endParam)
+      ]);
+      result.summary = {
+        total_sales: summaryData.total_sales,
+        total_orders: summaryData.order_count,
+        total_qty: summaryData.total_qty,
+        total_items: summaryData.items,
+        avg_order: summaryData.order_count > 0 ? Math.round(summaryData.total_sales / summaryData.order_count) : 0
+      };
+      result.daily = dailyData.map(r => ({
+        date: r.date.slice(0,4)+'-'+r.date.slice(4,6)+'-'+r.date.slice(6,8),
+        sales: r.sales, orders: r.orders, qty: r.qty
+      }));
+      result.products = productData;
+      result.sources.gift = 'connected';
+    } catch (e) {
+      console.error('Sales gift error:', e.message);
+      logError('warn', 'Sales gift: ' + e.message, e.stack, req.url, req.method);
+      result.sources.gift = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+    }
+    result.period = { start: startParam, end: endParam };
+    ok(res, result); return;
+  }
+
+  // ── POST /api/sales/cache/refresh ──
+  if (pathname === '/api/sales/cache/refresh' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
+    salesKpiCache = null; salesKpiCacheTime = 0;
+    const d1 = db.prepare("DELETE FROM sales_daily_cache WHERE sale_date >= date('now', '-7 days')").run();
+    const d2 = db.prepare("DELETE FROM sales_monthly_cache WHERE sale_month >= strftime('%Y-%m', 'now', '-2 months')").run();
+    const d3 = db.prepare("DELETE FROM sales_product_cache WHERE sale_month >= strftime('%Y-%m', 'now', '-2 months')").run();
+    ok(res, { message: '매출 캐시 초기화 완료', deleted: { daily: d1.changes, monthly: d2.changes, product: d3.changes } }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  원가관리 API (Cost Management / Margin Analysis)
+  // ════════════════════════════════════════════════════════════════════
+
+  // ── GET /api/cost/summary ── KPI: 평균마진율, 매출총이익, 최고/최저 채널마진, 원재료비 비중
+  if (pathname === '/api/cost/summary' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const now = Date.now();
+    const refresh = parsed.searchParams.get('refresh') === '1';
+    if (!refresh && costSummaryCache && (now - costSummaryCacheTime < COST_CACHE_TTL)) {
+      ok(res, costSummaryCache); return;
+    }
+    const result = { sources: {}, channels: [], bar_shop1: {}, cost_basis: {}, kpi: {} };
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const sYMD = startOfMonth.toISOString().slice(0,10).replace(/-/g,'');
+    const eYMD = today.toISOString().slice(0,10).replace(/-/g,'');
+
+    // ── XERP: 채널별 매출/공급가/수수료 ──
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request()
+        .input('s', sql.NVarChar(8), sYMD)
+        .input('e', sql.NVarChar(8), eYMD)
+        .query(`SELECT RTRIM(DeptGubun) AS channel,
+                  COUNT(DISTINCT h_orderid) AS order_count,
+                  ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                  ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                  ISNULL(SUM(FeeAmnt),0) AS total_fee
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                GROUP BY RTRIM(DeptGubun)`);
+      result.channels = r.recordset.map(row => ({
+        channel: row.channel,
+        channel_name: DEPT_GUBUN_LABELS[row.channel] || row.channel,
+        order_count: row.order_count,
+        total_sales: Number(row.total_sales),
+        total_supply: Number(row.total_supply),
+        total_fee: Number(row.total_fee),
+        margin: Number(row.total_sales) - Number(row.total_supply) - Number(row.total_fee),
+        margin_rate: Number(row.total_sales) > 0
+          ? ((Number(row.total_sales) - Number(row.total_supply) - Number(row.total_fee)) / Number(row.total_sales) * 100).toFixed(1)
+          : '0.0'
+      }));
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      result.sources.xerp = 'error';
+      console.error('[cost/summary] XERP error:', e.message);
+    }
+
+    // ── bar_shop1: 주문별 매출 vs 원가 ──
+    try {
+      await withBarShop1Pool(async (bPool) => {
+        const r = await bPool.request()
+          .input('s', sql.NVarChar(10), startOfMonth.toISOString().slice(0,10))
+          .input('e', sql.NVarChar(10), today.toISOString().slice(0,10))
+          .query(`SELECT SUM(i.item_sale_price * i.item_count) AS total_revenue,
+                    SUM(i.item_price * i.item_count) AS total_cost,
+                    COUNT(DISTINCT o.order_seq) AS order_count
+                  FROM custom_order o WITH (NOLOCK)
+                  JOIN custom_order_item i WITH (NOLOCK) ON o.order_seq = i.order_seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day,1,@e)
+                    AND o.status_seq >= 1 AND i.item_sale_price > 0 AND i.item_price > 0`);
+        const row = r.recordset[0] || {};
+        result.bar_shop1 = {
+          total_revenue: Number(row.total_revenue || 0),
+          total_cost: Number(row.total_cost || 0),
+          order_count: row.order_count || 0,
+          margin: Number(row.total_revenue || 0) - Number(row.total_cost || 0),
+          margin_rate: Number(row.total_revenue || 0) > 0
+            ? ((Number(row.total_revenue || 0) - Number(row.total_cost || 0)) / Number(row.total_revenue || 0) * 100).toFixed(1) : '0.0'
+        };
+        result.sources.bar_shop1 = 'connected';
+      });
+    } catch (e) {
+      result.sources.bar_shop1 = 'error';
+      console.error('[cost/summary] bar_shop1 error:', e.message);
+    }
+
+    // ── SQLite: 후공정비 합계 ──
+    try {
+      const ppRow = db.prepare(`SELECT COALESCE(SUM(amount),0) AS total FROM post_process_history
+        WHERE date >= ? AND date <= ?`).get(startOfMonth.toISOString().slice(0,10), today.toISOString().slice(0,10));
+      result.post_process_total = ppRow ? Number(ppRow.total || 0) : 0;
+      result.sources.sqlite = 'connected';
+    } catch (e) {
+      // post_process_history 테이블이 없을 수 있음
+      result.post_process_total = 0;
+      result.sources.sqlite = 'connected';
+    }
+
+    // ── 원가 기준 정보 (Cost Basis Definition) ──
+    result.cost_basis = {
+      description: '원가 산출 기준',
+      components: [
+        { name: '상품원가(Cost_Price)', source: 'bar_shop1.S2_Card.Cost_Price', desc: '품목 마스터에 등록된 단위 원가 (제조원가 기준)' },
+        { name: '공장도가(CardFactory_Price)', source: 'bar_shop1.S2_Card.CardFactory_Price', desc: '공장 출고가 (인쇄/제조 원가)' },
+        { name: '판매가(Card_Price)', source: 'bar_shop1.S2_Card.Card_Price', desc: '정가 (소비자가)' },
+        { name: '실매출', source: 'XERP.ERP_SalesData.h_sumPrice', desc: '실제 거래 매출액 (할인/쿠폰 적용 후)' },
+        { name: '공급가', source: 'XERP.ERP_SalesData.h_offerPrice', desc: '채널에 공급하는 가격' },
+        { name: '수수료', source: 'XERP.ERP_SalesData.FeeAmnt', desc: '채널 수수료 (플랫폼 수수료 등)' },
+        { name: '후공정비', source: 'SQLite.post_process_history', desc: '후가공 비용 (형압, 금박, UV 등)' },
+        { name: '주문원가(item_price)', source: 'bar_shop1.custom_order_item.item_price', desc: '주문 시점의 개별 원가 (실거래 원가)' },
+        { name: '주문매출(item_sale_price)', source: 'bar_shop1.custom_order_item.item_sale_price', desc: '주문 시점의 판매가' }
+      ],
+      margin_formula: '마진 = 실매출(h_sumPrice) - 상품원가(Cost_Price × 수량) - 수수료(FeeAmnt)',
+      margin_rate_formula: '마진율 = (마진 / 실매출) × 100%',
+      notes: [
+        '원가 미등록 상품(Cost_Price=0 또는 NULL)은 "원가 미등록"으로 별도 표시',
+        '음수 마진은 적자 상품으로 빨간색 강조 표시',
+        'bar_shop1 마진은 주문 시점 원가(item_price) 기준, XERP 마진은 품목원가(Cost_Price) 기준',
+        '수수료는 채널별로 상이 (자사몰 0%, 외부몰 10~30%)'
+      ]
+    };
+
+    // ── KPI 산출 ──
+    const xerpTotalSales = result.channels.reduce((s, c) => s + c.total_sales, 0);
+    const xerpTotalFee = result.channels.reduce((s, c) => s + c.total_fee, 0);
+    const xerpTotalSupply = result.channels.reduce((s, c) => s + c.total_supply, 0);
+    const xerpMargin = xerpTotalSales - xerpTotalSupply - xerpTotalFee;
+    const avgMarginRate = xerpTotalSales > 0 ? (xerpMargin / xerpTotalSales * 100) : 0;
+    const bestChannel = result.channels.length > 0
+      ? result.channels.reduce((a, b) => parseFloat(a.margin_rate) > parseFloat(b.margin_rate) ? a : b) : null;
+    const worstChannel = result.channels.length > 0
+      ? result.channels.reduce((a, b) => parseFloat(a.margin_rate) < parseFloat(b.margin_rate) ? a : b) : null;
+    const costRatio = xerpTotalSales > 0 ? (xerpTotalSupply / xerpTotalSales * 100) : 0;
+
+    result.kpi = {
+      avg_margin_rate: avgMarginRate.toFixed(1),
+      gross_profit: xerpMargin,
+      total_sales: xerpTotalSales,
+      total_supply: xerpTotalSupply,
+      total_fee: xerpTotalFee,
+      best_channel: bestChannel ? { name: bestChannel.channel_name, rate: bestChannel.margin_rate } : null,
+      worst_channel: worstChannel ? { name: worstChannel.channel_name, rate: worstChannel.margin_rate } : null,
+      cost_ratio: costRatio.toFixed(1),
+      bar_shop1_margin_rate: result.bar_shop1.margin_rate || '0.0',
+      post_process_total: result.post_process_total,
+      period: { start: sYMD, end: eYMD }
+    };
+
+    costSummaryCache = result; costSummaryCacheTime = now;
+    ok(res, result); return;
+  }
+
+  // ── GET /api/cost/products ── 상품별 원가/마진 분석
+  if (pathname === '/api/cost/products' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const limit = parseInt(parsed.searchParams.get('limit') || '50', 10);
+    const sort = parsed.searchParams.get('sort') || 'sales'; // sales | margin_rate | qty
+    if (!startParam || !endParam) { fail(res, 400, 'start, end 필수'); return; }
+    const result = { products: [], sources: {}, cost_basis: '상품원가=S2_Card.Cost_Price, 마진=실매출-(원가×수량)-수수료' };
+
+    // ── XERP: 상품별 매출/수량/수수료 ──
+    let xerpProducts = [];
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request()
+        .input('s', sql.NVarChar(8), startParam)
+        .input('e', sql.NVarChar(8), endParam)
+        .query(`SELECT TOP 200 RTRIM(b_goodCode) AS product_code,
+                  COUNT(DISTINCT h_orderid) AS order_count,
+                  ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                  ISNULL(SUM(b_quantity),0) AS total_qty,
+                  ISNULL(SUM(FeeAmnt),0) AS total_fee
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                  AND b_goodCode IS NOT NULL AND RTRIM(b_goodCode) != ''
+                GROUP BY RTRIM(b_goodCode)
+                ORDER BY SUM(h_sumPrice) DESC`);
+      xerpProducts = r.recordset;
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      result.sources.xerp = 'error';
+      console.error('[cost/products] XERP error:', e.message);
+    }
+
+    // ── bar_shop1: S2_Card 배치 조회 (원가/공장도가/판매가) ──
+    let cardMap = {};
+    if (xerpProducts.length > 0) {
+      try {
+        await withBarShop1Pool(async (bPool) => {
+          const codes = xerpProducts.map(p => p.product_code.trim()).filter(Boolean);
+          const uniqueCodes = [...new Set(codes)].slice(0, 200);
+          const req = bPool.request();
+          const placeholders = uniqueCodes.map((c, i) => { req.input(`c${i}`, sql.VarChar(30), c); return `@c${i}`; }).join(',');
+          const r = await req.query(`SELECT RTRIM(Card_Code) AS card_code, RTRIM(Card_Name) AS card_name,
+                    Card_Price, Cost_Price, CardFactory_Price, RTRIM(Brand) AS brand
+                  FROM S2_Card WITH (NOLOCK)
+                  WHERE RTRIM(Card_Code) IN (${placeholders})`);
+          r.recordset.forEach(row => {
+            cardMap[row.card_code] = {
+              name: row.card_name,
+              price: Number(row.Card_Price || 0),
+              cost: Number(row.Cost_Price || 0),
+              factory_price: Number(row.CardFactory_Price || 0),
+              brand: BRAND_LABELS[row.brand] || row.brand || ''
+            };
+          });
+          result.sources.bar_shop1 = 'connected';
+        });
+      } catch (e) {
+        result.sources.bar_shop1 = 'error';
+        console.error('[cost/products] bar_shop1 error:', e.message);
+      }
+    }
+
+    // ── 결합: 마진 계산 ──
+    result.products = xerpProducts.map(p => {
+      const code = p.product_code.trim();
+      const card = cardMap[code] || null;
+      const totalSales = Number(p.total_sales);
+      const totalQty = Number(p.total_qty);
+      const totalFee = Number(p.total_fee);
+      const unitCost = card ? card.cost : 0;
+      const totalCost = unitCost * totalQty;
+      const margin = unitCost > 0 ? (totalSales - totalCost - totalFee) : null;
+      const marginRate = (margin !== null && totalSales > 0) ? (margin / totalSales * 100) : null;
+      return {
+        code,
+        name: card ? card.name : code,
+        brand: card ? card.brand : '',
+        unit_price: card ? card.price : 0,
+        unit_cost: unitCost,
+        factory_price: card ? card.factory_price : 0,
+        cost_registered: unitCost > 0,
+        total_sales: totalSales,
+        total_qty: totalQty,
+        total_fee: totalFee,
+        total_cost: totalCost,
+        margin: margin,
+        margin_rate: marginRate !== null ? marginRate.toFixed(1) : null,
+        order_count: p.order_count
+      };
+    });
+
+    // 정렬
+    if (sort === 'margin_rate') {
+      result.products.sort((a, b) => (parseFloat(b.margin_rate) || -999) - (parseFloat(a.margin_rate) || -999));
+    } else if (sort === 'qty') {
+      result.products.sort((a, b) => b.total_qty - a.total_qty);
+    }
+    // sales는 이미 정렬됨
+
+    result.products = result.products.slice(0, limit);
+    result.products.forEach((p, i) => { p.rank = i + 1; });
+    ok(res, result); return;
+  }
+
+  // ── GET /api/cost/by-channel ── 채널별 마진 비교
+  if (pathname === '/api/cost/by-channel' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    if (!startParam || !endParam) { fail(res, 400, 'start, end 필수'); return; }
+    const result = { channels: [], sources: {}, cost_basis: '채널마진=매출-공급가-수수료, 수수료율=수수료/매출×100' };
+
+    // ── XERP: DeptGubun별 ──
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request()
+        .input('s', sql.NVarChar(8), startParam)
+        .input('e', sql.NVarChar(8), endParam)
+        .query(`SELECT RTRIM(DeptGubun) AS channel,
+                  COUNT(DISTINCT h_orderid) AS order_count,
+                  ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                  ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                  ISNULL(SUM(FeeAmnt),0) AS total_fee,
+                  ISNULL(SUM(b_quantity),0) AS total_qty
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                GROUP BY RTRIM(DeptGubun)
+                ORDER BY SUM(h_sumPrice) DESC`);
+      result.channels = r.recordset.map(row => {
+        const sales = Number(row.total_sales);
+        const supply = Number(row.total_supply);
+        const fee = Number(row.total_fee);
+        const margin = sales - supply - fee;
+        return {
+          channel: row.channel,
+          channel_name: DEPT_GUBUN_LABELS[row.channel] || row.channel,
+          order_count: row.order_count,
+          total_sales: sales,
+          total_supply: supply,
+          total_fee: fee,
+          total_qty: Number(row.total_qty),
+          margin: margin,
+          margin_rate: sales > 0 ? (margin / sales * 100).toFixed(1) : '0.0',
+          fee_rate: sales > 0 ? (fee / sales * 100).toFixed(1) : '0.0'
+        };
+      });
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      result.sources.xerp = 'error';
+      console.error('[cost/by-channel] XERP error:', e.message);
+    }
+
+    // ── bar_shop1: site_gubun별 ──
+    try {
+      await withBarShop1Pool(async (bPool) => {
+        const startDate = startParam.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+        const endDate = endParam.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+        const r = await bPool.request()
+          .input('s', sql.NVarChar(10), startDate)
+          .input('e', sql.NVarChar(10), endDate)
+          .query(`SELECT ISNULL(RTRIM(o.site_gubun),'기타') AS site,
+                    SUM(i.item_sale_price * i.item_count) AS revenue,
+                    SUM(i.item_price * i.item_count) AS cost,
+                    COUNT(DISTINCT o.order_seq) AS orders
+                  FROM custom_order o WITH (NOLOCK)
+                  JOIN custom_order_item i WITH (NOLOCK) ON o.order_seq = i.order_seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day,1,@e)
+                    AND o.status_seq >= 1 AND i.item_sale_price > 0 AND i.item_price > 0
+                  GROUP BY RTRIM(o.site_gubun)`);
+        result.bar_shop1_channels = r.recordset.map(row => {
+          const rev = Number(row.revenue || 0);
+          const cost = Number(row.cost || 0);
+          return {
+            site: row.site,
+            revenue: rev, cost: cost,
+            margin: rev - cost,
+            margin_rate: rev > 0 ? ((rev - cost) / rev * 100).toFixed(1) : '0.0',
+            orders: row.orders
+          };
+        });
+        result.sources.bar_shop1 = 'connected';
+      });
+    } catch (e) {
+      result.sources.bar_shop1 = 'error';
+      result.bar_shop1_channels = [];
+      console.error('[cost/by-channel] bar_shop1 error:', e.message);
+    }
+
+    ok(res, result); return;
+  }
+
+  // ── GET /api/cost/trend ── 월별 매출/마진율 추이
+  if (pathname === '/api/cost/trend' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const months = parseInt(parsed.searchParams.get('months') || '12', 10);
+    const result = { months: [], sources: {}, cost_basis: '월별마진=매출-공급가-수수료' };
+
+    // 시작일 계산
+    const today = new Date();
+    const startDate = new Date(today.getFullYear(), today.getMonth() - months + 1, 1);
+    const sYMD = startDate.toISOString().slice(0,10).replace(/-/g,'');
+    const eYMD = today.toISOString().slice(0,10).replace(/-/g,'');
+
+    // ── XERP: 월별 매출/수수료 ──
+    let monthMap = {};
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request()
+        .input('s', sql.NVarChar(8), sYMD)
+        .input('e', sql.NVarChar(8), eYMD)
+        .query(`SELECT LEFT(h_date,6) AS ym,
+                  ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                  ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                  ISNULL(SUM(FeeAmnt),0) AS total_fee,
+                  COUNT(DISTINCT h_orderid) AS order_count
+                FROM ERP_SalesData WITH (NOLOCK)
+                WHERE h_date >= @s AND h_date <= @e
+                GROUP BY LEFT(h_date,6)
+                ORDER BY LEFT(h_date,6)`);
+      r.recordset.forEach(row => {
+        monthMap[row.ym] = {
+          month: row.ym,
+          total_sales: Number(row.total_sales),
+          total_supply: Number(row.total_supply),
+          total_fee: Number(row.total_fee),
+          order_count: row.order_count
+        };
+      });
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      result.sources.xerp = 'error';
+      console.error('[cost/trend] XERP error:', e.message);
+    }
+
+    // ── bar_shop1: 월별 원가/매출 ──
+    try {
+      await withBarShop1Pool(async (bPool) => {
+        const startDateStr = startDate.toISOString().slice(0,10);
+        const endDateStr = today.toISOString().slice(0,10);
+        const r = await bPool.request()
+          .input('s', sql.NVarChar(10), startDateStr)
+          .input('e', sql.NVarChar(10), endDateStr)
+          .query(`SELECT FORMAT(o.order_date, 'yyyyMM') AS ym,
+                    SUM(i.item_sale_price * i.item_count) AS revenue,
+                    SUM(i.item_price * i.item_count) AS cost,
+                    COUNT(DISTINCT o.order_seq) AS orders
+                  FROM custom_order o WITH (NOLOCK)
+                  JOIN custom_order_item i WITH (NOLOCK) ON o.order_seq = i.order_seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day,1,@e)
+                    AND o.status_seq >= 1 AND i.item_sale_price > 0 AND i.item_price > 0
+                  GROUP BY FORMAT(o.order_date, 'yyyyMM')
+                  ORDER BY FORMAT(o.order_date, 'yyyyMM')`);
+        r.recordset.forEach(row => {
+          if (!monthMap[row.ym]) monthMap[row.ym] = { month: row.ym, total_sales: 0, total_supply: 0, total_fee: 0, order_count: 0 };
+          monthMap[row.ym].bs_revenue = Number(row.revenue || 0);
+          monthMap[row.ym].bs_cost = Number(row.cost || 0);
+          monthMap[row.ym].bs_orders = row.orders || 0;
+        });
+        result.sources.bar_shop1 = 'connected';
+      });
+    } catch (e) {
+      result.sources.bar_shop1 = 'error';
+      console.error('[cost/trend] bar_shop1 error:', e.message);
+    }
+
+    // 월별 배열 생성 + 마진 계산
+    result.months = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month)).map(m => {
+      const margin = m.total_sales - m.total_supply - m.total_fee;
+      return {
+        ...m,
+        margin: margin,
+        margin_rate: m.total_sales > 0 ? (margin / m.total_sales * 100).toFixed(1) : '0.0',
+        bs_margin: (m.bs_revenue || 0) - (m.bs_cost || 0),
+        bs_margin_rate: (m.bs_revenue || 0) > 0 ? (((m.bs_revenue || 0) - (m.bs_cost || 0)) / (m.bs_revenue || 0) * 100).toFixed(1) : '0.0'
+      };
+    });
+
+    ok(res, result); return;
+  }
+
+  // ── GET /api/cost/breakdown ── 원가 구성 분해 (파이차트용)
+  if (pathname === '/api/cost/breakdown' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const startParam = parsed.searchParams.get('start') || '';
+    const endParam = parsed.searchParams.get('end') || '';
+    const productCode = parsed.searchParams.get('product_code') || '';
+    if (!startParam || !endParam) { fail(res, 400, 'start, end 필수'); return; }
+    const result = { breakdown: [], total: 0, sources: {},
+      cost_basis: '원가구성: 원재료비(Cost_Price), 수수료(FeeAmnt), 후공정비(post_process), 기타' };
+
+    // ── XERP: 매출/수수료 ──
+    let totalSales = 0, totalFee = 0, totalSupply = 0, totalQty = 0;
+    try {
+      const pool = await ensureXerpPool();
+      const req = pool.request()
+        .input('s', sql.NVarChar(8), startParam)
+        .input('e', sql.NVarChar(8), endParam);
+      let where = `h_date >= @s AND h_date <= @e`;
+      if (productCode) {
+        req.input('pc', sql.VarChar(30), productCode);
+        where += ` AND RTRIM(b_goodCode) = @pc`;
+      }
+      const r = await req.query(`SELECT ISNULL(SUM(h_sumPrice),0) AS sales,
+                ISNULL(SUM(h_offerPrice),0) AS supply,
+                ISNULL(SUM(FeeAmnt),0) AS fee,
+                ISNULL(SUM(b_quantity),0) AS qty
+              FROM ERP_SalesData WITH (NOLOCK)
+              WHERE ${where}`);
+      const row = r.recordset[0] || {};
+      totalSales = Number(row.sales || 0);
+      totalSupply = Number(row.supply || 0);
+      totalFee = Number(row.fee || 0);
+      totalQty = Number(row.qty || 0);
+      result.sources.xerp = 'connected';
+    } catch (e) {
+      result.sources.xerp = 'error';
+      console.error('[cost/breakdown] XERP error:', e.message);
+    }
+
+    // ── bar_shop1: 원재료비 (Cost_Price 기반) ──
+    let materialCost = 0;
+    try {
+      if (productCode) {
+        await withBarShop1Pool(async (bPool) => {
+          const r = await bPool.request()
+            .input('c', sql.VarChar(30), productCode)
+            .query(`SELECT Cost_Price, CardFactory_Price FROM S2_Card WITH (NOLOCK) WHERE RTRIM(Card_Code)=@c`);
+          const card = r.recordset[0];
+          if (card && card.Cost_Price > 0) {
+            materialCost = Number(card.Cost_Price) * totalQty;
+          } else if (card && card.CardFactory_Price > 0) {
+            materialCost = Number(card.CardFactory_Price) * totalQty;
+          }
+          result.sources.bar_shop1 = 'connected';
+        });
+      } else {
+        // 전체 원가: 공급가를 원재료비 추정치로 사용
+        materialCost = totalSupply;
+        result.sources.bar_shop1 = 'estimated';
+      }
+    } catch (e) {
+      materialCost = totalSupply; // fallback
+      result.sources.bar_shop1 = 'error';
+    }
+
+    // ── SQLite: 후공정비 ──
+    let postProcessCost = 0;
+    try {
+      const startDate = startParam.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+      const endDate = endParam.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+      let ppSql = `SELECT COALESCE(SUM(amount),0) AS total FROM post_process_history WHERE date >= ? AND date <= ?`;
+      const ppParams = [startDate, endDate];
+      if (productCode) { ppSql += ` AND product_code = ?`; ppParams.push(productCode); }
+      const ppRow = db.prepare(ppSql).get(...ppParams);
+      postProcessCost = ppRow ? Number(ppRow.total || 0) : 0;
+    } catch (e) {
+      postProcessCost = 0;
+    }
+
+    // ── 구성 분해 ──
+    const otherCost = Math.max(0, totalSales - materialCost - totalFee - postProcessCost);
+    const totalCost = materialCost + totalFee + postProcessCost;
+    result.breakdown = [
+      { name: '원재료비', amount: materialCost, pct: totalCost > 0 ? (materialCost / totalCost * 100).toFixed(1) : '0.0', color: '#3b82f6' },
+      { name: '수수료', amount: totalFee, pct: totalCost > 0 ? (totalFee / totalCost * 100).toFixed(1) : '0.0', color: '#f59e0b' },
+      { name: '후공정비', amount: postProcessCost, pct: totalCost > 0 ? (postProcessCost / totalCost * 100).toFixed(1) : '0.0', color: '#10b981' }
+    ];
+    result.total = totalCost;
+    result.total_sales = totalSales;
+    result.gross_profit = totalSales - totalCost;
+    result.margin_rate = totalSales > 0 ? ((totalSales - totalCost) / totalSales * 100).toFixed(1) : '0.0';
+    result.sources.sqlite = 'connected';
+
+    ok(res, result); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  공지/게시판 API (Notice Board)
+  // ════════════════════════════════════════════════════════════════════
+
+  // ── GET /api/notices ── 공지 목록
+  if (pathname === '/api/notices' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const category = parsed.searchParams.get('category') || '';
+    const page = parseInt(parsed.searchParams.get('page') || '1', 10);
+    const limit = parseInt(parsed.searchParams.get('limit') || '20', 10);
+    const offset = (page - 1) * limit;
+    let where = "status = 'active'";
+    const params = [];
+    if (category) { where += " AND category = ?"; params.push(category); }
+    const total = db.prepare(`SELECT COUNT(*) as cnt FROM notices WHERE ${where}`).get(...params).cnt;
+    const rows = db.prepare(`SELECT * FROM notices WHERE ${where} ORDER BY is_pinned DESC, created_at DESC LIMIT ? OFFSET ?`)
+      .all(...params, limit, offset);
+    // 읽음 여부 추가
+    const reads = db.prepare(`SELECT notice_id FROM notice_reads WHERE user_id = ?`).all(decoded.userId);
+    const readSet = new Set(reads.map(r => r.notice_id));
+    rows.forEach(r => { r.is_read = readSet.has(r.id) ? 1 : 0; });
+    ok(res, { notices: rows, total, page, limit, totalPages: Math.ceil(total / limit) }); return;
+  }
+
+  // ── GET /api/notices/popup ── 활성 팝업 공지 (로그인 시 표시)
+  if (pathname === '/api/notices/popup' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const popups = db.prepare(`SELECT n.* FROM notices n
+      WHERE n.status = 'active' AND n.is_popup = 1
+        AND (n.popup_start IS NULL OR n.popup_start <= ?)
+        AND (n.popup_end IS NULL OR n.popup_end >= ?)
+      ORDER BY n.created_at DESC`).all(now, now);
+    // 사용자가 이미 닫은 팝업 제외
+    const dismissed = db.prepare(`SELECT notice_id FROM notice_reads WHERE user_id = ? AND popup_dismissed = 1`).all(decoded.userId);
+    const dismissedSet = new Set(dismissed.map(r => r.notice_id));
+    const active = popups.filter(p => !dismissedSet.has(p.id));
+    ok(res, { popups: active }); return;
+  }
+
+  // ── POST /api/notices/popup/:id/dismiss ── 팝업 닫기 (오늘 하루 안보기)
+  if (pathname.match(/^\/api\/notices\/popup\/(\d+)\/dismiss$/) && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const noticeId = parseInt(pathname.match(/\/(\d+)\/dismiss/)[1], 10);
+    db.prepare(`INSERT INTO notice_reads (notice_id, user_id, popup_dismissed) VALUES (?, ?, 1)
+      ON CONFLICT(notice_id, user_id) DO UPDATE SET popup_dismissed = 1, read_at = datetime('now','localtime')`)
+      .run(noticeId, decoded.userId);
+    ok(res, { message: '팝업 닫기 완료' }); return;
+  }
+
+  // ── GET /api/notices/:id ── 공지 상세 + 조회수 증가
+  if (pathname.match(/^\/api\/notices\/(\d+)$/) && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
+    const notice = db.prepare("SELECT * FROM notices WHERE id = ?").get(id);
+    if (!notice) { fail(res, 404, '공지를 찾을 수 없습니다'); return; }
+    // 조회수 증가
+    db.prepare("UPDATE notices SET view_count = view_count + 1 WHERE id = ?").run(id);
+    notice.view_count += 1;
+    // 읽음 처리
+    db.prepare(`INSERT INTO notice_reads (notice_id, user_id) VALUES (?, ?)
+      ON CONFLICT(notice_id, user_id) DO UPDATE SET read_at = datetime('now','localtime')`)
+      .run(id, decoded.userId);
+    ok(res, notice); return;
+  }
+
+  // ── POST /api/notices ── 공지 작성 (admin만)
+  if (pathname === '/api/notices' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한 필요'); return; }
+    const body = await readJSON(req);
+    const { title, content, category, is_popup, popup_start, popup_end, is_pinned } = body;
+    if (!title) { fail(res, 400, '제목 필수'); return; }
+    const r = db.prepare(`INSERT INTO notices (title, content, category, is_popup, popup_start, popup_end, is_pinned, author_id, author_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      title, content || '', category || 'notice',
+      is_popup ? 1 : 0, popup_start || null, popup_end || null,
+      is_pinned ? 1 : 0, decoded.userId, decoded.username
+    );
+    ok(res, { id: r.lastInsertRowid, message: '공지 등록 완료' }); return;
+  }
+
+  // ── PUT /api/notices/:id ── 공지 수정 (admin만)
+  if (pathname.match(/^\/api\/notices\/(\d+)$/) && method === 'PUT') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한 필요'); return; }
+    const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
+    const body = await readJSON(req);
+    const { title, content, category, is_popup, popup_start, popup_end, is_pinned, status } = body;
+    db.prepare(`UPDATE notices SET title=COALESCE(?,title), content=COALESCE(?,content),
+      category=COALESCE(?,category), is_popup=?, popup_start=?, popup_end=?,
+      is_pinned=?, status=COALESCE(?,status), updated_at=datetime('now','localtime') WHERE id=?`).run(
+      title || null, content !== undefined ? content : null, category || null,
+      is_popup ? 1 : 0, popup_start || null, popup_end || null,
+      is_pinned ? 1 : 0, status || null, id
+    );
+    ok(res, { message: '공지 수정 완료' }); return;
+  }
+
+  // ── DELETE /api/notices/:id ── 공지 삭제 (soft delete, admin만)
+  if (pathname.match(/^\/api\/notices\/(\d+)$/) && method === 'DELETE') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한 필요'); return; }
+    const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
+    db.prepare("UPDATE notices SET status = 'deleted', updated_at = datetime('now','localtime') WHERE id = ?").run(id);
+    ok(res, { message: '공지 삭제 완료' }); return;
   }
 
   // ════════════════════════════════════════════════════════════════════

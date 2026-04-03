@@ -54,16 +54,27 @@ user = os.getenv('DB_USER')
 password = os.getenv('DB_PASSWORD')
 ```
 
+### DD (wedding) DB 쿼리 - MySQL
+
+```bash
+# DD wedding DB 쿼리 (.env-all에서 접속 정보 로드)
+python3 python/db-query-dd.py "SELECT COUNT(*) FROM orders"
+
+# mysql 직접 접속
+mysql -h $DD_DB_SERVER -P $DD_DB_PORT -u $DD_DB_USER -p"$DD_DB_PASSWORD" wedding
+```
+
 ### Python 의존성
 
 ```
 pymssql
+pymysql
 python-dotenv
 ```
 
 ## .env 파일 형식
 
-`.env` 파일은 이 프로젝트 루트에 위치합니다.
+`.env` 파일은 이 프로젝트 루트에 위치합니다 (MSSQL 서버용).
 
 ```env
 DB_SERVER=<서버주소>
@@ -73,7 +84,29 @@ DB_PASSWORD=<비밀번호>
 DB_NAME=barunson
 ```
 
-> **주의**: `.env` 파일은 Git에 커밋하지 않습니다. `.gitignore`에 포함되어 있습니다.
+`.env-all` 파일에 MSSQL + DD(MySQL) 접속 정보가 통합되어 있습니다.
+
+```env
+# MSSQL (barunson/bar_shop1)
+DB_SERVER=<서버주소>
+DB_PORT=1433
+DB_USER=<사용자명>
+DB_PASSWORD=<비밀번호>
+
+# XERP (MSSQL, 별도 계정)
+XERP_DB_SERVER=<서버주소>
+XERP_DB_PORT=1433
+XERP_DB_USER=<사용자명>
+XERP_DB_PASSWORD=<비밀번호>
+
+# DD wedding (MySQL)
+DD_DB_SERVER=<서버주소>
+DD_DB_PORT=3306
+DD_DB_USER=<사용자명>
+DD_DB_PASSWORD=<비밀번호>
+```
+
+> **주의**: `.env`, `.env-all` 파일은 Git에 커밋하지 않습니다. `.gitignore`에 포함되어 있습니다.
 
 ## 사용 가능한 데이터베이스 (20개)
 
