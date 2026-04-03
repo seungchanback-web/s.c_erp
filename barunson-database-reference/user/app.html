@@ -16234,7 +16234,33 @@ async function loadReport() {
 //  창고관리 (Warehouse Management)
 // ════════════════════════════════════════════════════════════════════
 var _whList = [];
-var _whActiveTab = 'all'; // 'all' 또는 warehouse id
+var _whActiveTab = 'all';
+
+// 토스트 알림 (alert 대체)
+function whToast(msg, type) {
+  var t = document.createElement('div');
+  var bg = type==='error'?'#ef4444':type==='warn'?'#f59e0b':'#059669';
+  t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:12px 24px;border-radius:8px;color:#fff;font-size:14px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:opacity 0.3s;background:'+bg;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 300); }, 2500);
+}
+
+// 커스텀 confirm (confirm 대체)
+function whConfirm(msg) {
+  return new Promise(function(resolve) {
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);text-align:center';
+    box.innerHTML = '<div style="font-size:14px;color:#1e293b;margin-bottom:20px;white-space:pre-line">'+msg+'</div><div style="display:flex;gap:8px;justify-content:center"><button id="_whCfmNo" style="padding:8px 24px;background:#f1f5f9;color:#475569;border:none;border-radius:6px;cursor:pointer;font-size:13px">취소</button><button id="_whCfmYes" style="padding:8px 24px;background:#0f172a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">확인</button></div>';
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    box.querySelector('#_whCfmYes').onclick = function(){ ov.remove(); resolve(true); };
+    box.querySelector('#_whCfmNo').onclick = function(){ ov.remove(); resolve(false); };
+    ov.onclick = function(e){ if(e.target===ov){ ov.remove(); resolve(false); } };
+  });
+}
 
 async function loadWarehousePage() {
   try {
@@ -16295,16 +16321,13 @@ async function loadWarehouseInventory() {
     var data = rj.data || rj;
     var tb = document.getElementById('whInvBody');
     if (!data.length) { tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#94a3b8">데이터 없음</td></tr>'; return; }
-
     var isAll = (_whActiveTab === 'all');
-    // 컬럼 헤더 변경
     var thead = document.querySelector('#whInvTable thead tr');
     if (isAll) {
       thead.innerHTML = '<th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목코드</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목명</th><th style="padding:10px 8px;text-align:right;font-weight:600;color:#475569">전체수량</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">창고별 내역</th><th style="padding:10px 8px;text-align:center;font-weight:600;color:#475569">작업</th>';
     } else {
       thead.innerHTML = '<th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목코드</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목명</th><th style="padding:10px 8px;text-align:right;font-weight:600;color:#475569">수량</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">메모</th><th style="padding:10px 8px;text-align:center;font-weight:600;color:#475569">작업</th>';
     }
-
     var h = '';
     data.forEach(function(row) {
       h += '<tr style="border-bottom:1px solid #f1f5f9">';
@@ -16329,13 +16352,14 @@ async function loadWarehouseInventory() {
 }
 
 async function syncXerpToWarehouse() {
-  if (!confirm('XERP 재고를 본사창고로 동기화합니다. 진행하시겠습니까?')) return;
+  var yes = await whConfirm('XERP 재고를 본사창고로 동기화합니다.\n진행하시겠습니까?');
+  if (!yes) return;
   try {
     var r = await authFetch('/api/warehouses/sync-xerp', { method:'POST' });
     var d = await r.json();
-    if (r.ok) { alert(d.message); loadWarehouseInventory(); }
-    else alert('실패: ' + (d.error||d.message));
-  } catch(e) { alert('동기화 오류: ' + e.message); }
+    if (r.ok) { whToast(d.data ? d.data.message : d.message); loadWarehouseInventory(); }
+    else whToast('실패: ' + (d.error||d.message), 'error');
+  } catch(e) { whToast('동기화 오류: ' + e.message, 'error'); }
 }
 
 function openWhTransferModal(pc, pn) {
@@ -16350,14 +16374,17 @@ function openWhTransferModal(pc, pn) {
   html += '<div><label style="font-size:12px;font-weight:600;color:#475569">수량</label><input id="tfQty" type="number" min="1" value="1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box"></div>';
   html += '<div><label style="font-size:12px;font-weight:600;color:#475569">메모</label><input id="tfMemo" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="선택사항"></div>';
   html += '</div>';
+  html += '<div id="tfResult" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>';
   html += '<div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">';
-  html += '<button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
-  html += '<button class="btn" onclick="doWhTransfer()" style="padding:8px 20px;background:#7c3aed;color:#fff;border-radius:6px">이동 실행</button>';
+  html += '<button class="btn" onclick="closeWhModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
+  html += '<button class="btn" id="tfSubmitBtn" onclick="doWhTransfer()" style="padding:8px 20px;background:#7c3aed;color:#fff;border-radius:6px">이동 실행</button>';
   html += '</div></div>';
   showWhModal('whModal', html);
 }
 
 async function doWhTransfer() {
+  var resultEl = document.getElementById('tfResult');
+  var submitBtn = document.getElementById('tfSubmitBtn');
   var d = {
     from_warehouse: parseInt(document.getElementById('tfFrom').value),
     to_warehouse: parseInt(document.getElementById('tfTo').value),
@@ -16367,14 +16394,24 @@ async function doWhTransfer() {
     operator: currentAuthUser ? currentAuthUser.name : '',
     memo: document.getElementById('tfMemo').value.trim()
   };
-  if (!d.product_code) { alert('품목코드를 입력하세요'); return; }
-  if (d.from_warehouse === d.to_warehouse) { alert('같은 창고로는 이동할 수 없습니다'); return; }
+  if (!d.product_code) { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='품목코드를 입력하세요'; return; }
+  if (d.from_warehouse === d.to_warehouse) { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='같은 창고로는 이동할 수 없습니다'; return; }
+  submitBtn.disabled = true; submitBtn.textContent = '처리 중...';
   try {
     var r = await authFetch('/api/warehouses/transfer', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
     var res = await r.json();
-    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehouseInventory(); }
-    else alert('실패: ' + (res.error||res.message));
-  } catch(e) { alert('오류: ' + e.message); }
+    if (r.ok) {
+      var msg = res.data ? res.data.message : res.message;
+      resultEl.style.display='block'; resultEl.style.background='#f0fdf4'; resultEl.style.color='#16a34a'; resultEl.textContent='✅ ' + msg;
+      setTimeout(function(){ closeWhModal('whModal'); loadWarehouseInventory(); }, 1200);
+    } else {
+      resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='❌ ' + (res.error||res.message);
+      submitBtn.disabled = false; submitBtn.textContent = '이동 실행';
+    }
+  } catch(e) {
+    resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='❌ 오류: ' + e.message;
+    submitBtn.disabled = false; submitBtn.textContent = '이동 실행';
+  }
 }
 
 function openWhAdjustModal(pc, pn) {
@@ -16388,14 +16425,17 @@ function openWhAdjustModal(pc, pn) {
   html += '<div><label style="font-size:12px;font-weight:600;color:#475569">조정 수량 (변경 후)</label><input id="adjQty" type="number" min="0" value="0" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box"></div>';
   html += '<div><label style="font-size:12px;font-weight:600;color:#475569">사유</label><input id="adjReason" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="조정 사유 입력"></div>';
   html += '</div>';
+  html += '<div id="adjResult" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>';
   html += '<div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">';
-  html += '<button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
-  html += '<button class="btn" onclick="doWhAdjust()" style="padding:8px 20px;background:#ea580c;color:#fff;border-radius:6px">조정 실행</button>';
+  html += '<button class="btn" onclick="closeWhModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
+  html += '<button class="btn" id="adjSubmitBtn" onclick="doWhAdjust()" style="padding:8px 20px;background:#ea580c;color:#fff;border-radius:6px">조정 실행</button>';
   html += '</div></div>';
   showWhModal('whModal', html);
 }
 
 async function doWhAdjust() {
+  var resultEl = document.getElementById('adjResult');
+  var submitBtn = document.getElementById('adjSubmitBtn');
   var d = {
     warehouse_id: parseInt(document.getElementById('adjWh').value),
     product_code: document.getElementById('adjCode').value.trim(),
@@ -16404,13 +16444,23 @@ async function doWhAdjust() {
     reason: document.getElementById('adjReason').value.trim(),
     operator: currentAuthUser ? currentAuthUser.name : ''
   };
-  if (!d.product_code) { alert('품목코드를 입력하세요'); return; }
+  if (!d.product_code) { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='품목코드를 입력하세요'; return; }
+  submitBtn.disabled = true; submitBtn.textContent = '처리 중...';
   try {
     var r = await authFetch('/api/warehouses/adjust', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
     var res = await r.json();
-    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehouseInventory(); }
-    else alert('실패: ' + (res.error||res.message));
-  } catch(e) { alert('오류: ' + e.message); }
+    if (r.ok) {
+      var msg = res.data ? res.data.message : res.message;
+      resultEl.style.display='block'; resultEl.style.background='#f0fdf4'; resultEl.style.color='#16a34a'; resultEl.textContent='✅ ' + msg;
+      setTimeout(function(){ closeWhModal('whModal'); loadWarehouseInventory(); }, 1200);
+    } else {
+      resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='❌ ' + (res.error||res.message);
+      submitBtn.disabled = false; submitBtn.textContent = '조정 실행';
+    }
+  } catch(e) {
+    resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='❌ 오류: ' + e.message;
+    submitBtn.disabled = false; submitBtn.textContent = '조정 실행';
+  }
 }
 
 function openWhSettingsModal() {
@@ -16438,9 +16488,10 @@ function openWhSettingsModal() {
   html += '<input id="newWhLoc" placeholder="위치 (선택)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
   html += '<input id="newWhDesc" placeholder="설명 (선택)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
   html += '</div>';
+  html += '<div id="whSettingsResult" style="display:none;margin-top:8px;padding:8px;border-radius:6px;font-size:13px"></div>';
   html += '<button class="btn" onclick="addWarehouse()" style="margin-top:12px;padding:8px 20px;background:#059669;color:#fff;border-radius:6px">추가</button>';
   html += '</div>';
-  html += '<div style="margin-top:16px;text-align:right"><button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">닫기</button></div>';
+  html += '<div style="margin-top:16px;text-align:right"><button class="btn" onclick="closeWhModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">닫기</button></div>';
   html += '</div>';
   showWhModal('whModal', html);
 }
@@ -16452,23 +16503,25 @@ async function addWarehouse() {
     location: document.getElementById('newWhLoc').value.trim(),
     description: document.getElementById('newWhDesc').value.trim()
   };
-  if (!d.code || !d.name) { alert('코드와 이름은 필수입니다'); return; }
+  var resultEl = document.getElementById('whSettingsResult');
+  if (!d.code || !d.name) { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='코드와 이름은 필수입니다'; return; }
   try {
     var r = await authFetch('/api/warehouses', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
     var res = await r.json();
-    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehousePage(); }
-    else alert('실패: ' + (res.error||res.message));
-  } catch(e) { alert('오류: ' + e.message); }
+    if (r.ok) { whToast('창고 등록 완료'); closeWhModal('whModal'); loadWarehousePage(); }
+    else { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='실패: '+(res.error||res.message); }
+  } catch(e) { resultEl.style.display='block'; resultEl.style.background='#fef2f2'; resultEl.style.color='#dc2626'; resultEl.textContent='오류: '+e.message; }
 }
 
 async function deleteWarehouse(id) {
-  if (!confirm('이 창고를 삭제하시겠습니까? 재고가 있으면 삭제할 수 없습니다.')) return;
+  var yes = await whConfirm('이 창고를 삭제하시겠습니까?\n재고가 있으면 삭제할 수 없습니다.');
+  if (!yes) return;
   try {
     var r = await authFetch('/api/warehouses/' + id, { method:'DELETE' });
     var res = await r.json();
-    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehousePage(); }
-    else alert('실패: ' + (res.error||res.message));
-  } catch(e) { alert('오류: ' + e.message); }
+    if (r.ok) { whToast('창고 삭제 완료'); closeWhModal('whModal'); loadWarehousePage(); }
+    else whToast('실패: ' + (res.error||res.message), 'error');
+  } catch(e) { whToast('오류: ' + e.message, 'error'); }
 }
 
 async function loadWhTransfers() {
@@ -16533,7 +16586,7 @@ async function loadWhAdjustments() {
   } catch(e) { console.error(e); }
 }
 
-// 범용 모달 표시 (whModal)
+// 창고 모달
 function showWhModal(id, html) {
   var existing = document.getElementById(id);
   if (existing) existing.remove();
