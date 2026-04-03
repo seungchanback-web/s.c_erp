@@ -1292,9 +1292,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT (datetime('now','localtime')),
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 )`);
-// google_id, profile_picture 컬럼 마이그레이션
+// google_id, profile_picture, permissions 컬럼 마이그레이션
 try { db.exec("ALTER TABLE users ADD COLUMN google_id TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE users ADD COLUMN profile_picture TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE vendors ADD COLUMN email_cc TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE product_post_vendor ADD COLUMN step_order INTEGER DEFAULT 1"); } catch {}
 try { db.exec("ALTER TABLE po_header ADD COLUMN process_step INTEGER DEFAULT 0"); } catch {}
@@ -1639,22 +1640,62 @@ function logError(level, message, stack, url, method, userId) {
   } catch (e) { console.error('에러 로그 기록 실패:', e.message); }
 }
 
-// 역할 권한 맵
+// 전체 페이지 목록 (관리자 권한 UI용)
+const ALL_PAGES = [
+  { id: 'dashboard', name: '홈', group: '기본' },
+  { id: 'inventory', name: '재고현황', group: '재고' },
+  { id: 'shipments', name: '출고현황', group: '재고' },
+  { id: 'closing', name: '마감현황', group: '재고' },
+  { id: 'report', name: '보고서', group: '재고' },
+  { id: 'auto-order', name: '자동발주', group: '발주' },
+  { id: 'create-po', name: '발주생성', group: '발주' },
+  { id: 'po-list', name: '발주현황', group: '발주' },
+  { id: 'po-mgmt', name: '발주서 관리', group: '발주' },
+  { id: 'china-shipment', name: '중국선적', group: '발주' },
+  { id: 'delivery-schedule', name: '입고일정', group: '입고' },
+  { id: 'receipts', name: '입고관리', group: '입고' },
+  { id: 'os-register', name: 'OS등록', group: '입고' },
+  { id: 'production-req', name: '생산요청', group: '생산' },
+  { id: 'production-stock', name: '생산재고', group: '생산' },
+  { id: 'mrp', name: 'MRP', group: '생산' },
+  { id: 'tasks', name: '업무관리', group: '업무' },
+  { id: 'meeting-log', name: '미팅일지', group: '업무' },
+  { id: 'invoices', name: '거래명세서', group: '관리' },
+  { id: 'mat-purchase', name: '원재료 매입', group: '관리' },
+  { id: 'notes', name: '거래처 관리', group: '관리' },
+  { id: 'product-mgmt', name: '품목관리', group: '관리' },
+  { id: 'post-process', name: '후공정 단가', group: '관리' },
+  { id: 'defects', name: '불량관리', group: '관리' },
+  { id: 'analytics', name: '대시보드', group: '관리' },
+  { id: 'user-mgmt', name: '사용자 관리', group: '관리' },
+];
+
+// 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
 const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
   purchase: ['dashboard', 'inventory', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
-    'delivery-schedule', 'receipts', 'invoices', 'vendors', 'product-mgmt', 'notes', 'mrp', 'post-process', 'defects'],
-  production: ['dashboard', 'inventory', 'shipments', 'production-req', 'mrp', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock'],
+    'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'mrp', 'post-process', 'defects',
+    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log'],
+  production: ['dashboard', 'inventory', 'shipments', 'production-req', 'mrp', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
   viewer: ['dashboard', 'inventory', 'shipments', 'po-list', 'notes'],
 };
 
-function hasPermission(role, page) {
+function hasPermission(role, page, userPermissions) {
   if (!role) return false;
+  // admin은 항상 전체 권한
+  if (role === 'admin') return true;
+  // 사용자별 개별 permissions가 있으면 그것 사용
+  if (userPermissions && userPermissions.length > 0) {
+    return userPermissions.includes(page);
+  }
+  // 없으면 역할 기본 권한
   const perms = ROLE_PERMISSIONS[role];
   if (!perms) return false;
-  if (perms.includes('*')) return true;
   return perms.includes(page);
 }
+
+// GET /api/auth/pages — 전체 페이지 목록 (관리자 권한 UI용)
+// (handleRequest 내에서 처리)
 
 // ── DB 자동 백업 ──────────────────────────────────────────────────
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
@@ -1999,9 +2040,17 @@ async function handleRequest(req, res) {
     const token = extractToken(req);
     const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
-    const user = db.prepare("SELECT user_id, username, display_name, role, email, last_login FROM users WHERE user_id = ?").get(decoded.userId);
+    const user = db.prepare("SELECT user_id, username, display_name, role, email, permissions, last_login FROM users WHERE user_id = ?").get(decoded.userId);
     if (!user) { fail(res, 401, '사용자를 찾을 수 없습니다'); return; }
-    ok(res, { user, permissions: ROLE_PERMISSIONS[user.role] || [] });
+    const userPerms = user.permissions ? JSON.parse(user.permissions) : [];
+    const effectivePerms = user.role === 'admin' ? ['*'] : (userPerms.length > 0 ? userPerms : (ROLE_PERMISSIONS[user.role] || []));
+    ok(res, { user: { ...user, permissions: undefined }, permissions: effectivePerms });
+    return;
+  }
+
+  // GET /api/auth/pages — 전체 페이지 목록 (관리자 권한 UI용)
+  if (pathname === '/api/auth/pages' && method === 'GET') {
+    ok(res, ALL_PAGES);
     return;
   }
 
@@ -2027,7 +2076,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req);
     const decoded = token ? verifyToken(token) : null;
     if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
-    const users = db.prepare("SELECT user_id, username, display_name, role, email, is_active, last_login, created_at FROM users ORDER BY user_id").all();
+    const users = db.prepare("SELECT user_id, username, display_name, role, email, permissions, is_active, last_login, created_at FROM users ORDER BY user_id").all();
     ok(res, users);
     return;
   }
@@ -2064,6 +2113,7 @@ async function handleRequest(req, res) {
     if (body.email !== undefined) { sets.push('email=?'); params.push(body.email); }
     if (body.is_active !== undefined) { sets.push('is_active=?'); params.push(body.is_active ? 1 : 0); }
     if (body.password) { sets.push('password_hash=?'); params.push(bcrypt.hashSync(body.password, 10)); }
+    if (body.permissions !== undefined) { sets.push('permissions=?'); params.push(JSON.stringify(body.permissions)); }
     if (sets.length === 0) { fail(res, 400, '변경할 항목이 없습니다'); return; }
     sets.push("updated_at=datetime('now','localtime')");
     params.push(uid);

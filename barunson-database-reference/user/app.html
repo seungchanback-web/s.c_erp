@@ -1359,7 +1359,7 @@ function toggleMegaCat(cat) {
   d.items.forEach(function(it, idx) {
     if (idx > 0) h += '<div class="mm-divider"></div>';
     var oc = it.clickOrigin ? "showPage('"+it.page+"',{origin:'"+it.clickOrigin+"'});closeMegaMenu()" : "showPage('"+it.page+"');closeMegaMenu()";
-    h += '<div class="mm-item" onclick="'+oc+'">';
+    h += '<div class="mm-item" data-page="'+it.page+'" onclick="'+oc+'">';
     h += '<div class="mm-item-icon" style="background:'+it.bg+';color:'+it.fg+'">'+it.icon+'</div>';
     h += '<div style="flex:1;min-width:0"><div class="mm-name">'+it.name+'</div><div class="mm-desc">'+it.desc+'</div></div>';
     if (it.origins) {
@@ -1376,6 +1376,14 @@ function toggleMegaCat(cat) {
   });
   var menu = document.getElementById('megaMenu');
   menu.innerHTML = h;
+  // 권한 기반 메뉴 필터링
+  if (typeof canAccess === 'function') {
+    menu.querySelectorAll('[data-page]').forEach(function(el) {
+      var p = el.getAttribute('data-page');
+      if (p === 'user-mgmt') { el.style.display = (currentAuthUser && currentAuthUser.role === 'admin') ? '' : 'none'; }
+      else { el.style.display = canAccess(p) ? '' : 'none'; }
+    });
+  }
   // Position dropdown under the clicked tab
   var tab = document.querySelector('.topbar-tab[data-cat="'+cat+'"]');
   if (tab) {
@@ -1461,16 +1469,16 @@ function closeMegaMenu() {
     <!-- 재고 -->
     <div class="hm-card">
       <div class="hm-card-title">재고</div>
-      <div class="hm-item" onclick="showPage('inventory')">
+      <div class="hm-item" data-page="inventory" onclick="showPage('inventory')">
         <div class="hm-icon" style="background:#fef2f2;color:#ef4444">📦</div>
         <div><div class="hm-name">재고현황</div><div class="hm-desc">XERP 실시간 재고</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#fef2f2;color:#ef4444" id="qmInventory">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('shipments')">
+      <div class="hm-item" data-page="shipments" onclick="showPage('shipments')">
         <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🚚</div>
         <div><div class="hm-name">출고현황</div><div class="hm-desc">SO/MO/SI/MI 조회</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('closing')">
+      <div class="hm-item" data-page="closing" onclick="showPage('closing')">
         <div class="hm-icon" style="background:#f0f9ff;color:#0284c7">📑</div>
         <div><div class="hm-name">마감현황</div><div class="hm-desc">월별 매입 마감 보고</div></div>
       </div>
@@ -1479,7 +1487,7 @@ function closeMegaMenu() {
     <!-- 발주 -->
     <div class="hm-card">
       <div class="hm-card-title">발주</div>
-      <div class="hm-item" onclick="showPage('auto-order')">
+      <div class="hm-item" data-page="auto-order" onclick="showPage('auto-order')">
         <div class="hm-icon" style="background:#eef2ff;color:#6366f1">🔄</div>
         <div><div class="hm-name">자동발주</div><div class="hm-desc">전략발주 + 단가 최적화</div></div>
         <div class="hm-right"><div class="hm-origins">
@@ -1487,7 +1495,7 @@ function closeMegaMenu() {
           <span class="hm-origin hm-o-gift" onclick="event.stopPropagation();showPage('auto-order',{origin:'더기프트'})">Gift</span>
         </div></div>
       </div>
-      <div class="hm-item" onclick="showPage('create-po')">
+      <div class="hm-item" data-page="create-po" onclick="showPage('create-po')">
         <div class="hm-icon" style="background:#eff6ff;color:#2563eb">📝</div>
         <div><div class="hm-name">발주생성</div><div class="hm-desc">수동 발주 + 엑셀</div></div>
         <div class="hm-right"><div class="hm-origins">
@@ -1496,17 +1504,17 @@ function closeMegaMenu() {
           <span class="hm-origin hm-o-gift" onclick="event.stopPropagation();showPage('create-po',{origin:'더기프트'})">Gift</span>
         </div></div>
       </div>
-      <div class="hm-item" onclick="showPage('po-list')">
+      <div class="hm-item" data-page="po-list" onclick="showPage('po-list')">
         <div class="hm-icon" style="background:#f0fdf4;color:#16a34a">📋</div>
         <div><div class="hm-name">발주현황</div><div class="hm-desc">PO 상태 관리</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#f0fdf4;color:#16a34a" id="qmPOList">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('po-mgmt')">
+      <div class="hm-item" data-page="po-mgmt" onclick="showPage('po-mgmt')">
         <div class="hm-icon" style="background:#f5f3ff;color:#7c3aed">📄</div>
         <div><div class="hm-name">발주서 관리</div><div class="hm-desc">발주서 출력 + 이력</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#f5f3ff;color:#7c3aed" id="qmPOMgmt">0건</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('china-shipment',{origin:'중국'})">
+      <div class="hm-item" data-page="china-shipment" onclick="showPage('china-shipment',{origin:'중국'})">
         <div class="hm-icon" style="background:#fef2f2;color:#dc2626">🚢</div>
         <div><div class="hm-name">중국선적</div><div class="hm-desc">交期表 + BL추적</div></div>
       </div>
@@ -1515,7 +1523,7 @@ function closeMegaMenu() {
     <!-- 입고 -->
     <div class="hm-card">
       <div class="hm-card-title">입고</div>
-      <div class="hm-item" onclick="showPage('delivery-schedule')">
+      <div class="hm-item" data-page="delivery-schedule" onclick="showPage('delivery-schedule')">
         <div class="hm-icon" style="background:#ecfdf5;color:#0d9488">📅</div>
         <div><div class="hm-name">입고일정</div><div class="hm-desc">완료 기준 입고 예정</div></div>
         <div class="hm-right"><div class="hm-origins">
@@ -1524,7 +1532,7 @@ function closeMegaMenu() {
           <span class="hm-origin hm-o-gift" onclick="event.stopPropagation();showPage('delivery-schedule',{origin:'더기프트'})">Gift</span>
         </div></div>
       </div>
-      <div class="hm-item" onclick="showPage('receipts')">
+      <div class="hm-item" data-page="receipts" onclick="showPage('receipts')">
         <div class="hm-icon" style="background:#f0fdf4;color:#059669">📥</div>
         <div><div class="hm-name">입고관리</div><div class="hm-desc">수령 처리 + 불량 기록</div></div>
         <div class="hm-right"><div class="hm-origins">
@@ -1533,7 +1541,7 @@ function closeMegaMenu() {
           <span class="hm-origin hm-o-gift" onclick="event.stopPropagation();showPage('receipts',{origin:'더기프트'})">Gift</span>
         </div></div>
       </div>
-      <div class="hm-item" onclick="showPage('os-register')">
+      <div class="hm-item" data-page="os-register" onclick="showPage('os-register')">
         <div class="hm-icon" style="background:#f5f3ff;color:#8b5cf6">🏷</div>
         <div><div class="hm-name">OS등록</div><div class="hm-desc">외주 생산 등록</div></div>
       </div>
@@ -1542,15 +1550,15 @@ function closeMegaMenu() {
     <!-- 생산 -->
     <div class="hm-card">
       <div class="hm-card-title">생산</div>
-      <div class="hm-item" onclick="showPage('production-req')">
+      <div class="hm-item" data-page="production-req" onclick="showPage('production-req')">
         <div class="hm-icon" style="background:#fef3c7;color:#d97706">🎬</div>
         <div><div class="hm-name">생산요청</div><div class="hm-desc">생산 워크플로우</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('production-stock')">
+      <div class="hm-item" data-page="production-stock" onclick="showPage('production-stock')">
         <div class="hm-icon" style="background:#fce7f3;color:#db2777">🎁</div>
         <div><div class="hm-name">생산재고</div><div class="hm-desc">더기프트 세트 재고</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('mrp')">
+      <div class="hm-item" data-page="mrp" onclick="showPage('mrp')">
         <div class="hm-icon" style="background:#e0e7ff;color:#4338ca">🏭</div>
         <div><div class="hm-name">MRP</div><div class="hm-desc">자재소요 + 생산계획</div></div>
       </div>
@@ -1559,12 +1567,12 @@ function closeMegaMenu() {
     <!-- 업무 -->
     <div class="hm-card">
       <div class="hm-card-title">업무</div>
-      <div class="hm-item" onclick="showPage('tasks')">
+      <div class="hm-item" data-page="tasks" onclick="showPage('tasks')">
         <div class="hm-icon" style="background:#ecfdf5;color:#10b981">✅</div>
         <div><div class="hm-name">업무관리</div><div class="hm-desc">등록 + 추적 + 협업</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#ecfdf5;color:#10b981" id="qmTaskTodo">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('notes')">
+      <div class="hm-item" data-page="notes" onclick="showPage('notes')">
         <div class="hm-icon" style="background:#fef9c3;color:#a16207">📓</div>
         <div><div class="hm-name">미팅일지</div><div class="hm-desc">회의 기록 + 공유</div></div>
       </div>
@@ -1573,38 +1581,38 @@ function closeMegaMenu() {
     <!-- 관리 -->
     <div class="hm-card">
       <div class="hm-card-title">관리</div>
-      <div class="hm-item" onclick="showPage('invoices')">
+      <div class="hm-item" data-page="invoices" onclick="showPage('invoices')">
         <div class="hm-icon" style="background:#f5f5f4;color:#78716c">🧾</div>
         <div><div class="hm-name">거래명세서</div><div class="hm-desc">월별 명세서</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('mat-purchase')">
+      <div class="hm-item" data-page="mat-purchase" onclick="showPage('mat-purchase')">
         <div class="hm-icon" style="background:#fff1f2;color:#e11d48">📊</div>
         <div><div class="hm-name">원재료 매입</div><div class="hm-desc">매입 현황 분석</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('vendors')">
+      <div class="hm-item" data-page="vendors" onclick="showPage('vendors')">
         <div class="hm-icon" style="background:#fef3c7;color:#b45309">👥</div>
         <div><div class="hm-name">거래처 관리</div><div class="hm-desc">업체 정보 + 포털</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#fef3c7;color:#b45309" id="qmVendors">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('product-mgmt')">
+      <div class="hm-item" data-page="product-mgmt" onclick="showPage('product-mgmt')">
         <div class="hm-icon" style="background:#f5f3ff;color:#7c3aed">📦</div>
         <div><div class="hm-name">품목관리</div><div class="hm-desc">마스터 + BOM</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#f5f3ff;color:#7c3aed" id="qmProducts">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('post-process')">
+      <div class="hm-item" data-page="post-process" onclick="showPage('post-process')">
         <div class="hm-icon" style="background:#fff7ed;color:#c2410c">💰</div>
         <div><div class="hm-name">후공정 단가</div><div class="hm-desc">단가 관리</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('defects')">
+      <div class="hm-item" data-page="defects" onclick="showPage('defects')">
         <div class="hm-icon" style="background:#fef2f2;color:#ef4444">🔍</div>
         <div><div class="hm-name">불량관리</div><div class="hm-desc">접수 + 대응</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#fef2f2;color:#ef4444" id="qmDefects">-</span></div>
       </div>
-      <div class="hm-item" onclick="showPage('analytics')">
+      <div class="hm-item" data-page="analytics" onclick="showPage('analytics')">
         <div class="hm-icon" style="background:#eff6ff;color:#2563eb">📊</div>
         <div><div class="hm-name">대시보드</div><div class="hm-desc">현황 집계 + 통계</div></div>
       </div>
-      <div class="hm-item" onclick="showPage('settings')">
+      <div class="hm-item" data-page="settings" onclick="showPage('settings')">
         <div class="hm-icon" style="background:#f1f5f9;color:#64748b">⚙</div>
         <div><div class="hm-name">설정</div><div class="hm-desc">시스템 설정</div></div>
       </div>
@@ -4550,6 +4558,11 @@ async function doLogin() {
       authToken = d.data.token;
       currentAuthUser = d.data.user;
       localStorage.setItem('authToken', authToken);
+      // permissions 로드
+      try {
+        var meResp = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + authToken } }).then(rr=>rr.json());
+        if (meResp.ok && meResp.data) userPermissions = meResp.data.permissions || [];
+      } catch(e) {}
       showApp();
     } else {
       errEl.textContent = d.error || '로그인 실패';
@@ -4574,8 +4587,8 @@ function doLogout() {
 
 function showLoginScreen() {
   document.getElementById('loginOverlay').style.display = 'flex';
-  document.querySelector('.sidebar').style.display = 'none';
-  document.querySelector('.main').style.display = 'none';
+  var tb = document.querySelector('.topbar'); if(tb) tb.style.display = 'none';
+  var mn = document.querySelector('.main'); if(mn) mn.style.display = 'none';
   document.getElementById('loginError').style.display = 'none';
   // 인증 모드에 따라 Google 또는 ID/PW 표시
   if (authConfig && authConfig.auth_mode === 'google') {
@@ -4593,10 +4606,17 @@ function showLoginScreen() {
   }
 }
 
+function canAccess(pageId) {
+  if (!currentAuthUser) return false;
+  if (currentAuthUser.role === 'admin') return true;
+  if (userPermissions.includes('*')) return true;
+  return userPermissions.includes(pageId);
+}
+
 function showApp() {
   document.getElementById('loginOverlay').style.display = 'none';
-  document.querySelector('.sidebar').style.display = 'flex';
-  document.querySelector('.main').style.display = 'block';
+  var tb = document.querySelector('.topbar'); if(tb) tb.style.display = '';
+  var mn = document.querySelector('.main'); if(mn) mn.style.display = '';
   // 사용자 정보 표시
   if (currentAuthUser) {
     document.getElementById('userInfoBar').style.display = 'block';
@@ -4611,13 +4631,30 @@ function showApp() {
     } else {
       nameEl.textContent = currentAuthUser.display_name || currentAuthUser.username;
     }
-    // admin만 사용자관리 메뉴 표시
-    const navUm = document.getElementById('navUserMgmt');
-    if (navUm) navUm.style.display = currentAuthUser.role === 'admin' ? 'flex' : 'none';
+    // 권한 기반 네비게이션 메뉴 필터링
+    filterNavByPermissions();
   }
+  // 대시보드 로드
+  showPage('dashboard');
+}
+
+function filterNavByPermissions() {
+  // 사이드바 + 홈 메뉴카드의 data-page 속성으로 필터링
+  var navItems = document.querySelectorAll('[data-page]');
+  navItems.forEach(function(el) {
+    var pageId = el.getAttribute('data-page');
+    if (!pageId) return;
+    // user-mgmt는 admin만
+    if (pageId === 'user-mgmt') {
+      el.style.display = (currentAuthUser && currentAuthUser.role === 'admin') ? '' : 'none';
+      return;
+    }
+    el.style.display = canAccess(pageId) ? '' : 'none';
+  });
 }
 
 // 앱 초기화: 인증 설정 로드 → 토큰 검증 → 진입
+var userPermissions = []; // 현재 사용자 접근 가능 페이지 목록
 async function initAuth() {
   // 인증 설정 로드 (Google Client ID 등)
   try {
@@ -4631,6 +4668,7 @@ async function initAuth() {
       const d = await r.json();
       if (d.ok && d.data && d.data.user) {
         currentAuthUser = d.data.user;
+        userPermissions = d.data.permissions || [];
         showApp();
         return;
       }
@@ -5498,6 +5536,11 @@ function toggleSidebar() { /* legacy - no-op */ }
 function toggleNavGroup(groupKey) { /* legacy - no-op */ }
 
 function showPage(page, opts){
+  // 권한 체크 (dashboard는 항상 허용)
+  if (page !== 'dashboard' && page !== 'settings' && typeof canAccess === 'function' && !canAccess(page)) {
+    alert('접근 권한이 없습니다. 관리자에게 문의하세요.');
+    return;
+  }
   // Close mega menu
   closeMegaMenu();
   // Origin context 설정
@@ -14346,7 +14389,7 @@ async function loadUserMgmt() {
         <button onclick="showAddUserModal()" style="padding:8px 16px;background:#2F81F7;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit">+ 사용자 추가</button>
       </div>`;
       html += '<table style="width:100%;border-collapse:collapse"><thead><tr>';
-      ['ID', '아이디', '이름', '역할', '이메일', '상태', '최근접속', ''].forEach(h =>
+      ['ID', '아이디', '이름', '역할', '권한', '이메일', '상태', '최근접속', ''].forEach(h =>
         html += `<th style="text-align:left;padding:8px 10px;border-bottom:2px solid #e8e8e6;font-size:12px;font-weight:600;color:#787774">${h}</th>`);
       html += '</tr></thead><tbody>';
       users.forEach(u => {
@@ -14356,6 +14399,7 @@ async function loadUserMgmt() {
           <td style="padding:8px 10px;font-size:13px;font-weight:600">${esc(u.username)}</td>
           <td style="padding:8px 10px;font-size:13px">${esc(u.display_name)}</td>
           <td style="padding:8px 10px"><span style="background:${roleColor}22;color:${roleColor};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">${ROLE_LABELS[u.role] || u.role}</span></td>
+          <td style="padding:8px 10px;font-size:12px;color:#787774">${u.role === 'admin' ? '<span style="color:#EF4444;font-weight:600">전체</span>' : (function(){ try{ var p=JSON.parse(u.permissions||'[]'); return p.length > 0 ? p.length+'개 페이지' : '기본'; }catch(e){return '기본';} })()}</td>
           <td style="padding:8px 10px;font-size:13px;color:#787774">${esc(u.email || '-')}</td>
           <td style="padding:8px 10px"><span style="color:${u.is_active ? '#27AE60' : '#EB5757'};font-size:12px;font-weight:600">${u.is_active ? '활성' : '비활성'}</span></td>
           <td style="padding:8px 10px;font-size:12px;color:#787774">${u.last_login || '-'}</td>
@@ -14470,14 +14514,42 @@ async function submitNewUser() {
   } catch (e) { alert('오류: ' + e.message); }
 }
 
-function editUserRow(id, username, name, role, email, active) {
+async function editUserRow(id, username, name, role, email, active) {
+  // 페이지 목록 + 현재 사용자 권한 로드
+  var pagesResp = await authFetch('/api/auth/pages').then(r=>r.json()).catch(()=>({data:[]}));
+  var allPages = pagesResp.data || pagesResp || [];
+  var userResp = await authFetch('/api/auth/users').then(r=>r.json()).catch(()=>({data:[]}));
+  var users = userResp.data || [];
+  var targetUser = users.find(u => u.user_id === id);
+  var currentPerms = [];
+  if (targetUser && targetUser.permissions) {
+    try { currentPerms = JSON.parse(targetUser.permissions); } catch(e) { currentPerms = []; }
+  }
+
+  // 그룹별 페이지 체크박스 생성
+  var groups = {};
+  allPages.forEach(function(p) { if(!groups[p.group]) groups[p.group]=[]; groups[p.group].push(p); });
+  var permHtml = '';
+  Object.keys(groups).forEach(function(g) {
+    permHtml += '<div style="margin-bottom:6px"><div style="font-size:11px;font-weight:700;color:#787774;margin-bottom:2px">' + g + '</div>';
+    permHtml += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    groups[g].forEach(function(p) {
+      var checked = (role === 'admin' || currentPerms.includes(p.id)) ? 'checked' : '';
+      var disabled = role === 'admin' ? 'disabled' : '';
+      permHtml += '<label style="font-size:12px;display:flex;align-items:center;gap:3px;padding:2px 6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap">'
+        + '<input type="checkbox" class="eu-perm-cb" value="' + p.id + '" ' + checked + ' ' + disabled + ' style="margin:0">'
+        + p.name + '</label>';
+    });
+    permHtml += '</div></div>';
+  });
+
   const html = `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9998;display:flex;align-items:center;justify-content:center" id="userModal" onclick="if(event.target===this)this.remove()">
-    <div style="background:#fff;border-radius:12px;padding:28px;width:400px;box-shadow:0 4px 24px rgba(0,0,0,0.15)">
+    <div style="background:#fff;border-radius:12px;padding:28px;width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,0.15)">
       <h3 style="margin-bottom:16px;font-size:16px">사용자 수정: ${esc(username)}</h3>
       <div style="display:grid;gap:10px">
         <input id="euName" value="${esc(name)}" placeholder="이름" style="padding:8px 12px;border:1px solid #e8e8e6;border-radius:6px;font-size:13px;font-family:inherit">
         <input id="euEmail" value="${esc(email)}" placeholder="이메일" style="padding:8px 12px;border:1px solid #e8e8e6;border-radius:6px;font-size:13px;font-family:inherit">
-        <select id="euRole" style="padding:8px 12px;border:1px solid #e8e8e6;border-radius:6px;font-size:13px;font-family:inherit">
+        <select id="euRole" onchange="togglePermCheckboxes(this.value)" style="padding:8px 12px;border:1px solid #e8e8e6;border-radius:6px;font-size:13px;font-family:inherit">
           <option value="viewer" ${role==='viewer'?'selected':''}>뷰어</option>
           <option value="purchase" ${role==='purchase'?'selected':''}>구매담당</option>
           <option value="production" ${role==='production'?'selected':''}>생산담당</option>
@@ -14489,6 +14561,16 @@ function editUserRow(id, username, name, role, email, active) {
         </label>
         <input id="euPass" type="password" placeholder="새 비밀번호 (변경 시만)" style="padding:8px 12px;border:1px solid #e8e8e6;border-radius:6px;font-size:13px;font-family:inherit">
       </div>
+      <div style="margin-top:16px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:#111">페이지 접근 권한</span>
+          <div style="display:flex;gap:6px">
+            <button onclick="document.querySelectorAll('.eu-perm-cb').forEach(c=>{if(!c.disabled)c.checked=true})" style="padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer;font-size:11px">전체선택</button>
+            <button onclick="document.querySelectorAll('.eu-perm-cb').forEach(c=>{if(!c.disabled)c.checked=false})" style="padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer;font-size:11px">전체해제</button>
+          </div>
+        </div>
+        ${permHtml}
+      </div>
       <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
         <button onclick="document.getElementById('userModal').remove()" style="padding:8px 16px;border:1px solid #e8e8e6;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit">취소</button>
         <button onclick="submitEditUser(${id})" style="padding:8px 16px;background:#2F81F7;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit">저장</button>
@@ -14496,6 +14578,15 @@ function editUserRow(id, username, name, role, email, active) {
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function togglePermCheckboxes(role) {
+  var cbs = document.querySelectorAll('.eu-perm-cb');
+  if (role === 'admin') {
+    cbs.forEach(function(c) { c.checked = true; c.disabled = true; });
+  } else {
+    cbs.forEach(function(c) { c.disabled = false; });
+  }
 }
 
 async function submitEditUser(id) {
@@ -14507,6 +14598,14 @@ async function submitEditUser(id) {
   };
   const pass = document.getElementById('euPass').value;
   if (pass) body.password = pass;
+  // 권한 수집
+  if (body.role !== 'admin') {
+    var perms = [];
+    document.querySelectorAll('.eu-perm-cb:checked').forEach(function(c) { perms.push(c.value); });
+    body.permissions = perms;
+  } else {
+    body.permissions = [];
+  }
   try {
     const d = await authFetch(`/api/auth/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
     if (d.ok) {
@@ -14516,13 +14615,9 @@ async function submitEditUser(id) {
   } catch (e) { alert('오류: ' + e.message); }
 }
 
-// Init: check vendor portal mode, then load
+// Init: check vendor portal mode, then auth
 if(!initVendorPortal()){
-  // 로그인 없이 바로 홈 표시
-  document.getElementById('loginOverlay').style.display = 'none';
-  document.querySelector('.sidebar').style.display = 'flex';
-  document.querySelector('.main').style.display = 'block';
-  loadDashboard();
+  // initAuth()가 페이지 맨 끝에서 호출됨 (로그인 체크 후 showApp → loadDashboard)
 }
 // ═══════════════════════════════════════════════════════════════════
 //  생산재고 (Production Stock / Gift Set)
@@ -16009,6 +16104,9 @@ async function loadReport() {
     c.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">오류: ' + e.message + '</div>';
   }
 }
+
+// ===== 앱 시작: 인증 체크 =====
+initAuth();
 </script>
 </body>
 </html>
