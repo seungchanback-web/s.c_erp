@@ -1344,7 +1344,9 @@ var _megaData = {
       {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출 현황',page:'sales-barun'},
       {icon:'💳',bg:'#fce7f3',fg:'#db2777',name:'DD매출',desc:'디얼디어 매출 현황',page:'sales-dd'},
       {icon:'🎁',bg:'#ecfdf5',fg:'#059669',name:'더기프트매출',desc:'더기프트 답례품 매출',page:'sales-gift'},
-      {icon:'📊',bg:'#fef2f2',fg:'#ef4444',name:'원가관리',desc:'원가/마진 분석',page:'cost-mgmt'}
+      {icon:'📊',bg:'#fef2f2',fg:'#ef4444',name:'원가관리',desc:'원가/마진 분석',page:'cost-mgmt'},
+      {icon:'🛒',bg:'#f5f3ff',fg:'#7c3aed',name:'고객주문',desc:'주문 조회/현황',page:'customer-orders'},
+      {icon:'🚛',bg:'#ecfdf5',fg:'#059669',name:'배송추적',desc:'배송 현황/추적',page:'shipping'}
     ]
   },
   mgmt: {
@@ -1360,7 +1362,9 @@ var _megaData = {
       {icon:'📊',bg:'#eff6ff',fg:'#2563eb',name:'대시보드',desc:'현황 집계 + 통계',page:'analytics'},
       {icon:'📄',bg:'#ecfdf5',fg:'#047857',name:'보고서',desc:'단가 협상 + 분석 보고',page:'report'},
       {icon:'⚙',bg:'#f1f5f9',fg:'#64748b',name:'설정',desc:'시스템 설정',page:'settings'},
-      {icon:'👤',bg:'#fef3c7',fg:'#92400e',name:'사용자 관리',desc:'권한 + 계정 관리',page:'user-mgmt'}
+      {icon:'👤',bg:'#fef3c7',fg:'#92400e',name:'사용자 관리',desc:'권한 + 계정 관리',page:'user-mgmt'},
+      {icon:'🔒',bg:'#f0f9ff',fg:'#0369a1',name:'감사로그',desc:'사용자 활동 추적',page:'audit-log'},
+      {icon:'📈',bg:'#ecfdf5',fg:'#059669',name:'경영대시보드',desc:'매출/마진/KPI 종합',page:'exec-dashboard'}
     ]
   }
 };
@@ -4613,6 +4617,131 @@ function closeMegaMenu() {
   </div>
 </div>
 
+<!-- ========== AUDIT-LOG (감사로그) PAGE ========== -->
+<div class="page" id="page-audit-log" style="background:#fff;color:#111">
+  <!-- KPI 카드 -->
+  <div id="auditKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px"></div>
+  <!-- 탭 -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="audit-tab active" data-tab="timeline" onclick="switchAuditTab('timeline')" style="background:#0f172a;color:#fff;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">타임라인</button>
+    <button class="audit-tab" data-tab="stats" onclick="switchAuditTab('stats')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">통계</button>
+    <button class="audit-tab" data-tab="errors" onclick="switchAuditTab('errors')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">에러로그</button>
+  </div>
+  <!-- 필터 툴바 -->
+  <div id="auditToolbar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <select id="auditUserFilter" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+      <option value="">전체 사용자</option>
+    </select>
+    <select id="auditActionFilter" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+      <option value="">전체 액션</option>
+    </select>
+    <select id="auditResourceFilter" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+      <option value="">전체 대상</option>
+    </select>
+    <input type="date" id="auditStartDate" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <span style="color:#94a3b8">~</span>
+    <input type="date" id="auditEndDate" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <input type="text" id="auditSearch" placeholder="검색..." style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:140px">
+    <button onclick="loadAuditTimeline()" style="background:#0f172a;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">조회</button>
+    <button onclick="exportAuditExcel()" style="background:#059669;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">엑셀</button>
+  </div>
+  <!-- 탭 콘텐츠 -->
+  <div id="auditContent" style="min-height:400px"></div>
+  <div id="auditPagination" style="display:flex;justify-content:center;gap:4px;margin-top:12px"></div>
+</div>
+
+<!-- ========== EXEC-DASHBOARD (경영대시보드) PAGE ========== -->
+<div class="page" id="page-exec-dashboard" style="background:#fff;color:#111">
+  <!-- 소스 상태바 -->
+  <div id="execSourceBar" style="display:flex;gap:8px;margin-bottom:12px"></div>
+  <!-- KPI 카드 -->
+  <div id="execKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px"></div>
+  <!-- 차트 2열 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">월별 매출/마진 추이</h4>
+      <div style="height:280px"><canvas id="execTrendChart"></canvas></div>
+    </div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">채널별 매출 비중</h4>
+      <div style="height:280px"><canvas id="execChannelChart"></canvas></div>
+    </div>
+  </div>
+  <!-- 하단 정보 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">업무 현황</h4>
+      <div id="execTasks"></div>
+    </div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">채널별 매출 상세</h4>
+      <div id="execChannelTable"></div>
+    </div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">주요 지표</h4>
+      <div id="execMetrics"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== CUSTOMER-ORDERS (고객주문) PAGE ========== -->
+<div class="page" id="page-customer-orders" style="background:#fff;color:#111">
+  <div id="coSourceBar" style="display:flex;gap:8px;margin-bottom:12px"></div>
+  <div id="coKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <!-- 탭 -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="co-tab active" data-tab="overview" onclick="switchCoTab('overview')" style="background:#0f172a;color:#fff;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">종합현황</button>
+    <button class="co-tab" data-tab="xerp" onclick="switchCoTab('xerp')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">XERP 주문</button>
+    <button class="co-tab" data-tab="barshop" onclick="switchCoTab('barshop')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">바른손 주문</button>
+    <button class="co-tab" data-tab="trend" onclick="switchCoTab('trend')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">주문추이</button>
+  </div>
+  <!-- 필터 -->
+  <div id="coToolbar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <input type="date" id="coStart" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <span style="color:#94a3b8">~</span>
+    <input type="date" id="coEnd" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <select id="coChannel" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+      <option value="">전체 채널</option>
+      <option value="SB">쇼핑몰B</option><option value="BR">바른손</option><option value="ST">스토어</option>
+      <option value="SS">쇼핑몰S</option><option value="SA">쇼핑몰A</option><option value="OB">기타B</option>
+    </select>
+    <input type="text" id="coSearch" placeholder="주문번호/상품코드" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:150px">
+    <button onclick="loadCoTabData()" style="background:#0f172a;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">조회</button>
+    <button onclick="exportCoExcel()" style="background:#059669;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">엑셀</button>
+  </div>
+  <div id="coContent" style="min-height:400px"></div>
+  <div id="coPagination" style="display:flex;justify-content:center;gap:4px;margin-top:12px"></div>
+</div>
+
+<!-- ========== SHIPPING (배송추적) PAGE ========== -->
+<div class="page" id="page-shipping" style="background:#fff;color:#111">
+  <div id="shipSourceBar" style="display:flex;gap:8px;margin-bottom:12px"></div>
+  <div id="shipKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <!-- 파이프라인 -->
+  <div id="shipPipeline" style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap"></div>
+  <!-- 탭 -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="ship-tab active" data-tab="overview" onclick="switchShipTab('overview')" style="background:#0f172a;color:#fff;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">종합현황</button>
+    <button class="ship-tab" data-tab="bar-list" onclick="switchShipTab('bar-list')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">바른손 배송</button>
+    <button class="ship-tab" data-tab="dd-list" onclick="switchShipTab('dd-list')" style="background:#f1f5f9;color:#334155;border-radius:6px;padding:5px 14px;font-size:12px;border:none;cursor:pointer">DD 배송</button>
+  </div>
+  <!-- 필터 -->
+  <div id="shipToolbar" style="display:none;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <input type="date" id="shipStart" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <span style="color:#94a3b8">~</span>
+    <input type="date" id="shipEnd" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+    <select id="shipStatus" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
+      <option value="">전체 상태</option>
+      <option value="1">접수</option><option value="2">결제완료</option><option value="3">제작중</option>
+      <option value="4">제작완료</option><option value="5">발송</option><option value="6">배송완료</option>
+    </select>
+    <input type="text" id="shipSearch" placeholder="주문번호/수령인" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:150px">
+    <button onclick="loadShipTabData()" style="background:#0f172a;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">조회</button>
+    <button onclick="exportShipExcel()" style="background:#059669;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer">엑셀</button>
+  </div>
+  <div id="shipContent" style="min-height:400px"></div>
+</div>
+
 <!-- ========== COST-MGMT (원가관리) PAGE ========== -->
 <div class="page" id="page-cost-mgmt" style="background:#fff;color:#111">
   <div id="costSourceBar" style="display:flex;gap:8px;margin-bottom:12px"></div>
@@ -5874,8 +6003,12 @@ const pageTitles={
   'sales-barun':'바른손 매출현황',
   'sales-dd':'DD 매출현황',
   'sales-gift':'더기프트 매출현황',
-  'cost-mgmt':'원가���리',
-  'board':'공지/게시��'
+  'cost-mgmt':'원가관리',
+  'board':'공지/게시판',
+  'audit-log':'감사로그',
+  'exec-dashboard':'경영대시보드',
+  'customer-orders':'고객주문',
+  'shipping':'배송추적'
 };
 
 function toggleSidebar() { /* legacy - no-op */ }
@@ -5906,7 +6039,7 @@ function showPage(page, opts){
     'invoices':'mgmt','mat-purchase':'mgmt','vendors':'mgmt','product-mgmt':'mgmt','bom':'mgmt',
     'post-process':'mgmt','defects':'mgmt','report':'mgmt','settings':'mgmt','user-mgmt':'mgmt',
     'sales':'sales','sales-barun':'sales','sales-dd':'sales','sales-gift':'sales','cost-mgmt':'sales',
-    'board':'work'
+    'board':'work','audit-log':'mgmt','exec-dashboard':'mgmt','customer-orders':'sales','shipping':'sales'
   };
   var activeCat = pageCatMap[page] || '';
   document.querySelectorAll('.topbar-tab').forEach(function(t){
@@ -5960,6 +6093,10 @@ function showPage(page, opts){
   if(page==='sales-gift') loadSalesGiftPage();
   if(page==='cost-mgmt') loadCostMgmtPage();
   if(page==='board') loadBoardPage();
+  if(page==='audit-log') loadAuditLogPage();
+  if(page==='exec-dashboard') loadExecDashboard();
+  if(page==='customer-orders') loadCustomerOrders();
+  if(page==='shipping') loadShippingPage();
   if(page==='report') loadReportList();
   if(page==='closing') {
     var cyr = document.getElementById('closingYear');
@@ -17286,6 +17423,843 @@ async function closePopupNotice() {
 
 // 로그인 후 팝업 체크 (기존 initApp에 훅)
 var _origInitApp = typeof initApp === 'function' ? initApp : null;
+
+// ════════════════════════════════════════════════════════════════════
+//  감사로그 (Audit Log)
+// ════════════════════════════════════════════════════════════════════
+var _auditActiveTab = 'timeline';
+var _auditPage = 0;
+var _auditPageSize = 50;
+var _auditCharts = {};
+
+var AUDIT_ACTION_LABELS = {
+  login:'로그인', login_failed:'로그인 실패', google_login:'구글 로그인', google_register:'구글 가입',
+  register:'회원가입', password_change:'비밀번호 변경', user_create:'사용자 생성', user_update:'사용자 수정',
+  google_login_blocked:'구글 차단', inspection_create:'수입검사',
+  task_create:'업무 생성', task_update:'업무 수정', task_delete:'업무 삭제',
+  notice_create:'공지 작성', notice_update:'공지 수정', notice_delete:'공지 삭제',
+  vendor_create:'거래처 등록', vendor_update:'거래처 수정', vendor_delete:'거래처 삭제'
+};
+var AUDIT_ACTION_COLORS = {
+  login:'#22c55e', login_failed:'#ef4444', google_login:'#3b82f6', google_register:'#8b5cf6',
+  register:'#6366f1', password_change:'#f59e0b', user_create:'#0ea5e9', user_update:'#06b6d4',
+  google_login_blocked:'#dc2626', inspection_create:'#14b8a6',
+  task_create:'#10b981', task_update:'#f59e0b', task_delete:'#ef4444',
+  notice_create:'#8b5cf6', notice_update:'#a855f7', notice_delete:'#ef4444',
+  vendor_create:'#059669', vendor_update:'#0d9488', vendor_delete:'#dc2626'
+};
+
+async function loadAuditLogPage() {
+  // 권한 체크 (admin만)
+  if (typeof _currentRole !== 'undefined' && _currentRole !== 'admin') {
+    document.getElementById('auditContent').innerHTML = '<div style="padding:40px;text-align:center;color:#ef4444;font-size:15px">관리자 권한이 필요합니다</div>';
+    return;
+  }
+  _auditPage = 0;
+  // 필터 옵션 로드
+  try {
+    var d = await authFetch('/api/audit-log/actions').then(function(r){return r.json()});
+    var data = d.data || d;
+    var uf = document.getElementById('auditUserFilter');
+    var af = document.getElementById('auditActionFilter');
+    var rf = document.getElementById('auditResourceFilter');
+    uf.innerHTML = '<option value="">전체 사용자</option>';
+    af.innerHTML = '<option value="">전체 액션</option>';
+    rf.innerHTML = '<option value="">전체 대상</option>';
+    (data.users||[]).forEach(function(u){if(u)uf.innerHTML+='<option value="'+esc(u)+'">'+esc(u)+'</option>'});
+    (data.actions||[]).forEach(function(a){af.innerHTML+='<option value="'+esc(a)+'">'+(AUDIT_ACTION_LABELS[a]||esc(a))+'</option>'});
+    (data.resources||[]).forEach(function(r){if(r)rf.innerHTML+='<option value="'+esc(r)+'">'+esc(r)+'</option>'});
+  } catch(e){}
+  // 기본 날짜 (최근 30일)
+  var now = new Date();
+  var s = new Date(now); s.setDate(s.getDate()-30);
+  document.getElementById('auditStartDate').value = s.toISOString().slice(0,10);
+  document.getElementById('auditEndDate').value = now.toISOString().slice(0,10);
+  // KPI 로드
+  loadAuditKpi();
+  // 타임라인 탭 로드
+  switchAuditTab('timeline');
+}
+
+async function loadAuditKpi() {
+  try {
+    var d = await authFetch('/api/audit-log/stats?days=30').then(function(r){return r.json()});
+    var s = d.data || d;
+    var el = document.getElementById('auditKpi');
+    el.innerHTML = [
+      {label:'30일 총 기록',value:fmtN(s.total||0),icon:'📋',color:'#3b82f6'},
+      {label:'활성 사용자',value:fmtN(s.unique_users||0)+'명',icon:'👥',color:'#10b981'},
+      {label:'로그인 실패',value:fmtN(s.login_failed||0)+'건',icon:'🚫',color:'#ef4444'},
+      {label:'최근 1시간',value:fmtN((s.recent_hour||[]).reduce(function(a,b){return a+b.cnt},0))+'건',icon:'⚡',color:'#f59e0b'}
+    ].map(function(k){return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="font-size:20px;margin-bottom:4px">'+k.icon+'</div><div style="font-size:22px;font-weight:700;color:'+k.color+'">'+k.value+'</div><div style="font-size:11px;color:#64748b;margin-top:2px">'+k.label+'</div></div>'}).join('');
+  } catch(e){}
+}
+function fmtN(n){return typeof n==='number'?n.toLocaleString():n;}
+
+function switchAuditTab(tab) {
+  _auditActiveTab = tab;
+  _auditPage = 0;
+  document.querySelectorAll('.audit-tab').forEach(function(t){
+    var isActive = t.dataset.tab === tab;
+    t.style.background = isActive ? '#0f172a' : '#f1f5f9';
+    t.style.color = isActive ? '#fff' : '#334155';
+    if(isActive) t.classList.add('active'); else t.classList.remove('active');
+  });
+  var toolbar = document.getElementById('auditToolbar');
+  toolbar.style.display = tab === 'errors' ? 'none' : (tab === 'stats' ? 'none' : 'flex');
+  if (tab === 'timeline') loadAuditTimeline();
+  else if (tab === 'stats') loadAuditStats();
+  else if (tab === 'errors') loadAuditErrors();
+}
+
+async function loadAuditTimeline() {
+  var el = document.getElementById('auditContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  var p = new URLSearchParams();
+  p.set('limit', _auditPageSize);
+  p.set('offset', _auditPage * _auditPageSize);
+  var user = document.getElementById('auditUserFilter').value;
+  var action = document.getElementById('auditActionFilter').value;
+  var resource = document.getElementById('auditResourceFilter').value;
+  var start = document.getElementById('auditStartDate').value;
+  var end = document.getElementById('auditEndDate').value;
+  var q = document.getElementById('auditSearch').value;
+  if(user)p.set('user',user);if(action)p.set('action',action);if(resource)p.set('resource',resource);
+  if(start)p.set('start',start);if(end)p.set('end',end);if(q)p.set('q',q);
+  try {
+    var d = await authFetch('/api/audit-log?'+p.toString()).then(function(r){return r.json()});
+    var data = d.data || d;
+    var rows = data.rows || [];
+    var total = data.total || 0;
+    if (!rows.length) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;font-size:14px">해당 기간에 기록이 없습니다</div>'; document.getElementById('auditPagination').innerHTML=''; return; }
+
+    var html = '<div style="font-size:12px;color:#64748b;margin-bottom:8px">총 '+fmtN(total)+'건 ('+(_auditPage*_auditPageSize+1)+'-'+Math.min((_auditPage+1)*_auditPageSize,total)+')</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>';
+    ['시각','사용자','액션','대상','리소스 ID','IP','상세'].forEach(function(h){
+      html+='<th style="text-align:left;padding:8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b;white-space:nowrap">'+h+'</th>';
+    });
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var actionLabel = AUDIT_ACTION_LABELS[r.action] || r.action;
+      var actionColor = AUDIT_ACTION_COLORS[r.action] || '#64748b';
+      var time = (r.created_at||'').replace('T',' ').substring(0,19);
+      html+='<tr style="border-bottom:1px solid #f1f5f9;transition:background 0.15s" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">';
+      html+='<td style="padding:6px 8px;font-size:11px;color:#64748b;white-space:nowrap">'+esc(time)+'</td>';
+      html+='<td style="padding:6px 8px;font-weight:500">'+esc(r.username||'-')+'</td>';
+      html+='<td style="padding:6px 8px"><span style="background:'+actionColor+'18;color:'+actionColor+';padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">'+esc(actionLabel)+'</span></td>';
+      html+='<td style="padding:6px 8px;font-size:12px">'+esc(r.resource||'')+'</td>';
+      html+='<td style="padding:6px 8px;font-size:12px;color:#64748b">'+esc(r.resource_id!=null?String(r.resource_id):'')+'</td>';
+      html+='<td style="padding:6px 8px;font-size:11px;color:#94a3b8;white-space:nowrap">'+esc(r.ip_address||'')+'</td>';
+      html+='<td style="padding:6px 8px;font-size:12px;color:#64748b;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.details||'')+'">'+esc(r.details||'')+'</td>';
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML = html;
+
+    // 페이지네이션
+    var totalPages = Math.ceil(total / _auditPageSize);
+    var pgEl = document.getElementById('auditPagination');
+    if (totalPages <= 1) { pgEl.innerHTML = ''; return; }
+    var pgHtml = '';
+    if (_auditPage > 0) pgHtml += '<button onclick="auditGoPage('+(_auditPage-1)+')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">◀</button>';
+    var startP = Math.max(0, _auditPage - 3), endP = Math.min(totalPages - 1, _auditPage + 3);
+    for (var i = startP; i <= endP; i++) {
+      pgHtml += '<button onclick="auditGoPage('+i+')" style="background:'+(i===_auditPage?'#0f172a':'#f1f5f9')+';color:'+(i===_auditPage?'#fff':'#334155')+';border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">'+(i+1)+'</button>';
+    }
+    if (_auditPage < totalPages-1) pgHtml += '<button onclick="auditGoPage('+(_auditPage+1)+')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">▶</button>';
+    pgEl.innerHTML = pgHtml;
+  } catch(e) { el.innerHTML = '<div style="color:#ef4444;padding:20px">로드 실패: '+e.message+'</div>'; }
+}
+
+function auditGoPage(p) { _auditPage = p; loadAuditTimeline(); }
+
+async function loadAuditStats() {
+  var el = document.getElementById('auditContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">통계 로딩 중...</div>';
+  document.getElementById('auditPagination').innerHTML = '';
+  try {
+    var d = await authFetch('/api/audit-log/stats?days=30').then(function(r){return r.json()});
+    var s = d.data || d;
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+
+    // 액션별 분포 차트
+    html += '<div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e2e8f0">';
+    html += '<h4 style="margin:0 0 12px;font-size:14px;font-weight:600">액션별 분포</h4>';
+    html += '<canvas id="auditActionChart" height="250"></canvas>';
+    html += '</div>';
+
+    // 일별 추이 차트
+    html += '<div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e2e8f0">';
+    html += '<h4 style="margin:0 0 12px;font-size:14px;font-weight:600">일별 활동 추이</h4>';
+    html += '<canvas id="auditDayChart" height="250"></canvas>';
+    html += '</div>';
+
+    html += '</div>';
+
+    // 사용자별 활동 테이블
+    html += '<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+    html += '<div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e2e8f0">';
+    html += '<h4 style="margin:0 0 12px;font-size:14px;font-weight:600">사용자별 활동 (Top 20)</h4>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">사용자</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">활동</th></tr></thead><tbody>';
+    (s.by_user||[]).forEach(function(u){
+      html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px;font-weight:500">'+esc(u.username||'-')+'</td><td style="padding:5px 8px;text-align:right;color:#3b82f6;font-weight:600">'+fmtN(u.cnt)+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // 리소스별 테이블
+    html += '<div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e2e8f0">';
+    html += '<h4 style="margin:0 0 12px;font-size:14px;font-weight:600">리소스별 활동</h4>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">대상</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">건수</th></tr></thead><tbody>';
+    (s.by_resource||[]).forEach(function(r){
+      html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px">'+esc(r.resource||'-')+'</td><td style="padding:5px 8px;text-align:right;color:#0ea5e9;font-weight:600">'+fmtN(r.cnt)+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '</div>';
+
+    el.innerHTML = html;
+
+    // Chart.js 렌더링
+    setTimeout(function(){
+      if(typeof Chart==='undefined') return;
+      // 액션 도넛 차트
+      var actionCtx = document.getElementById('auditActionChart');
+      if(actionCtx){
+        if(_auditCharts.action) _auditCharts.action.destroy();
+        var actions = (s.by_action||[]).slice(0,10);
+        var palette = ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#f97316','#6366f1'];
+        _auditCharts.action = new Chart(actionCtx, {
+          type:'doughnut',
+          data:{labels:actions.map(function(a){return AUDIT_ACTION_LABELS[a.action]||a.action}),datasets:[{data:actions.map(function(a){return a.cnt}),backgroundColor:palette}]},
+          options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}
+        });
+      }
+      // 일별 라인 차트
+      var dayCtx = document.getElementById('auditDayChart');
+      if(dayCtx){
+        if(_auditCharts.day) _auditCharts.day.destroy();
+        var days = (s.by_day||[]).reverse();
+        _auditCharts.day = new Chart(dayCtx, {
+          type:'line',
+          data:{labels:days.map(function(d){return d.day.substring(5)}),datasets:[{label:'활동 건수',data:days.map(function(d){return d.cnt}),borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.1)',fill:true,tension:0.3,pointRadius:2}]},
+          options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{font:{size:11}}},x:{ticks:{font:{size:10},maxRotation:45}}},plugins:{legend:{display:false}}}
+        });
+      }
+    }, 100);
+  } catch(e) { el.innerHTML = '<div style="color:#ef4444;padding:20px">통계 로드 실패: '+e.message+'</div>'; }
+}
+
+async function loadAuditErrors() {
+  var el = document.getElementById('auditContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">에러 로그 로딩 중...</div>';
+  document.getElementById('auditPagination').innerHTML = '';
+  try {
+    var d = await authFetch('/api/error-logs?limit=100').then(function(r){return r.json()});
+    var data = d.data || d;
+    var rows = data.rows || [];
+    if (!rows.length) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#22c55e;font-size:15px">✅ 에러 없음</div>'; return; }
+
+    var html = '<div style="font-size:12px;color:#64748b;margin-bottom:8px">총 '+fmtN(data.total||rows.length)+'건</div>';
+    rows.forEach(function(l){
+      html+='<div style="border:1px solid #fecdd3;border-radius:8px;padding:12px;margin-bottom:8px;background:#fff5f5">';
+      html+='<div style="display:flex;justify-content:space-between;margin-bottom:4px">';
+      html+='<span style="font-weight:600;color:#ef4444;font-size:13px">['+esc(l.level||'error')+'] '+esc((l.message||'').substring(0,120))+'</span>';
+      html+='<span style="font-size:11px;color:#94a3b8;white-space:nowrap">'+esc(l.created_at||'')+'</span>';
+      html+='</div>';
+      html+='<div style="font-size:12px;color:#64748b">'+esc(l.method||'')+' '+esc(l.url||'')+'</div>';
+      if(l.stack){html+='<pre style="font-size:11px;color:#999;margin-top:4px;white-space:pre-wrap;max-height:60px;overflow:hidden">'+esc(l.stack.substring(0,300))+'</pre>';}
+      html+='</div>';
+    });
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div style="color:#ef4444;padding:20px">에러 로그 로드 실패: '+e.message+'</div>'; }
+}
+
+function exportAuditExcel() {
+  if(typeof XLSX==='undefined'){alert('SheetJS 라이브러리가 필요합니다');return;}
+  var table = document.querySelector('#auditContent table');
+  if(!table){alert('내보낼 데이터가 없습니다');return;}
+  var wb = XLSX.utils.table_to_book(table, {sheet:'감사로그'});
+  XLSX.writeFile(wb, '감사로그_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  경영대시보드 (Executive Dashboard)
+// ════════════════════════════════════════════════════════════════════
+var _execCharts = {};
+var DEPT_LABELS = {'자체':'자체','입점':'입점','제휴':'제휴','총판':'총판','해외':'해외','DD':'DD','더기프트':'더기프트'};
+
+async function loadExecDashboard() {
+  // KPI + 채널 데이터
+  try {
+    var d = await authFetch('/api/exec/summary').then(function(r){return r.json()});
+    var data = d.data || d;
+    renderExecSources(data.sources||{});
+    renderExecKpi(data.kpi||{}, data.period||{});
+    renderExecChannels(data.channels||[], data.bar_shop1||{});
+    renderExecTasks(data.tasks||{}, data.kpi||{}, data.po||{});
+    renderExecMetrics(data.kpi||{}, data.bar_shop1||{});
+  } catch(e){ console.error('exec summary error:', e); }
+  // 추이 차트
+  try {
+    var d2 = await authFetch('/api/exec/trend?months=12').then(function(r){return r.json()});
+    var trend = (d2.data||d2).trend || [];
+    renderExecTrend(trend);
+  } catch(e){ console.error('exec trend error:', e); }
+}
+
+function renderExecSources(src) {
+  var el = document.getElementById('execSourceBar');
+  var html = '';
+  Object.entries(src).forEach(function(kv){
+    var icon = kv[1]==='ok'?'🟢':(kv[1]==='error'?'🔴':'🟡');
+    html += '<span style="font-size:12px;padding:3px 10px;background:#f1f5f9;border-radius:12px">'+icon+' '+kv[0]+'</span>';
+  });
+  el.innerHTML = html;
+}
+
+function renderExecKpi(kpi, period) {
+  var el = document.getElementById('execKpi');
+  var fmt = function(n){return typeof n==='number'?n.toLocaleString():n};
+  var fmtW = function(n){if(n>=100000000)return Math.round(n/100000000).toLocaleString()+'억';if(n>=10000)return Math.round(n/10000).toLocaleString()+'만';return fmt(n)};
+  var growthIcon = kpi.sales_growth > 0 ? '📈' : (kpi.sales_growth < 0 ? '📉' : '➡️');
+  var growthColor = kpi.sales_growth > 0 ? '#22c55e' : (kpi.sales_growth < 0 ? '#ef4444' : '#64748b');
+  var cards = [
+    {label:period.month+' 매출',value:fmtW(kpi.total_sales||0),icon:'💰',color:'#3b82f6',sub:fmt(kpi.order_count||0)+'건'},
+    {label:'매출총이익',value:fmtW(kpi.gross_profit||0),icon:'📊',color:'#10b981',sub:'마진율 '+(kpi.margin_rate||0)+'%'},
+    {label:'전월대비 성장',value:(kpi.sales_growth>0?'+':'')+kpi.sales_growth+'%',icon:growthIcon,color:growthColor,sub:'XERP 기준'},
+    {label:'수수료',value:fmtW(kpi.total_fee||0),icon:'💸',color:'#f59e0b',sub:'이번달 합계'},
+    {label:'미수령 발주',value:fmt(kpi.po_pending||0)+'건',icon:'📦',color:'#8b5cf6',sub:'수령 대기'},
+    {label:'이달 불량',value:fmt(kpi.defect_count||0)+'건',icon:'🔍',color:'#ef4444',sub:'불량 접수'}
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center">'
+      +'<div style="font-size:20px;margin-bottom:2px">'+c.icon+'</div>'
+      +'<div style="font-size:22px;font-weight:700;color:'+c.color+'">'+c.value+'</div>'
+      +'<div style="font-size:11px;color:#64748b;margin-top:2px">'+c.label+'</div>'
+      +'<div style="font-size:10px;color:#94a3b8">'+c.sub+'</div></div>';
+  }).join('');
+}
+
+function renderExecChannels(channels, barData) {
+  // 도넛 차트
+  var ctx = document.getElementById('execChannelChart');
+  if(!ctx || typeof Chart==='undefined') return;
+  if(_execCharts.channel) _execCharts.channel.destroy();
+  var labels = channels.map(function(c){return DEPT_LABELS[c.channel]||c.channel||'기타'});
+  var values = channels.map(function(c){return c.total_sales||0});
+  if(barData.total_revenue > 0){ labels.push('bar_shop1'); values.push(barData.total_revenue); }
+  var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316','#14b8a6'];
+  _execCharts.channel = new Chart(ctx, {
+    type:'doughnut',
+    data:{labels:labels,datasets:[{data:values,backgroundColor:palette}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}
+  });
+  // 테이블
+  var tbl = document.getElementById('execChannelTable');
+  var total = values.reduce(function(a,b){return a+b},0);
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">채널</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">매출</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">비중</th></tr></thead><tbody>';
+  labels.forEach(function(l,i){
+    var pct = total>0?(values[i]/total*100).toFixed(1):'0';
+    html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:3px 6px">'+esc(l)+'</td><td style="padding:3px 6px;text-align:right;font-weight:500">'+Math.round(values[i]).toLocaleString()+'</td><td style="padding:3px 6px;text-align:right;color:#3b82f6">'+pct+'%</td></tr>';
+  });
+  html+='</tbody></table>';
+  tbl.innerHTML = html;
+}
+
+function renderExecTrend(trend) {
+  var ctx = document.getElementById('execTrendChart');
+  if(!ctx || typeof Chart==='undefined') return;
+  if(_execCharts.trend) _execCharts.trend.destroy();
+  _execCharts.trend = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:trend.map(function(t){return t.month.substring(2)}),
+      datasets:[
+        {label:'매출',data:trend.map(function(t){return t.sales}),backgroundColor:'rgba(59,130,246,0.7)',borderRadius:4,order:2},
+        {label:'마진',data:trend.map(function(t){return t.margin}),type:'line',borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',fill:true,tension:0.3,pointRadius:3,order:1}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      scales:{y:{beginAtZero:true,ticks:{font:{size:10},callback:function(v){return v>=100000000?(v/100000000).toFixed(0)+'억':(v>=10000?(v/10000).toFixed(0)+'만':v)}}},x:{ticks:{font:{size:10}}}},
+      plugins:{legend:{labels:{font:{size:11}}}}
+    }
+  });
+}
+
+function renderExecTasks(tasks, kpi, po) {
+  var el = document.getElementById('execTasks');
+  var items = [
+    {label:'전체 업무',value:tasks.total||0,color:'#3b82f6'},
+    {label:'완료',value:tasks.done||0,color:'#22c55e'},
+    {label:'진행중',value:tasks.in_progress||0,color:'#f59e0b'},
+    {label:'발주 잔여',value:po.pending||0,color:'#8b5cf6'},
+    {label:'이달 불량',value:kpi.defect_count||0,color:'#ef4444'}
+  ];
+  var html = '';
+  items.forEach(function(it){
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9">';
+    html+='<span style="font-size:12px;color:#334155">'+it.label+'</span>';
+    html+='<span style="font-size:14px;font-weight:700;color:'+it.color+'">'+it.value.toLocaleString()+'</span>';
+    html+='</div>';
+  });
+  var doneRate = tasks.total > 0 ? Math.round(tasks.done/tasks.total*100) : 0;
+  html+='<div style="margin-top:10px;background:#e2e8f0;border-radius:10px;height:8px;overflow:hidden"><div style="background:#22c55e;height:100%;width:'+doneRate+'%;border-radius:10px"></div></div>';
+  html+='<div style="text-align:center;font-size:11px;color:#64748b;margin-top:4px">업무 완료율 '+doneRate+'%</div>';
+  el.innerHTML = html;
+}
+
+function renderExecMetrics(kpi, barData) {
+  var el = document.getElementById('execMetrics');
+  var items = [
+    {label:'XERP 매출',value:kpi.total_sales?Math.round(kpi.total_sales).toLocaleString()+'원':'데이터 없음'},
+    {label:'bar_shop1 매출',value:barData.total_revenue?Math.round(barData.total_revenue).toLocaleString()+'원':'데이터 없음'},
+    {label:'bar_shop1 원가',value:barData.total_cost?Math.round(barData.total_cost).toLocaleString()+'원':'데이터 없음'},
+    {label:'수수료 합계',value:kpi.total_fee?Math.round(kpi.total_fee).toLocaleString()+'원':'0원'},
+    {label:'평균 마진율',value:(kpi.margin_rate||0)+'%'}
+  ];
+  var html = '';
+  items.forEach(function(it){
+    html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9"><span style="font-size:12px;color:#64748b">'+it.label+'</span><span style="font-size:12px;font-weight:600;color:#334155">'+it.value+'</span></div>';
+  });
+  el.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  고객주문 (Customer Orders)
+// ════════════════════════════════════════════════════════════════════
+var _coActiveTab = 'overview';
+var _coPage = 0;
+var _coCharts = {};
+var BAR_STATUS_LABELS = {1:'접수',2:'결제완료',3:'제작중',4:'제작완료',5:'발송',6:'배송완료',9:'취소'};
+var DD_STATE_LABELS = {'B':'대기','P':'결제완료','D':'배송중','C':'취소','F':'완료'};
+
+async function loadCustomerOrders() {
+  var now = new Date();
+  var s = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('coStart').value = s.toISOString().slice(0,10);
+  document.getElementById('coEnd').value = now.toISOString().slice(0,10);
+  _coPage = 0;
+  switchCoTab('overview');
+}
+
+function switchCoTab(tab) {
+  _coActiveTab = tab;
+  _coPage = 0;
+  document.querySelectorAll('.co-tab').forEach(function(t){
+    var isActive = t.dataset.tab === tab;
+    t.style.background = isActive ? '#0f172a' : '#f1f5f9';
+    t.style.color = isActive ? '#fff' : '#334155';
+  });
+  document.getElementById('coToolbar').style.display = tab === 'overview' ? 'none' : 'flex';
+  loadCoTabData();
+}
+
+async function loadCoTabData() {
+  if (_coActiveTab === 'overview') await loadCoOverview();
+  else if (_coActiveTab === 'xerp') await loadCoXerpList();
+  else if (_coActiveTab === 'barshop') await loadCoBarList();
+  else if (_coActiveTab === 'trend') await loadCoTrend();
+}
+
+async function loadCoOverview() {
+  var el = document.getElementById('coContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  document.getElementById('coPagination').innerHTML = '';
+  var s = document.getElementById('coStart').value.replace(/-/g,'');
+  var e = document.getElementById('coEnd').value.replace(/-/g,'');
+  try {
+    var d = await authFetch('/api/customer-orders/summary?start='+s+'&end='+e).then(function(r){return r.json()});
+    var data = d.data || d;
+    // 소스 상태
+    var sb = document.getElementById('coSourceBar');
+    sb.innerHTML = Object.entries(data.sources||{}).map(function(kv){
+      var icon=kv[1]==='ok'?'🟢':(kv[1]==='error'?'🔴':'🟡');
+      return '<span style="font-size:12px;padding:3px 10px;background:#f1f5f9;border-radius:12px">'+icon+' '+kv[0]+'</span>';
+    }).join('');
+    // KPI
+    var kpi = data.kpi || {};
+    var fmtW = function(n){if(n>=100000000)return Math.round(n/100000000).toLocaleString()+'억';if(n>=10000)return Math.round(n/10000).toLocaleString()+'만';return n.toLocaleString()};
+    document.getElementById('coKpi').innerHTML = [
+      {label:'총 주문',value:(kpi.total_orders||0).toLocaleString()+'건',icon:'📋',color:'#3b82f6'},
+      {label:'총 매출',value:fmtW(kpi.total_sales||0),icon:'💰',color:'#10b981'},
+      {label:'XERP 주문',value:(kpi.xerp_orders||0).toLocaleString()+'건',icon:'🏢',color:'#6366f1'},
+      {label:'바른손 주문',value:(kpi.bar_orders||0).toLocaleString()+'건',icon:'💳',color:'#f59e0b'},
+      {label:'DD 주문',value:(kpi.dd_orders||0).toLocaleString()+'건',icon:'💒',color:'#ec4899'}
+    ].map(function(c){return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center"><div style="font-size:18px">'+c.icon+'</div><div style="font-size:20px;font-weight:700;color:'+c.color+'">'+c.value+'</div><div style="font-size:11px;color:#64748b">'+c.label+'</div></div>'}).join('');
+
+    // 채널별 + 상태별
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">';
+    // XERP 채널
+    html+='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">XERP 채널별</h4>';
+    if((data.xerp||{}).channels && data.xerp.channels.length){
+      html+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">채널</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">건수</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">매출</th></tr></thead><tbody>';
+      data.xerp.channels.forEach(function(c){html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:3px 6px">'+esc(c.channel)+'</td><td style="padding:3px 6px;text-align:right">'+c.count.toLocaleString()+'</td><td style="padding:3px 6px;text-align:right;font-weight:500">'+Math.round(c.sales).toLocaleString()+'</td></tr>'});
+      html+='</tbody></table>';
+    } else html+='<div style="color:#94a3b8;font-size:12px">데이터 없음</div>';
+    html+='</div>';
+
+    // bar_shop1 상태
+    html+='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">바른손 주문상태</h4>';
+    var barStatus = (data.bar_shop1||{}).status || [];
+    if(barStatus.length){
+      html+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">상태</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">건수</th></tr></thead><tbody>';
+      barStatus.forEach(function(s){html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:3px 6px">'+(BAR_STATUS_LABELS[s.status_seq]||s.status_seq)+'</td><td style="padding:3px 6px;text-align:right;font-weight:500">'+s.cnt.toLocaleString()+'</td></tr>'});
+      html+='</tbody></table>';
+    } else html+='<div style="color:#94a3b8;font-size:12px">데이터 없음</div>';
+    html+='</div>';
+
+    // DD 상태
+    html+='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">DD 주문상태</h4>';
+    var ddStates = (data.dd||{}).states || [];
+    if(ddStates.length){
+      html+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">상태</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;color:#64748b">건수</th></tr></thead><tbody>';
+      ddStates.forEach(function(s){html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:3px 6px">'+(DD_STATE_LABELS[s.order_state]||s.order_state)+'</td><td style="padding:3px 6px;text-align:right;font-weight:500">'+s.cnt.toLocaleString()+'</td></tr>'});
+      html+='</tbody></table>';
+    } else html+='<div style="color:#94a3b8;font-size:12px">데이터 없음</div>';
+    html+='</div></div>';
+
+    // 채널 차트
+    html+='<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+    html+='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">채널별 매출 비중</h4><div style="height:250px"><canvas id="coChannelChart"></canvas></div></div>';
+    html+='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">사이트별 주문</h4><div style="height:250px"><canvas id="coSiteChart"></canvas></div></div>';
+    html+='</div>';
+    el.innerHTML = html;
+
+    // Chart.js
+    setTimeout(function(){
+      if(typeof Chart==='undefined') return;
+      var channels = (data.xerp||{}).channels||[];
+      if(channels.length){
+        if(_coCharts.channel) _coCharts.channel.destroy();
+        var palette=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+        _coCharts.channel=new Chart(document.getElementById('coChannelChart'),{type:'doughnut',data:{labels:channels.map(function(c){return c.channel}),datasets:[{data:channels.map(function(c){return c.sales}),backgroundColor:palette}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}});
+      }
+      var sites = (data.bar_shop1||{}).sites||[];
+      if(sites.length){
+        if(_coCharts.site) _coCharts.site.destroy();
+        var pal2=['#6366f1','#f59e0b','#ec4899','#14b8a6','#f97316','#8b5cf6'];
+        _coCharts.site=new Chart(document.getElementById('coSiteChart'),{type:'bar',data:{labels:sites.map(function(s){return s.site||'기타'}),datasets:[{label:'건수',data:sites.map(function(s){return s.cnt}),backgroundColor:pal2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+      }
+    },100);
+  } catch(e){ el.innerHTML='<div style="color:#ef4444;padding:20px">로드 실패: '+e.message+'</div>'; }
+}
+
+async function loadCoXerpList() {
+  var el = document.getElementById('coContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  var s = document.getElementById('coStart').value.replace(/-/g,'');
+  var e = document.getElementById('coEnd').value.replace(/-/g,'');
+  var ch = document.getElementById('coChannel').value;
+  var q = document.getElementById('coSearch').value;
+  var p = new URLSearchParams({start:s,end:e,limit:'100',offset:String(_coPage*100)});
+  if(ch)p.set('channel',ch); if(q)p.set('q',q);
+  try{
+    var d=await authFetch('/api/customer-orders/list?'+p.toString()).then(function(r){return r.json()});
+    var data=d.data||d;
+    var rows=data.rows||[];
+    var total=data.total||0;
+    if(!rows.length){el.innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">해당 기간에 주문이 없습니다</div>';document.getElementById('coPagination').innerHTML='';return}
+    var html='<div style="font-size:12px;color:#64748b;margin-bottom:8px">총 '+total.toLocaleString()+'건</div>';
+    html+='<table id="coXerpTable" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+    ['날짜','주문번호','채널','상품코드','수량','매출','공급가','수수료'].forEach(function(h){html+='<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b;white-space:nowrap">'+h+'</th>'});
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      html+='<tr style="border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">';
+      html+='<td style="padding:5px 8px;font-size:11px;white-space:nowrap">'+esc(r.h_date||'')+'</td>';
+      html+='<td style="padding:5px 8px;font-weight:500">'+esc(r.h_orderid||'')+'</td>';
+      html+='<td style="padding:5px 8px"><span style="background:#dbeafe;color:#2563eb;padding:1px 6px;border-radius:3px;font-size:11px">'+esc(r.channel_name||'')+'</span></td>';
+      html+='<td style="padding:5px 8px">'+esc(r.product_code||'')+'</td>';
+      html+='<td style="padding:5px 8px;text-align:right">'+(r.qty||0)+'</td>';
+      html+='<td style="padding:5px 8px;text-align:right;font-weight:500">'+Math.round(r.sales||0).toLocaleString()+'</td>';
+      html+='<td style="padding:5px 8px;text-align:right;color:#64748b">'+Math.round(r.supply||0).toLocaleString()+'</td>';
+      html+='<td style="padding:5px 8px;text-align:right;color:#f59e0b">'+Math.round(r.fee||0).toLocaleString()+'</td>';
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML=html;
+    // 페이지네이션
+    var totalP=Math.ceil(total/100),pgEl=document.getElementById('coPagination');
+    if(totalP<=1){pgEl.innerHTML='';return}
+    var ph='';
+    if(_coPage>0)ph+='<button onclick="coGoPage('+(_coPage-1)+')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">◀</button>';
+    for(var i=Math.max(0,_coPage-3);i<=Math.min(totalP-1,_coPage+3);i++){ph+='<button onclick="coGoPage('+i+')" style="background:'+(i===_coPage?'#0f172a':'#f1f5f9')+';color:'+(i===_coPage?'#fff':'#334155')+';border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">'+(i+1)+'</button>'}
+    if(_coPage<totalP-1)ph+='<button onclick="coGoPage('+(_coPage+1)+')" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer">▶</button>';
+    pgEl.innerHTML=ph;
+  }catch(ex){el.innerHTML='<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'}
+}
+function coGoPage(p){_coPage=p;loadCoTabData()}
+
+async function loadCoBarList() {
+  var el = document.getElementById('coContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  document.getElementById('coPagination').innerHTML='';
+  var s = document.getElementById('coStart').value;
+  var e = document.getElementById('coEnd').value;
+  try{
+    var d=await authFetch('/api/customer-orders/bar-list?start='+s+'&end='+e+'&limit=200').then(function(r){return r.json()});
+    var data=d.data||d;
+    var rows=data.rows||[];
+    if(!rows.length){el.innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">해당 기간에 주문이 없습니다</div>';return}
+    var html='<div style="font-size:12px;color:#64748b;margin-bottom:8px">'+rows.length+'건</div>';
+    html+='<table id="coBarTable" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+    ['주문일','주문번호','총금액','상태','사이트','결제','아이템수'].forEach(function(h){html+='<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">'+h+'</th>'});
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var statusLabel=BAR_STATUS_LABELS[r.status_seq]||r.status_seq;
+      var statusColor=r.status_seq>=5?'#22c55e':(r.status_seq>=3?'#f59e0b':'#3b82f6');
+      html+='<tr style="border-bottom:1px solid #f1f5f9">';
+      html+='<td style="padding:5px 8px;font-size:11px">'+esc(String(r.order_date||'').substring(0,10))+'</td>';
+      html+='<td style="padding:5px 8px;font-weight:500">'+esc(String(r.order_seq||''))+'</td>';
+      html+='<td style="padding:5px 8px;text-align:right;font-weight:500">'+Math.round(r.total_price||0).toLocaleString()+'</td>';
+      html+='<td style="padding:5px 8px"><span style="background:'+statusColor+'18;color:'+statusColor+';padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600">'+statusLabel+'</span></td>';
+      html+='<td style="padding:5px 8px">'+esc(r.site||'')+'</td>';
+      html+='<td style="padding:5px 8px">'+esc(r.pay_type||'')+'</td>';
+      html+='<td style="padding:5px 8px;text-align:center">'+r.item_count+'</td>';
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML=html;
+  }catch(ex){el.innerHTML='<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'}
+}
+
+async function loadCoTrend() {
+  var el = document.getElementById('coContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">추이 로딩 중...</div>';
+  document.getElementById('coPagination').innerHTML='';
+  try{
+    var d=await authFetch('/api/customer-orders/daily?days=30').then(function(r){return r.json()});
+    var data=d.data||d;
+    var daily=data.daily||[];
+    if(!daily.length){el.innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">데이터 없음</div>';return}
+    var html='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px"><h4 style="margin:0 0 10px;font-size:14px;font-weight:600">일별 주문/매출 추이 (30일)</h4><div style="height:300px"><canvas id="coTrendChart"></canvas></div></div>';
+    // 테이블
+    html+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+    ['날짜','주문수','매출'].forEach(function(h){html+='<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">'+h+'</th>'});
+    html+='</tr></thead><tbody>';
+    daily.slice().reverse().forEach(function(d){
+      html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 8px">'+esc(d.day||'')+'</td><td style="padding:4px 8px;text-align:right;font-weight:500">'+d.orders.toLocaleString()+'</td><td style="padding:4px 8px;text-align:right;font-weight:500">'+Math.round(d.sales).toLocaleString()+'</td></tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML=html;
+    setTimeout(function(){
+      if(typeof Chart==='undefined') return;
+      if(_coCharts.trend) _coCharts.trend.destroy();
+      _coCharts.trend=new Chart(document.getElementById('coTrendChart'),{
+        type:'bar',
+        data:{labels:daily.map(function(d){return d.day.substring(4)}),datasets:[
+          {label:'주문수',data:daily.map(function(d){return d.orders}),backgroundColor:'rgba(99,102,241,0.7)',borderRadius:3,yAxisID:'y'},
+          {label:'매출',data:daily.map(function(d){return d.sales}),type:'line',borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',fill:true,tension:0.3,pointRadius:2,yAxisID:'y1'}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,position:'left',ticks:{font:{size:10}}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{font:{size:10},callback:function(v){return v>=10000?(v/10000).toFixed(0)+'만':v}}}},plugins:{legend:{labels:{font:{size:11}}}}}
+      });
+    },100);
+  }catch(ex){el.innerHTML='<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'}
+}
+
+function exportCoExcel(){
+  if(typeof XLSX==='undefined'){alert('SheetJS 라이브러리가 필요합니다');return}
+  var table=document.querySelector('#coContent table');
+  if(!table){alert('내보낼 데이터가 없습니다');return}
+  var wb=XLSX.utils.table_to_book(table,{sheet:'고객주문'});
+  XLSX.writeFile(wb,'고객주문_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  배송추적 (Shipping Tracking)
+// ════════════════════════════════════════════════════════════════════
+var _shipActiveTab = 'overview';
+var SHIP_STATUS_LABELS = {1:'접수',2:'결제완료',3:'제작중',4:'제작완료',5:'발송',6:'배송완료',9:'취소'};
+var SHIP_STATUS_COLORS = {1:'#94a3b8',2:'#3b82f6',3:'#f59e0b',4:'#8b5cf6',5:'#06b6d4',6:'#22c55e',9:'#ef4444'};
+var DD_SHIP_LABELS = {'B':'대기','P':'결제완료','D':'배송중','C':'취소','F':'완료','R':'반품'};
+
+async function loadShippingPage() {
+  var now = new Date();
+  var s = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('shipStart').value = s.toISOString().slice(0,10);
+  document.getElementById('shipEnd').value = now.toISOString().slice(0,10);
+  switchShipTab('overview');
+}
+
+function switchShipTab(tab) {
+  _shipActiveTab = tab;
+  document.querySelectorAll('.ship-tab').forEach(function(t){
+    var isActive = t.dataset.tab === tab;
+    t.style.background = isActive ? '#0f172a' : '#f1f5f9';
+    t.style.color = isActive ? '#fff' : '#334155';
+  });
+  document.getElementById('shipToolbar').style.display = (tab === 'overview') ? 'none' : 'flex';
+  loadShipTabData();
+}
+
+async function loadShipTabData() {
+  if (_shipActiveTab === 'overview') await loadShipOverview();
+  else if (_shipActiveTab === 'bar-list') await loadShipBarList();
+  else if (_shipActiveTab === 'dd-list') await loadShipDDList();
+}
+
+async function loadShipOverview() {
+  var el = document.getElementById('shipContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  var s = document.getElementById('shipStart').value.replace(/-/g,'');
+  var e = document.getElementById('shipEnd').value.replace(/-/g,'');
+  try {
+    var d = await authFetch('/api/shipping/summary?start='+s+'&end='+e).then(function(r){return r.json()});
+    var data = d.data || d;
+    var kpi = data.kpi || {};
+    // 소스
+    var sb = document.getElementById('shipSourceBar');
+    sb.innerHTML = Object.entries(data.sources||{}).map(function(kv){
+      var icon=kv[1]==='ok'?'🟢':(kv[1]==='error'?'🔴':'🟡');
+      return '<span style="font-size:12px;padding:3px 10px;background:#f1f5f9;border-radius:12px">'+icon+' '+kv[0]+'</span>';
+    }).join('');
+    // KPI
+    var fmtN=function(n){return typeof n==='number'?n.toLocaleString():n};
+    document.getElementById('shipKpi').innerHTML = [
+      {label:'총 주문',value:fmtN(kpi.total_orders||0)+'건',icon:'📦',color:'#3b82f6'},
+      {label:'발송/배송완료',value:fmtN(kpi.shipped||0)+'건',icon:'✅',color:'#22c55e'},
+      {label:'제작중',value:fmtN(kpi.in_production||0)+'건',icon:'🏭',color:'#f59e0b'},
+      {label:'대기/결제',value:fmtN(kpi.pending||0)+'건',icon:'⏳',color:'#8b5cf6'},
+      {label:'바른손',value:fmtN(kpi.bar_total||0)+'건',icon:'🏢',color:'#0ea5e9'},
+      {label:'DD',value:fmtN(kpi.dd_total||0)+'건',icon:'💒',color:'#ec4899'}
+    ].map(function(c){return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center"><div style="font-size:18px">'+c.icon+'</div><div style="font-size:20px;font-weight:700;color:'+c.color+'">'+c.value+'</div><div style="font-size:11px;color:#64748b">'+c.label+'</div></div>'}).join('');
+
+    // 파이프라인 (진행 바)
+    var pipeline = data.pipeline || {};
+    var total = Object.values(pipeline).reduce(function(a,b){return a+b},0) || 1;
+    var pipEl = document.getElementById('shipPipeline');
+    var pipHtml = '<div style="width:100%;background:#f1f5f9;border-radius:8px;overflow:hidden;display:flex;height:32px">';
+    [1,2,3,4,5,6].forEach(function(st){
+      var cnt = pipeline[st] || 0;
+      var pct = cnt / total * 100;
+      if(pct > 0) pipHtml += '<div style="background:'+SHIP_STATUS_COLORS[st]+';width:'+pct+'%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;min-width:30px" title="'+(SHIP_STATUS_LABELS[st]||st)+': '+cnt+'건">'+(SHIP_STATUS_LABELS[st]||st)+'</div>';
+    });
+    pipHtml += '</div>';
+    pipHtml += '<div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">';
+    [1,2,3,4,5,6].forEach(function(st){
+      var cnt = pipeline[st] || 0;
+      pipHtml += '<span style="font-size:11px;color:#64748b"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(SHIP_STATUS_COLORS[st]||'#ccc')+';margin-right:3px"></span>'+(SHIP_STATUS_LABELS[st]||st)+' '+cnt+'건</span>';
+    });
+    pipHtml += '</div>';
+    pipEl.innerHTML = pipHtml;
+
+    // 최근 배송 + DD 상태
+    var html = '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">';
+    // 최근 배송
+    html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">';
+    html += '<h4 style="margin:0 0 10px;font-size:14px;font-weight:600">최근 배송 (바른손)</h4>';
+    var recent = (data.bar_shop1||{}).recent || [];
+    if (recent.length) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+      ['날짜','주문번호','상태','금액','수령인','사이트'].forEach(function(h){html+='<th style="text-align:left;padding:5px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">'+h+'</th>'});
+      html+='</tr></thead><tbody>';
+      recent.slice(0,20).forEach(function(r){
+        var stLabel = SHIP_STATUS_LABELS[r.status_seq]||r.status_seq;
+        var stColor = SHIP_STATUS_COLORS[r.status_seq]||'#64748b';
+        html+='<tr style="border-bottom:1px solid #f1f5f9">';
+        html+='<td style="padding:4px 6px;font-size:11px">'+esc(String(r.order_date||'').substring(0,10))+'</td>';
+        html+='<td style="padding:4px 6px;font-weight:500">'+esc(String(r.order_seq))+'</td>';
+        html+='<td style="padding:4px 6px"><span style="background:'+stColor+'18;color:'+stColor+';padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600">'+stLabel+'</span></td>';
+        html+='<td style="padding:4px 6px;text-align:right">'+Math.round(r.total_price||0).toLocaleString()+'</td>';
+        html+='<td style="padding:4px 6px">'+esc(r.recipient||'-')+'</td>';
+        html+='<td style="padding:4px 6px">'+esc(r.site||'')+'</td>';
+        html+='</tr>';
+      });
+      html += '</tbody></table>';
+    } else html += '<div style="color:#94a3b8;font-size:12px">데이터 없음</div>';
+    html += '</div>';
+
+    // DD 상태
+    html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">';
+    html += '<h4 style="margin:0 0 10px;font-size:14px;font-weight:600">DD 배송 상태</h4>';
+    var ddStates = (data.dd||{}).by_state || [];
+    if (ddStates.length) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">상태</th><th style="text-align:right;padding:5px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">건수</th></tr></thead><tbody>';
+      ddStates.forEach(function(s){html+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 6px">'+(DD_SHIP_LABELS[s.shipping_state]||s.shipping_state||'기타')+'</td><td style="padding:4px 6px;text-align:right;font-weight:500">'+s.cnt.toLocaleString()+'</td></tr>'});
+      html += '</tbody></table>';
+    } else html += '<div style="color:#94a3b8;font-size:12px">데이터 없음</div>';
+    html += '</div></div>';
+
+    el.innerHTML = html;
+  } catch(ex) { el.innerHTML = '<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'; }
+}
+
+async function loadShipBarList() {
+  var el = document.getElementById('shipContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">로딩 중...</div>';
+  var s = document.getElementById('shipStart').value;
+  var e = document.getElementById('shipEnd').value;
+  var st = document.getElementById('shipStatus').value;
+  var q = document.getElementById('shipSearch').value;
+  var p = new URLSearchParams({start:s,end:e,limit:'200'});
+  if(st) p.set('status',st); if(q) p.set('q',q);
+  try {
+    var d = await authFetch('/api/shipping/list?'+p.toString()).then(function(r){return r.json()});
+    var data = d.data || d;
+    var rows = data.rows || [];
+    if(!rows.length){el.innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">해당 기간에 배송이 없습니다</div>';return}
+    var html='<div style="font-size:12px;color:#64748b;margin-bottom:8px">'+rows.length+'건</div>';
+    html+='<table id="shipBarTable" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+    ['주문일','주문번호','상태','금액','수령인','주소','연락처','사이트','아이템'].forEach(function(h){html+='<th style="text-align:left;padding:5px 6px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b;white-space:nowrap">'+h+'</th>'});
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var stLabel=SHIP_STATUS_LABELS[r.status_seq]||r.status_seq;
+      var stColor=SHIP_STATUS_COLORS[r.status_seq]||'#64748b';
+      html+='<tr style="border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">';
+      html+='<td style="padding:4px 6px;font-size:11px">'+esc(String(r.order_date||'').substring(0,10))+'</td>';
+      html+='<td style="padding:4px 6px;font-weight:500">'+esc(String(r.order_seq))+'</td>';
+      html+='<td style="padding:4px 6px"><span style="background:'+stColor+'18;color:'+stColor+';padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600">'+stLabel+'</span></td>';
+      html+='<td style="padding:4px 6px;text-align:right">'+Math.round(r.total_price||0).toLocaleString()+'</td>';
+      html+='<td style="padding:4px 6px">'+esc(r.recipient||'-')+'</td>';
+      html+='<td style="padding:4px 6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.address||'')+'">'+esc(r.address||'-')+'</td>';
+      html+='<td style="padding:4px 6px;font-size:11px">'+esc(r.phone||'-')+'</td>';
+      html+='<td style="padding:4px 6px">'+esc(r.site||'')+'</td>';
+      html+='<td style="padding:4px 6px;text-align:center">'+r.item_count+'</td>';
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML = html;
+  } catch(ex) { el.innerHTML = '<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'; }
+}
+
+async function loadShipDDList() {
+  var el = document.getElementById('shipContent');
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">DD 배송 로딩 중...</div>';
+  var s = document.getElementById('shipStart').value;
+  var e = document.getElementById('shipEnd').value;
+  try {
+    var d = await authFetch('/api/shipping/dd-list?start='+s+'&end='+e+'&limit=200').then(function(r){return r.json()});
+    var data = d.data || d;
+    var rows = data.rows || [];
+    if(!rows.length){el.innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">해당 기간에 DD 배송이 없습니다</div>';return}
+    var html='<div style="font-size:12px;color:#64748b;margin-bottom:8px">'+rows.length+'건</div>';
+    html+='<table id="shipDDTable" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+    ['날짜','주문번호','주문상태','배송상태','금액','송장번호'].forEach(function(h){html+='<th style="text-align:left;padding:5px 6px;border-bottom:2px solid #e2e8f0;font-size:11px;font-weight:600;color:#64748b">'+h+'</th>'});
+    html+='</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var osLabel=DD_STATE_LABELS[r.order_state]||r.order_state||'';
+      var ssLabel=DD_SHIP_LABELS[r.shipping_state]||r.shipping_state||'';
+      html+='<tr style="border-bottom:1px solid #f1f5f9">';
+      html+='<td style="padding:4px 6px;font-size:11px">'+esc(String(r.created_at||'').substring(0,10))+'</td>';
+      html+='<td style="padding:4px 6px;font-weight:500">'+esc(r.order_number||String(r.id))+'</td>';
+      html+='<td style="padding:4px 6px"><span style="font-size:11px;font-weight:600">'+esc(osLabel)+'</span></td>';
+      html+='<td style="padding:4px 6px"><span style="background:#06b6d418;color:#06b6d4;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600">'+esc(ssLabel)+'</span></td>';
+      html+='<td style="padding:4px 6px;text-align:right">'+Math.round(r.total_money||0).toLocaleString()+'</td>';
+      html+='<td style="padding:4px 6px;font-size:11px">'+esc(r.cj_invoice_numbers||'-')+'</td>';
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML = html;
+  } catch(ex) { el.innerHTML = '<div style="color:#ef4444;padding:20px">로드 실패: '+ex.message+'</div>'; }
+}
+
+function exportShipExcel(){
+  if(typeof XLSX==='undefined'){alert('SheetJS 라이브러리가 필요합니다');return}
+  var table=document.querySelector('#shipContent table');
+  if(!table){alert('내보낼 데이터가 없습니다');return}
+  var wb=XLSX.utils.table_to_book(table,{sheet:'배송추적'});
+  XLSX.writeFile(wb,'배송추적_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  원가관리 (Cost Management / Margin Analysis)

@@ -1876,6 +1876,10 @@ const ALL_PAGES = [
   { id: 'sales-gift', name: '더기프트매출', group: '매출' },
   { id: 'cost-mgmt', name: '원가관리', group: '매출' },
   { id: 'board', name: '공지/게시판', group: '업무' },
+  { id: 'audit-log', name: '감사로그', group: '관리' },
+  { id: 'exec-dashboard', name: '경영대시보드', group: '관리' },
+  { id: 'customer-orders', name: '고객주문', group: '매출' },
+  { id: 'shipping', name: '배송추적', group: '매출' },
 ];
 
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
@@ -1883,9 +1887,9 @@ const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
   purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
-    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board'],
+    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping'],
   production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
-  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board'],
+  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping'],
 };
 
 function hasPermission(role, page, userPermissions) {
@@ -2359,25 +2363,86 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // GET /api/audit-log — 감사 로그 (admin만)
+  // GET /api/audit-log — 감사 로그 (admin만, 필터링/페이지네이션/통계 지원)
   if (pathname === '/api/audit-log' && method === 'GET') {
     const token = extractToken(req);
     const decoded = token ? verifyToken(token) : null;
     if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
-    const limit = parseInt(parsed.searchParams.get('limit') || '100');
-    const rows = db.prepare("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?").all(limit);
-    ok(res, rows);
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+    const offset = parseInt(parsed.searchParams.get('offset') || '0');
+    const user = parsed.searchParams.get('user') || '';
+    const action = parsed.searchParams.get('action') || '';
+    const resource = parsed.searchParams.get('resource') || '';
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const search = parsed.searchParams.get('q') || '';
+
+    let where = [], params = [];
+    if (user) { where.push("username LIKE ?"); params.push('%' + user + '%'); }
+    if (action) { where.push("action = ?"); params.push(action); }
+    if (resource) { where.push("resource = ?"); params.push(resource); }
+    if (start) { where.push("created_at >= ?"); params.push(start); }
+    if (end) { where.push("created_at <= ? || ' 23:59:59'"); params.push(end); }
+    if (search) { where.push("(details LIKE ? OR username LIKE ? OR resource_id LIKE ?)"); params.push('%'+search+'%','%'+search+'%','%'+search+'%'); }
+
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+    const total = db.prepare("SELECT COUNT(*) as cnt FROM audit_log" + whereClause).get(...params).cnt;
+    const rows = db.prepare("SELECT * FROM audit_log" + whereClause + " ORDER BY created_at DESC LIMIT ? OFFSET ?").all(...params, limit, offset);
+
+    ok(res, { rows, total, limit, offset });
     return;
   }
 
-  // GET /api/error-logs — 에러 로그 (admin만)
+  // GET /api/audit-log/stats — 감사 로그 통계 (admin만)
+  if (pathname === '/api/audit-log/stats' && method === 'GET') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
+    const days = parseInt(parsed.searchParams.get('days') || '30');
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+
+    const totalLogs = db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE created_at >= ?").get(since).cnt;
+    const byAction = db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY action ORDER BY cnt DESC").all(since);
+    const byUser = db.prepare("SELECT username, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY username ORDER BY cnt DESC LIMIT 20").all(since);
+    const byResource = db.prepare("SELECT resource, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY resource ORDER BY cnt DESC").all(since);
+    const byDay = db.prepare("SELECT DATE(created_at) as day, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY day DESC LIMIT ?").all(since, days);
+    const loginFailed = db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE action='login_failed' AND created_at >= ?").get(since).cnt;
+    const uniqueUsers = db.prepare("SELECT COUNT(DISTINCT username) as cnt FROM audit_log WHERE created_at >= ? AND action IN ('login','google_login')").get(since).cnt;
+    const recentActions = db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at >= datetime('now','-1 hour','localtime') GROUP BY action ORDER BY cnt DESC").all();
+
+    ok(res, { total: totalLogs, login_failed: loginFailed, unique_users: uniqueUsers, by_action: byAction, by_user: byUser, by_resource: byResource, by_day: byDay, recent_hour: recentActions, days });
+    return;
+  }
+
+  // GET /api/audit-log/actions — 감사 로그 액션 유형 목록
+  if (pathname === '/api/audit-log/actions' && method === 'GET') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
+    const actions = db.prepare("SELECT DISTINCT action FROM audit_log ORDER BY action").all();
+    const resources = db.prepare("SELECT DISTINCT resource FROM audit_log ORDER BY resource").all();
+    const users = db.prepare("SELECT DISTINCT username FROM audit_log WHERE username IS NOT NULL ORDER BY username").all();
+    ok(res, { actions: actions.map(a => a.action), resources: resources.map(r => r.resource), users: users.map(u => u.username) });
+    return;
+  }
+
+  // GET /api/error-logs — 에러 로그 (admin만, 필터링 지원)
   if (pathname === '/api/error-logs' && method === 'GET') {
     const token = extractToken(req);
     const decoded = token ? verifyToken(token) : null;
     if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
-    const limit = parseInt(parsed.searchParams.get('limit') || '50');
-    const rows = db.prepare("SELECT * FROM error_logs ORDER BY created_at DESC LIMIT ?").all(limit);
-    ok(res, rows);
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+    const offset = parseInt(parsed.searchParams.get('offset') || '0');
+    const level = parsed.searchParams.get('level') || '';
+    const search = parsed.searchParams.get('q') || '';
+
+    let where = [], params = [];
+    if (level) { where.push("level = ?"); params.push(level); }
+    if (search) { where.push("(message LIKE ? OR url LIKE ?)"); params.push('%'+search+'%','%'+search+'%'); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+    const total = db.prepare("SELECT COUNT(*) as cnt FROM error_logs" + whereClause).get(...params).cnt;
+    const rows = db.prepare("SELECT * FROM error_logs" + whereClause + " ORDER BY created_at DESC LIMIT ? OFFSET ?").all(...params, limit, offset);
+    ok(res, { rows, total, limit, offset });
     return;
   }
 
@@ -2473,6 +2538,7 @@ async function handleRequest(req, res) {
       kakao: body.kakao || '',
       memo: body.memo || '',
     });
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'vendor_create', 'vendors', info.lastInsertRowid, `거래처 등록: ${body.name}`, clientIP);
     ok(res, { vendor_id: info.lastInsertRowid });
     return;
   }
@@ -2518,6 +2584,7 @@ async function handleRequest(req, res) {
     if (fields.length === 0) { fail(res, 400, 'No fields to update'); return; }
     fields.push(`updated_at = datetime('now','localtime')`);
     db.prepare(`UPDATE vendors SET ${fields.join(', ')} WHERE vendor_id = @id`).run(params);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'vendor_update', 'vendors', id, `거래처 수정: ${body.name || id}`, clientIP);
     ok(res, { vendor_id: id });
     return;
   }
@@ -2527,6 +2594,7 @@ async function handleRequest(req, res) {
   if (vendorDel && method === 'DELETE') {
     const id = parseInt(vendorDel[1]);
     db.prepare('DELETE FROM vendors WHERE vendor_id = ?').run(id);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'vendor_delete', 'vendors', id, `거래처 삭제`, clientIP);
     ok(res, { deleted: id });
     return;
   }
@@ -7794,6 +7862,7 @@ async function handleRequest(req, res) {
       b.priority||'normal', b.assignee||'', b.due_date||'', b.start_date||'',
       b.related_po||'', b.related_vendor||'', b.tags||'', b.created_by||''
     );
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'task_create', 'tasks', info.lastInsertRowid, `업무 생성: ${b.title}`, clientIP);
     ok(res, { id: info.lastInsertRowid, task_number: num });
     return;
   }
@@ -7811,6 +7880,7 @@ async function handleRequest(req, res) {
     sets.push("updated_at=datetime('now','localtime')");
     vals2.push(id);
     db.prepare(`UPDATE tasks SET ${sets.join(',')} WHERE id=?`).run(...vals2);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'task_update', 'tasks', id, `업무 수정: ${b.status ? '상태→'+b.status : ''}${b.title ? ' 제목→'+b.title : ''}`, clientIP);
     ok(res, { updated: true });
     return;
   }
@@ -7820,6 +7890,7 @@ async function handleRequest(req, res) {
     const id = parseInt(taskMatch[1]);
     db.prepare('DELETE FROM task_comments WHERE task_id=?').run(id);
     db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'task_delete', 'tasks', id, `업무 삭제`, clientIP);
     ok(res, { deleted: true });
     return;
   }
@@ -9385,6 +9456,466 @@ async function handleRequest(req, res) {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  //  경영대시보드 API (Executive Dashboard)
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/exec/summary — 경영 종합 KPI
+  if (pathname === '/api/exec/summary' && method === 'GET') {
+    const sources = { xerp: 'unknown', bar_shop1: 'unknown', sqlite: 'ok' };
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const fmtDate = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    const s = fmtDate(monthStart), e = fmtDate(now);
+
+    let salesData = { total_sales: 0, total_supply: 0, total_fee: 0, order_count: 0, channels: [] };
+    let barData = { total_revenue: 0, total_cost: 0, order_count: 0 };
+    let prevMonthSales = 0;
+
+    // XERP: 이번달 매출
+    try {
+      const xerpPool = await ensureXerpPool();
+      const r = await xerpPool.request()
+        .input('s', s).input('e', e)
+        .query(`SELECT RTRIM(DeptGubun) AS channel, COUNT(DISTINCT h_orderid) AS order_count,
+                ISNULL(SUM(h_sumPrice),0) AS total_sales, ISNULL(SUM(h_offerPrice),0) AS total_supply,
+                ISNULL(SUM(FeeAmnt),0) AS total_fee
+                FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e GROUP BY RTRIM(DeptGubun)`);
+      salesData.channels = r.recordset || [];
+      salesData.channels.forEach(c => { salesData.total_sales += c.total_sales; salesData.total_supply += c.total_supply; salesData.total_fee += c.total_fee; salesData.order_count += c.order_count; });
+      // 전월 매출
+      const pm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+      const pmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      const r2 = await xerpPool.request()
+        .input('s', fmtDate(pm)).input('e', fmtDate(pmEnd))
+        .query(`SELECT ISNULL(SUM(h_sumPrice),0) AS total FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e`);
+      prevMonthSales = (r2.recordset[0] || {}).total || 0;
+      sources.xerp = 'ok';
+    } catch(e) { sources.xerp = 'error'; }
+
+    // bar_shop1: 이번달 매출/원가
+    try {
+      await withBarShop1Pool(async (pool) => {
+        const r = await pool.request()
+          .input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT SUM(i.item_sale_price * i.item_count) AS total_revenue,
+                  SUM(i.item_price * i.item_count) AS total_cost, COUNT(DISTINCT o.order_seq) AS order_count
+                  FROM custom_order o WITH (NOLOCK) JOIN custom_order_item i WITH (NOLOCK) ON o.order_seq = i.order_seq
+                  WHERE o.order_date >= @s AND o.order_date <= @e AND o.status_seq >= 1 AND i.item_sale_price > 0 AND i.item_price > 0`);
+        const row = r.recordset[0] || {};
+        barData.total_revenue = row.total_revenue || 0;
+        barData.total_cost = row.total_cost || 0;
+        barData.order_count = row.order_count || 0;
+      });
+      sources.bar_shop1 = 'ok';
+    } catch(e) { sources.bar_shop1 = 'error'; }
+
+    // SQLite: 업무/불량/후공정
+    let taskStats = { total: 0, done: 0, in_progress: 0 };
+    let defectCount = 0;
+    let postProcessTotal = 0;
+    try {
+      const ts = db.prepare("SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status").all();
+      ts.forEach(t => { taskStats.total += t.cnt; if(t.status==='done') taskStats.done=t.cnt; if(t.status==='in_progress') taskStats.in_progress=t.cnt; });
+      const dc = db.prepare("SELECT COUNT(*) as cnt FROM defects WHERE created_at >= ?").get(monthStart.toISOString().slice(0,10));
+      defectCount = dc ? dc.cnt : 0;
+      try { const pp = db.prepare("SELECT COALESCE(SUM(amount),0) as total FROM post_process_history WHERE created_at >= ?").get(monthStart.toISOString().slice(0,10)); postProcessTotal = pp ? pp.total : 0; } catch(e){}
+    } catch(e) {}
+
+    // PO 현황
+    let poStats = { total: 0, pending: 0 };
+    try {
+      const pc = db.prepare("SELECT COUNT(*) as cnt FROM purchase_orders WHERE created_at >= ?").get(monthStart.toISOString().slice(0,10));
+      poStats.total = pc ? pc.cnt : 0;
+      const pp = db.prepare("SELECT COUNT(*) as cnt FROM purchase_orders WHERE status IN ('pending','ordered','partial')").get();
+      poStats.pending = pp ? pp.cnt : 0;
+    } catch(e) {}
+
+    const totalSales = salesData.total_sales + barData.total_revenue;
+    const totalCost = barData.total_cost + salesData.total_fee + postProcessTotal;
+    const grossProfit = totalSales - totalCost;
+    const marginRate = totalSales > 0 ? (grossProfit / totalSales * 100) : 0;
+    const salesGrowth = prevMonthSales > 0 ? ((salesData.total_sales - prevMonthSales) / prevMonthSales * 100) : 0;
+
+    ok(res, {
+      sources,
+      period: { start: s, end: e, month: (now.getMonth()+1) + '월' },
+      kpi: {
+        total_sales: totalSales,
+        gross_profit: grossProfit,
+        margin_rate: Math.round(marginRate * 10) / 10,
+        sales_growth: Math.round(salesGrowth * 10) / 10,
+        order_count: salesData.order_count + barData.order_count,
+        total_fee: salesData.total_fee,
+        defect_count: defectCount,
+        po_pending: poStats.pending
+      },
+      channels: salesData.channels,
+      bar_shop1: barData,
+      tasks: taskStats,
+      po: poStats
+    });
+    return;
+  }
+
+  // GET /api/exec/trend — 경영 월별 추이 (최근 12개월)
+  if (pathname === '/api/exec/trend' && method === 'GET') {
+    const months = parseInt(parsed.searchParams.get('months') || '12');
+    const sources = { xerp: 'unknown', bar_shop1: 'unknown' };
+    const now = new Date();
+    const result = [];
+
+    try {
+      const xerpPool = await ensureXerpPool();
+      const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+      const fmtD = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+
+      // 월별 청크
+      for (let m = 0; m < months; m++) {
+        const md = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1);
+        const mEnd = new Date(md.getFullYear(), md.getMonth() + 1, 0);
+        const label = md.getFullYear() + '-' + String(md.getMonth()+1).padStart(2,'0');
+        let sales = 0, fee = 0, supply = 0, orders = 0;
+
+        try {
+          const r = await xerpPool.request()
+            .input('s', fmtD(md)).input('e', fmtD(mEnd))
+            .query(`SELECT ISNULL(SUM(h_sumPrice),0) AS sales, ISNULL(SUM(FeeAmnt),0) AS fee,
+                    ISNULL(SUM(h_offerPrice),0) AS supply, COUNT(DISTINCT h_orderid) AS orders
+                    FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e`);
+          const row = r.recordset[0] || {};
+          sales = row.sales || 0; fee = row.fee || 0; supply = row.supply || 0; orders = row.orders || 0;
+        } catch(e) {}
+
+        result.push({ month: label, sales, fee, supply, orders, margin: sales - fee });
+      }
+      sources.xerp = 'ok';
+    } catch(e) { sources.xerp = 'error'; }
+
+    ok(res, { sources, trend: result });
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  고객주문 API (Customer Orders)
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/customer-orders/summary — 주문 현황 KPI
+  if (pathname === '/api/customer-orders/summary' && method === 'GET') {
+    const sources = { xerp: 'unknown', bar_shop1: 'unknown', dd: 'unknown', sqlite: 'ok' };
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const now = new Date();
+    const s = start || (now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + '01');
+    const e = end || (now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0'));
+
+    let xerpSummary = { order_count: 0, total_sales: 0, channels: [] };
+    let barSummary = { order_count: 0, total_revenue: 0, status: [], sites: [] };
+    let ddSummary = { order_count: 0, states: [] };
+
+    // XERP
+    try {
+      const xerpPool = await ensureXerpPool();
+      const r = await xerpPool.request().input('s', s).input('e', e)
+        .query(`SELECT COUNT(DISTINCT h_orderid) AS order_count, ISNULL(SUM(h_sumPrice),0) AS total_sales,
+                ISNULL(SUM(FeeAmnt),0) AS total_fee
+                FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e`);
+      const row = r.recordset[0] || {};
+      xerpSummary.order_count = row.order_count || 0;
+      xerpSummary.total_sales = row.total_sales || 0;
+      xerpSummary.total_fee = row.total_fee || 0;
+      // 채널별
+      const r2 = await xerpPool.request().input('s', s).input('e', e)
+        .query(`SELECT RTRIM(DeptGubun) AS channel, COUNT(DISTINCT h_orderid) AS cnt, ISNULL(SUM(h_sumPrice),0) AS sales
+                FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e GROUP BY RTRIM(DeptGubun) ORDER BY sales DESC`);
+      xerpSummary.channels = (r2.recordset || []).map(r => ({ channel: DEPT_GUBUN_LABELS[r.channel] || r.channel || '기타', count: r.cnt, sales: r.sales }));
+      sources.xerp = 'ok';
+    } catch(ex) { sources.xerp = 'error'; }
+
+    // bar_shop1
+    try {
+      await withBarShop1Pool(async (pool) => {
+        const r = await pool.request().input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT COUNT(*) AS order_count, ISNULL(SUM(total_price),0) AS total_revenue
+                  FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date <= @e AND status_seq >= 1`);
+        const row = r.recordset[0] || {};
+        barSummary.order_count = row.order_count || 0;
+        barSummary.total_revenue = row.total_revenue || 0;
+        // 상태별
+        const r2 = await pool.request().input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT status_seq, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date <= @e AND status_seq >= 1 GROUP BY status_seq`);
+        barSummary.status = r2.recordset || [];
+        // 사이트별
+        const r3 = await pool.request().input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT RTRIM(site_gubun) AS site, COUNT(*) AS cnt FROM custom_order WITH (NOLOCK) WHERE order_date >= @s AND order_date <= @e AND status_seq >= 1 GROUP BY RTRIM(site_gubun) ORDER BY cnt DESC`);
+        barSummary.sites = r3.recordset || [];
+      });
+      sources.bar_shop1 = 'ok';
+    } catch(ex) { sources.bar_shop1 = 'error'; }
+
+    // DD
+    try {
+      if (typeof ddPool !== 'undefined' && ddPool) {
+        const sDate = s.substring(0,4)+'-'+s.substring(4,6)+'-'+s.substring(6,8);
+        const eDate = e.substring(0,4)+'-'+e.substring(4,6)+'-'+e.substring(6,8);
+        const [rows] = await ddPool.query('SELECT order_state, COUNT(*) AS cnt FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY) GROUP BY order_state', [sDate, eDate]);
+        ddSummary.states = rows || [];
+        ddSummary.order_count = rows.reduce((a,b)=>a+(b.cnt||0),0);
+        sources.dd = 'ok';
+      } else { sources.dd = 'unavailable'; }
+    } catch(ex) { sources.dd = 'error'; }
+
+    const totalOrders = xerpSummary.order_count + barSummary.order_count + ddSummary.order_count;
+    const totalSales = xerpSummary.total_sales + barSummary.total_revenue;
+
+    ok(res, {
+      sources, period: { start: s, end: e },
+      kpi: { total_orders: totalOrders, total_sales: totalSales, xerp_orders: xerpSummary.order_count, bar_orders: barSummary.order_count, dd_orders: ddSummary.order_count },
+      xerp: xerpSummary, bar_shop1: barSummary, dd: ddSummary
+    });
+    return;
+  }
+
+  // GET /api/customer-orders/list — 주문 목록 (XERP 기반)
+  if (pathname === '/api/customer-orders/list' && method === 'GET') {
+    const sources = { xerp: 'unknown' };
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const channel = parsed.searchParams.get('channel') || '';
+    const search = parsed.searchParams.get('q') || '';
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+    const offset = parseInt(parsed.searchParams.get('offset') || '0');
+
+    const now = new Date();
+    const s = start || (now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + '01');
+    const e = end || (now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0'));
+
+    let rows = [], total = 0;
+    try {
+      const xerpPool = await ensureXerpPool();
+      let where = "h_date >= @s AND h_date <= @e";
+      const request = xerpPool.request().input('s', s).input('e', e);
+      if (channel) { where += " AND RTRIM(DeptGubun) = @ch"; request.input('ch', channel); }
+      if (search) { where += " AND (h_orderid LIKE @q OR b_goodCode LIKE @q)"; request.input('q', '%'+search+'%'); }
+
+      const countR = await request.query(`SELECT COUNT(*) AS cnt FROM ERP_SalesData WITH (NOLOCK) WHERE ${where}`);
+      total = (countR.recordset[0] || {}).cnt || 0;
+
+      const request2 = xerpPool.request().input('s', s).input('e', e).input('lim', limit).input('off', offset);
+      if (channel) request2.input('ch', channel);
+      if (search) request2.input('q', '%'+search+'%');
+
+      const r = await request2.query(`SELECT TOP (@lim) h_orderid, h_date, RTRIM(DeptGubun) AS channel,
+        RTRIM(b_goodCode) AS product_code, b_OrderNum AS qty,
+        h_sumPrice AS sales, h_offerPrice AS supply, FeeAmnt AS fee, b_sumPrice AS product_sales
+        FROM ERP_SalesData WITH (NOLOCK) WHERE ${where}
+        ORDER BY h_date DESC, h_orderid DESC`);
+      rows = (r.recordset || []).map(r => ({
+        ...r, channel_name: DEPT_GUBUN_LABELS[r.channel] || r.channel || '기타'
+      }));
+      sources.xerp = 'ok';
+    } catch(ex) { sources.xerp = 'error'; }
+
+    ok(res, { sources, rows, total, limit, offset });
+    return;
+  }
+
+  // GET /api/customer-orders/bar-list — bar_shop1 주문 목록
+  if (pathname === '/api/customer-orders/bar-list' && method === 'GET') {
+    const sources = { bar_shop1: 'unknown' };
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const status = parsed.searchParams.get('status') || '';
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+
+    const now = new Date();
+    const s = start || (now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01');
+    const e = end || now.toISOString().slice(0,10);
+
+    let rows = [];
+    try {
+      await withBarShop1Pool(async (pool) => {
+        let where = "o.order_date >= @s AND o.order_date <= @e AND o.status_seq >= 1";
+        const request = pool.request().input('s', s).input('e', e + ' 23:59:59');
+        if (status) { where += " AND o.status_seq = @st"; request.input('st', parseInt(status)); }
+
+        const r = await request.query(`SELECT TOP ${limit} o.order_seq, o.order_date, o.total_price,
+          o.status_seq, RTRIM(o.site_gubun) AS site, RTRIM(o.pay_Type) AS pay_type,
+          (SELECT COUNT(*) FROM custom_order_item i WITH (NOLOCK) WHERE i.order_seq = o.order_seq) AS item_count
+          FROM custom_order o WITH (NOLOCK) WHERE ${where} ORDER BY o.order_date DESC`);
+        rows = r.recordset || [];
+      });
+      sources.bar_shop1 = 'ok';
+    } catch(ex) { sources.bar_shop1 = 'error'; }
+
+    ok(res, { sources, rows });
+    return;
+  }
+
+  // GET /api/customer-orders/daily — 일별 주문 추이
+  if (pathname === '/api/customer-orders/daily' && method === 'GET') {
+    const sources = { xerp: 'unknown' };
+    const days = parseInt(parsed.searchParams.get('days') || '30');
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - days);
+    const fmtD = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+
+    let daily = [];
+    try {
+      const xerpPool = await ensureXerpPool();
+      const r = await xerpPool.request()
+        .input('s', fmtD(startDate)).input('e', fmtD(now))
+        .query(`SELECT h_date AS day, COUNT(DISTINCT h_orderid) AS orders, ISNULL(SUM(h_sumPrice),0) AS sales
+                FROM ERP_SalesData WITH (NOLOCK) WHERE h_date >= @s AND h_date <= @e
+                GROUP BY h_date ORDER BY h_date`);
+      daily = (r.recordset || []).map(d => ({ day: d.day, orders: d.orders, sales: d.sales }));
+      sources.xerp = 'ok';
+    } catch(ex) { sources.xerp = 'error'; }
+
+    ok(res, { sources, daily });
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  배송추적 API (Shipping Tracking)
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/shipping/summary — 배송 현황 KPI
+  if (pathname === '/api/shipping/summary' && method === 'GET') {
+    const sources = { bar_shop1: 'unknown', dd: 'unknown' };
+    const now = new Date();
+    const fmtD = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    const s = parsed.searchParams.get('start') || fmtD(new Date(now.getFullYear(), now.getMonth(), 1));
+    const e = parsed.searchParams.get('end') || fmtD(now);
+
+    let barShipping = { total: 0, by_status: [], recent: [] };
+    let ddShipping = { total: 0, by_state: [] };
+
+    // bar_shop1: 주문 상태별 + 최근 배송
+    try {
+      await withBarShop1Pool(async (pool) => {
+        // 상태별 집계
+        const r1 = await pool.request().input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT o.status_seq, COUNT(*) AS cnt
+                  FROM custom_order o WITH (NOLOCK)
+                  WHERE o.order_date >= @s AND o.order_date <= @e AND o.status_seq >= 1
+                  GROUP BY o.status_seq ORDER BY o.status_seq`);
+        barShipping.by_status = r1.recordset || [];
+        barShipping.total = barShipping.by_status.reduce((a,b) => a + b.cnt, 0);
+
+        // 최근 배송 건
+        const r2 = await pool.request().input('s', s).input('e', e + ' 23:59:59')
+          .query(`SELECT TOP 50 o.order_seq, o.order_date, o.status_seq, o.total_price,
+                  RTRIM(o.site_gubun) AS site,
+                  d.NAME AS recipient, d.ADDR AS address
+                  FROM custom_order o WITH (NOLOCK)
+                  LEFT JOIN DELIVERY_INFO d WITH (NOLOCK) ON o.order_seq = d.ORDER_SEQ AND d.DELIVERY_SEQ = 1
+                  WHERE o.order_date >= @s AND o.order_date <= @e AND o.status_seq >= 3
+                  ORDER BY o.order_date DESC`);
+        barShipping.recent = r2.recordset || [];
+      });
+      sources.bar_shop1 = 'ok';
+    } catch(ex) { sources.bar_shop1 = 'error'; }
+
+    // DD: 배송 상태별
+    try {
+      if (typeof ddPool !== 'undefined' && ddPool) {
+        const sDate = s.substring(0,4)+'-'+s.substring(4,6)+'-'+s.substring(6,8);
+        const eDate = e.substring(0,4)+'-'+e.substring(4,6)+'-'+e.substring(6,8);
+        const [rows] = await ddPool.query(`SELECT shipping_state, COUNT(*) AS cnt FROM orders
+          WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY) AND order_state != 'C'
+          GROUP BY shipping_state`, [sDate, eDate]);
+        ddShipping.by_state = rows || [];
+        ddShipping.total = rows.reduce((a,b) => a + (b.cnt||0), 0);
+        sources.dd = 'ok';
+      } else { sources.dd = 'unavailable'; }
+    } catch(ex) { sources.dd = 'error'; }
+
+    // 파이프라인 계산
+    const pipeline = {};
+    barShipping.by_status.forEach(s => { pipeline[s.status_seq] = (pipeline[s.status_seq] || 0) + s.cnt; });
+
+    ok(res, {
+      sources, period: { start: s, end: e },
+      kpi: {
+        total_orders: barShipping.total + ddShipping.total,
+        bar_total: barShipping.total,
+        dd_total: ddShipping.total,
+        shipped: (pipeline[5] || 0) + (pipeline[6] || 0),
+        in_production: (pipeline[3] || 0) + (pipeline[4] || 0),
+        pending: (pipeline[1] || 0) + (pipeline[2] || 0)
+      },
+      pipeline,
+      bar_shop1: barShipping,
+      dd: ddShipping
+    });
+    return;
+  }
+
+  // GET /api/shipping/list — 배송 목록 (bar_shop1)
+  if (pathname === '/api/shipping/list' && method === 'GET') {
+    const sources = { bar_shop1: 'unknown' };
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const status = parsed.searchParams.get('status') || '';
+    const search = parsed.searchParams.get('q') || '';
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+
+    const now = new Date();
+    const fmtD = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    const s = start || fmtD(new Date(now.getFullYear(), now.getMonth(), 1));
+    const e = end || fmtD(now);
+
+    let rows = [];
+    try {
+      await withBarShop1Pool(async (pool) => {
+        let where = "o.order_date >= @s AND o.order_date <= @e AND o.status_seq >= 1";
+        const request = pool.request().input('s', s).input('e', e + ' 23:59:59');
+        if (status) { where += " AND o.status_seq = @st"; request.input('st', parseInt(status)); }
+        if (search) { where += " AND (CAST(o.order_seq AS VARCHAR) LIKE @q OR d.NAME LIKE @q)"; request.input('q', '%'+search+'%'); }
+
+        const r = await request.query(`SELECT TOP ${limit} o.order_seq, o.order_date, o.status_seq, o.total_price,
+          RTRIM(o.site_gubun) AS site, RTRIM(o.pay_Type) AS pay_type,
+          d.NAME AS recipient, RTRIM(d.ADDR) AS address, d.HPHONE AS phone,
+          (SELECT COUNT(*) FROM custom_order_item i WITH (NOLOCK) WHERE i.order_seq = o.order_seq) AS item_count
+          FROM custom_order o WITH (NOLOCK)
+          LEFT JOIN DELIVERY_INFO d WITH (NOLOCK) ON o.order_seq = d.ORDER_SEQ AND d.DELIVERY_SEQ = 1
+          WHERE ${where} ORDER BY o.order_date DESC`);
+        rows = r.recordset || [];
+      });
+      sources.bar_shop1 = 'ok';
+    } catch(ex) { sources.bar_shop1 = 'error'; }
+
+    ok(res, { sources, rows });
+    return;
+  }
+
+  // GET /api/shipping/dd-list — DD 배송 목록
+  if (pathname === '/api/shipping/dd-list' && method === 'GET') {
+    const sources = { dd: 'unknown' };
+    const start = parsed.searchParams.get('start') || '';
+    const end = parsed.searchParams.get('end') || '';
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100'), 500);
+    let rows = [];
+    try {
+      if (typeof ddPool !== 'undefined' && ddPool) {
+        const now = new Date();
+        const s = start || (now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-01');
+        const e = end || now.toISOString().slice(0,10);
+        const [r] = await ddPool.query(`SELECT id, order_number, order_state, shipping_state,
+          total_money, created_at, cj_invoice_numbers
+          FROM orders WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY) AND order_state != 'C'
+          ORDER BY created_at DESC LIMIT ?`, [s, e, limit]);
+        rows = r || [];
+        sources.dd = 'ok';
+      } else { sources.dd = 'unavailable'; }
+    } catch(ex) { sources.dd = 'error'; }
+
+    ok(res, { sources, rows });
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   //  원가관리 API (Cost Management / Margin Analysis)
   // ════════════════════════════════════════════════════════════════════
 
@@ -9995,6 +10526,7 @@ async function handleRequest(req, res) {
       is_popup ? 1 : 0, popup_start || null, popup_end || null,
       is_pinned ? 1 : 0, decoded.userId, decoded.username
     );
+    auditLog(decoded.userId, decoded.username, 'notice_create', 'notices', r.lastInsertRowid, `공지 작성: ${title}${is_popup ? ' (팝업)' : ''}`, clientIP);
     ok(res, { id: r.lastInsertRowid, message: '공지 등록 완료' }); return;
   }
 
@@ -10012,6 +10544,7 @@ async function handleRequest(req, res) {
       is_popup ? 1 : 0, popup_start || null, popup_end || null,
       is_pinned ? 1 : 0, status || null, id
     );
+    auditLog(decoded.userId, decoded.username, 'notice_update', 'notices', id, `공지 수정: ${title || '(제목 유지)'}`, clientIP);
     ok(res, { message: '공지 수정 완료' }); return;
   }
 
@@ -10021,6 +10554,7 @@ async function handleRequest(req, res) {
     if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한 필요'); return; }
     const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
     db.prepare("UPDATE notices SET status = 'deleted', updated_at = datetime('now','localtime') WHERE id = ?").run(id);
+    auditLog(decoded.userId, decoded.username, 'notice_delete', 'notices', id, '공지 삭제', clientIP);
     ok(res, { message: '공지 삭제 완료' }); return;
   }
 
