@@ -1298,7 +1298,8 @@ var _megaData = {
     items: [
       {icon:'📦',bg:'#fef2f2',fg:'#ef4444',name:'재고현황',desc:'XERP 실시간 재고',page:'inventory',badgeId:'qmInventory'},
       {icon:'🚚',bg:'#fff7ed',fg:'#ea580c',name:'출고현황',desc:'SO/MO/SI/MI 조회',page:'shipments'},
-      {icon:'📑',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 보고',page:'closing'}
+      {icon:'📑',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 보고',page:'closing'},
+      {icon:'🏢',bg:'#ecfdf5',fg:'#059669',name:'창고관리',desc:'다중 창고 재고/이동',page:'warehouse'}
     ]
   },
   order: {
@@ -3084,20 +3085,34 @@ function closeMegaMenu() {
   <div id="pmProductPanel">
     <div class="card-box" style="padding:0;overflow:hidden">
       <div class="table-wrap" style="max-height:calc(100vh - 280px)">
-        <table style="vertical-align:middle">
+        <table id="pmTable" style="table-layout:fixed;width:100%">
+          <colgroup>
+            <col style="width:8%">
+            <col style="width:12%">
+            <col style="width:6%">
+            <col style="width:6%">
+            <col style="width:4%">
+            <col style="width:5%">
+            <col style="width:8%">
+            <col style="width:18%">
+            <col style="width:3%">
+            <col style="width:4%">
+            <col style="width:6%">
+            <col style="width:8%">
+          </colgroup>
           <thead><tr>
-            <th style="width:100px">제품코드</th>
+            <th>제품코드</th>
             <th>품목명</th>
-            <th style="width:80px">브랜드</th>
-            <th style="width:80px">카테고리</th>
-            <th style="width:44px">단위</th>
-            <th style="width:60px">상태</th>
-            <th style="width:100px">원자재코드</th>
-            <th style="width:120px">원재료명</th>
-            <th style="width:50px">절</th>
-            <th style="width:50px">조판</th>
-            <th style="width:80px">제지사</th>
-            <th style="width:80px"></th>
+            <th>브랜드</th>
+            <th>카테고리</th>
+            <th>단위</th>
+            <th>상태</th>
+            <th>원자재코드</th>
+            <th>원재료명</th>
+            <th>절</th>
+            <th>조판</th>
+            <th>제지사</th>
+            <th></th>
           </tr></thead>
           <tbody id="pmTableBody">
             <tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
@@ -4394,6 +4409,57 @@ function closeMegaMenu() {
   </div>
 </div>
 
+<!-- ========== WAREHOUSE (창고관리) PAGE ========== -->
+<div class="page" id="page-warehouse" style="background:#fff;color:#111">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <h2 style="font-size:18px;font-weight:700;margin:0;color:#111">🏢 창고관리</h2>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="whSearch" placeholder="품목코드/이름 검색" onkeyup="if(event.key==='Enter')loadWarehouseInventory()" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:200px">
+      <button class="btn btn-sm" onclick="loadWarehouseInventory()" style="background:#0284c7;color:#fff">검색</button>
+      <button class="btn btn-sm" onclick="syncXerpToWarehouse()" style="background:#059669;color:#fff">XERP→본사 동기화</button>
+      <button class="btn btn-sm" onclick="openWhTransferModal()" style="background:#7c3aed;color:#fff">재고이동</button>
+      <button class="btn btn-sm" onclick="openWhAdjustModal()" style="background:#ea580c;color:#fff">재고조정</button>
+      <button class="btn btn-sm" onclick="openWhSettingsModal()" style="background:#475569;color:#fff">⚙ 창고설정</button>
+    </div>
+  </div>
+
+  <!-- 창고 탭 -->
+  <div id="whTabs" style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;border-bottom:2px solid #e5e7eb;padding-bottom:8px"></div>
+
+  <!-- KPI 카드 -->
+  <div id="whKpi" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px"></div>
+
+  <!-- 재고 테이블 -->
+  <div style="overflow-x:auto">
+    <table id="whInvTable" style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
+      <colgroup>
+        <col style="width:15%"><col style="width:25%"><col style="width:12%"><col style="width:35%"><col style="width:13%">
+      </colgroup>
+      <thead>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+          <th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목코드</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목명</th>
+          <th style="padding:10px 8px;text-align:right;font-weight:600;color:#475569">수량</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">창고별 내역</th>
+          <th style="padding:10px 8px;text-align:center;font-weight:600;color:#475569">작업</th>
+        </tr>
+      </thead>
+      <tbody id="whInvBody"></tbody>
+    </table>
+  </div>
+
+  <!-- 이동/조정 이력 영역 -->
+  <div id="whHistoryArea" style="display:none;margin-top:24px">
+    <h3 id="whHistoryTitle" style="font-size:15px;font-weight:600;margin:0 0 12px 0"></h3>
+    <div style="overflow-x:auto">
+      <table id="whHistoryTable" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead id="whHistoryHead"></thead>
+        <tbody id="whHistoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 </div><!-- /page-content -->
 
 <!-- Footer -->
@@ -5582,7 +5648,7 @@ function showPage(page, opts){
   // Update topbar highlight
   var pageCatMap = {
     'dashboard':'dashboard','analytics':'mgmt',
-    'inventory':'stock','shipments':'stock','closing':'stock',
+    'inventory':'stock','shipments':'stock','closing':'stock','warehouse':'stock',
     'auto-order':'order','create-po':'order','po-list':'order','po-mgmt':'order','china-shipment':'order',
     'delivery-schedule':'inbound','receipts':'inbound','os-register':'inbound',
     'production-req':'production','production-stock':'production','mrp':'production',
@@ -5635,6 +5701,7 @@ function showPage(page, opts){
   if(page==='user-mgmt') loadUserMgmt();
   if(page==='tasks') loadTasks();
   if(page==='production-stock') loadProductionStock();
+  if(page==='warehouse') loadWarehousePage();
   if(page==='report') loadReportList();
   if(page==='closing') {
     var cyr = document.getElementById('closingYear');
@@ -11614,18 +11681,19 @@ function renderProductMgmt(){
     const stCls=p.status==='active'?'sb-safe':'sb-nosale';
     const stLabel=p.status==='active'?'운영중':'중단';
     const newBadge = p.is_new_product ? '<span style="display:inline-block; padding:1px 6px; background:#fef3c7; color:#d97706; border-radius:4px; font-size:11px; margin-left:4px;">신제품</span>' : '';
-    return`<tr style="vertical-align:middle">
-      <td style="font-weight:600">${esc(p.product_code)}</td>
-      <td>${esc(p.product_name||'')}${newBadge}</td>
-      <td>${esc(p.brand||'')}</td>
-      <td>${esc(p.category||'')}</td>
-      <td style="text-align:center;color:#475569">${esc(p.unit||'EA')}</td>
-      <td><span class="status-badge ${stCls}" style="font-size:10px">${stLabel}</span></td>
-      <td>${esc(p.material_code||'')}</td>
-      <td>${esc(p.material_name||'')}</td>
-      <td class="n">${p.cut_spec||''}</td>
-      <td class="n">${p.jopan||''}</td>
-      <td>${esc(p.paper_maker||'')}</td>
+    const cellStyle = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px';
+    return`<tr>
+      <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${esc(p.product_code)}</td>
+      <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}</td>
+      <td style="${cellStyle}">${esc(p.brand||'')}</td>
+      <td style="${cellStyle}">${esc(p.category||'')}</td>
+      <td style="${cellStyle};text-align:center;color:#475569">${esc(p.unit||'EA')}</td>
+      <td style="${cellStyle}"><span class="status-badge ${stCls}" style="font-size:10px">${stLabel}</span></td>
+      <td style="${cellStyle}" title="${esc(p.material_code||'')}">${esc(p.material_code||'')}</td>
+      <td style="${cellStyle}" title="${esc(p.material_name||'')}">${esc(p.material_name||'')}</td>
+      <td style="${cellStyle};text-align:center">${p.cut_spec||''}</td>
+      <td style="${cellStyle};text-align:center">${p.jopan||''}</td>
+      <td style="${cellStyle}">${esc(p.paper_maker||'')}</td>
       <td>
         <button class="btn btn-sm" style="padding:2px 6px;font-size:11px" onclick="editProduct(${p.id})">수정</button>
         <button class="btn btn-sm btn-urgent" style="padding:2px 6px;font-size:11px" onclick="deleteProduct(${p.id})">삭제</button>
@@ -16156,6 +16224,329 @@ async function loadReport() {
   } catch(e) {
     c.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">오류: ' + e.message + '</div>';
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  창고관리 (Warehouse Management)
+// ════════════════════════════════════════════════════════════════════
+var _whList = [];
+var _whActiveTab = 'all'; // 'all' 또는 warehouse id
+
+async function loadWarehousePage() {
+  try {
+    const r = await authFetch('/api/warehouses');
+    const rj = await r.json();
+    _whList = rj.data || rj;
+    renderWhTabs();
+    renderWhKpi();
+    await loadWarehouseInventory();
+  } catch(e) { console.error('창고 로드 실패', e); }
+}
+
+function renderWhTabs() {
+  var h = '<button class="btn btn-sm" style="' + (_whActiveTab==='all'?'background:#0f172a;color:#fff':'background:#f1f5f9;color:#334155') + ';border-radius:6px;padding:6px 16px;font-weight:600" onclick="_whActiveTab=\'all\';renderWhTabs();renderWhKpi();loadWarehouseInventory()">📊 전체보기</button>';
+  _whList.forEach(function(w) {
+    var active = _whActiveTab == w.id;
+    h += '<button class="btn btn-sm" style="' + (active?'background:#0f172a;color:#fff':'background:#f1f5f9;color:#334155') + ';border-radius:6px;padding:6px 16px" onclick="_whActiveTab='+w.id+';renderWhTabs();renderWhKpi();loadWarehouseInventory()">' + (w.is_default?'⭐ ':'') + w.name + '</button>';
+  });
+  h += '<button class="btn btn-sm" style="background:#f1f5f9;color:#7c3aed;border-radius:6px;padding:6px 16px" onclick="_whActiveTab=\'transfers\';renderWhTabs();loadWhTransfers()">🔄 이동이력</button>';
+  h += '<button class="btn btn-sm" style="background:#f1f5f9;color:#ea580c;border-radius:6px;padding:6px 16px" onclick="_whActiveTab=\'adjustments\';renderWhTabs();loadWhAdjustments()">📝 조정이력</button>';
+  document.getElementById('whTabs').innerHTML = h;
+}
+
+function renderWhKpi() {
+  var el = document.getElementById('whKpi');
+  if (_whActiveTab === 'transfers' || _whActiveTab === 'adjustments') { el.innerHTML = ''; return; }
+  var h = '';
+  if (_whActiveTab === 'all') {
+    _whList.forEach(function(w) {
+      h += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;cursor:pointer" onclick="_whActiveTab='+w.id+';renderWhTabs();renderWhKpi();loadWarehouseInventory()">';
+      h += '<div style="font-size:12px;color:#64748b;margin-bottom:4px">' + (w.is_default?'⭐ ':'') + w.name + '</div>';
+      h += '<div style="font-size:11px;color:#94a3b8">' + w.code + (w.location?' · '+w.location:'') + '</div>';
+      h += '<div style="font-size:11px;color:#94a3b8;margin-top:4px">' + (w.status==='active'?'🟢 활성':'🔴 비활성') + '</div>';
+      h += '</div>';
+    });
+  } else {
+    var w = _whList.find(function(x){return x.id==_whActiveTab;});
+    if (w) {
+      h += '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:16px;grid-column:1/-1">';
+      h += '<div style="font-size:16px;font-weight:700;color:#0369a1">' + (w.is_default?'⭐ ':'') + w.name + ' <span style="font-size:12px;font-weight:400;color:#64748b">[' + w.code + ']</span></div>';
+      h += '<div style="font-size:12px;color:#64748b;margin-top:4px">' + (w.location||'위치 미설정') + (w.description?' — '+w.description:'') + '</div>';
+      h += '</div>';
+    }
+  }
+  el.innerHTML = h;
+}
+
+async function loadWarehouseInventory() {
+  var search = (document.getElementById('whSearch').value || '').trim();
+  var url = '/api/warehouses/inventory?search=' + encodeURIComponent(search);
+  if (_whActiveTab !== 'all' && _whActiveTab !== 'transfers' && _whActiveTab !== 'adjustments') {
+    url += '&warehouse_id=' + _whActiveTab;
+  }
+  document.getElementById('whHistoryArea').style.display = 'none';
+  try {
+    var r = await authFetch(url);
+    var rj = await r.json();
+    var data = rj.data || rj;
+    var tb = document.getElementById('whInvBody');
+    if (!data.length) { tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#94a3b8">데이터 없음</td></tr>'; return; }
+
+    var isAll = (_whActiveTab === 'all');
+    // 컬럼 헤더 변경
+    var thead = document.querySelector('#whInvTable thead tr');
+    if (isAll) {
+      thead.innerHTML = '<th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목코드</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목명</th><th style="padding:10px 8px;text-align:right;font-weight:600;color:#475569">전체수량</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">창고별 내역</th><th style="padding:10px 8px;text-align:center;font-weight:600;color:#475569">작업</th>';
+    } else {
+      thead.innerHTML = '<th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목코드</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">품목명</th><th style="padding:10px 8px;text-align:right;font-weight:600;color:#475569">수량</th><th style="padding:10px 8px;text-align:left;font-weight:600;color:#475569">메모</th><th style="padding:10px 8px;text-align:center;font-weight:600;color:#475569">작업</th>';
+    }
+
+    var h = '';
+    data.forEach(function(row) {
+      h += '<tr style="border-bottom:1px solid #f1f5f9">';
+      h += '<td style="padding:8px;font-family:monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(row.product_code)+'">' + esc(row.product_code) + '</td>';
+      h += '<td style="padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(row.product_name||'')+'">' + esc(row.product_name || '') + '</td>';
+      if (isAll) {
+        h += '<td style="padding:8px;text-align:right;font-weight:600;color:#0f172a">' + (row.total_qty||0).toLocaleString() + '</td>';
+        h += '<td style="padding:8px;font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(row.breakdown||'')+'">' + esc(row.breakdown || '') + '</td>';
+      } else {
+        h += '<td style="padding:8px;text-align:right;font-weight:600;color:#0f172a">' + (row.quantity||0).toLocaleString() + '</td>';
+        h += '<td style="padding:8px;font-size:11px;color:#64748b">' + esc(row.memo || '') + '</td>';
+      }
+      var pc = row.product_code;
+      var pn = row.product_name || '';
+      h += '<td style="padding:8px;text-align:center;white-space:nowrap">';
+      h += '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#7c3aed;color:#fff" onclick="openWhTransferModal(\''+esc(pc)+'\',\''+esc(pn)+'\')">이동</button> ';
+      h += '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#ea580c;color:#fff" onclick="openWhAdjustModal(\''+esc(pc)+'\',\''+esc(pn)+'\')">조정</button>';
+      h += '</td></tr>';
+    });
+    tb.innerHTML = h;
+  } catch(e) { console.error(e); }
+}
+
+async function syncXerpToWarehouse() {
+  if (!confirm('XERP 재고를 본사창고로 동기화합니다. 진행하시겠습니까?')) return;
+  try {
+    var r = await authFetch('/api/warehouses/sync-xerp', { method:'POST' });
+    var d = await r.json();
+    if (r.ok) { alert(d.message); loadWarehouseInventory(); }
+    else alert('실패: ' + (d.error||d.message));
+  } catch(e) { alert('동기화 오류: ' + e.message); }
+}
+
+function openWhTransferModal(pc, pn) {
+  var whOpts = _whList.filter(function(w){return w.status==='active';}).map(function(w){return '<option value="'+w.id+'">'+esc(w.name)+'</option>';}).join('');
+  var html = '<div style="padding:24px;max-width:480px;margin:auto">';
+  html += '<h3 style="margin:0 0 16px 0;font-size:16px;font-weight:700">🔄 재고 이동</h3>';
+  html += '<div style="display:grid;gap:12px">';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">출발 창고</label><select id="tfFrom" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px">' + whOpts + '</select></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">도착 창고</label><select id="tfTo" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px">' + whOpts + '</select></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">품목코드</label><input id="tfCode" value="'+(pc||'')+'" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="품목코드 입력"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">품목명</label><input id="tfName" value="'+(pn||'')+'" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="품목명"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">수량</label><input id="tfQty" type="number" min="1" value="1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">메모</label><input id="tfMemo" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="선택사항"></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">';
+  html += '<button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
+  html += '<button class="btn" onclick="doWhTransfer()" style="padding:8px 20px;background:#7c3aed;color:#fff;border-radius:6px">이동 실행</button>';
+  html += '</div></div>';
+  showWhModal('whModal', html);
+}
+
+async function doWhTransfer() {
+  var d = {
+    from_warehouse: parseInt(document.getElementById('tfFrom').value),
+    to_warehouse: parseInt(document.getElementById('tfTo').value),
+    product_code: document.getElementById('tfCode').value.trim(),
+    product_name: document.getElementById('tfName').value.trim(),
+    quantity: parseInt(document.getElementById('tfQty').value),
+    operator: currentAuthUser ? currentAuthUser.name : '',
+    memo: document.getElementById('tfMemo').value.trim()
+  };
+  if (!d.product_code) { alert('품목코드를 입력하세요'); return; }
+  if (d.from_warehouse === d.to_warehouse) { alert('같은 창고로는 이동할 수 없습니다'); return; }
+  try {
+    var r = await authFetch('/api/warehouses/transfer', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
+    var res = await r.json();
+    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehouseInventory(); }
+    else alert('실패: ' + (res.error||res.message));
+  } catch(e) { alert('오류: ' + e.message); }
+}
+
+function openWhAdjustModal(pc, pn) {
+  var whOpts = _whList.filter(function(w){return w.status==='active';}).map(function(w){return '<option value="'+w.id+'"'+ (_whActiveTab==w.id?' selected':'') +'>'+esc(w.name)+'</option>';}).join('');
+  var html = '<div style="padding:24px;max-width:480px;margin:auto">';
+  html += '<h3 style="margin:0 0 16px 0;font-size:16px;font-weight:700">📝 재고 조정</h3>';
+  html += '<div style="display:grid;gap:12px">';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">창고</label><select id="adjWh" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px">' + whOpts + '</select></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">품목코드</label><input id="adjCode" value="'+(pc||'')+'" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="품목코드 입력"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">품목명</label><input id="adjName" value="'+(pn||'')+'" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="품목명"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">조정 수량 (변경 후)</label><input id="adjQty" type="number" min="0" value="0" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box"></div>';
+  html += '<div><label style="font-size:12px;font-weight:600;color:#475569">사유</label><input id="adjReason" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;box-sizing:border-box" placeholder="조정 사유 입력"></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">';
+  html += '<button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">취소</button>';
+  html += '<button class="btn" onclick="doWhAdjust()" style="padding:8px 20px;background:#ea580c;color:#fff;border-radius:6px">조정 실행</button>';
+  html += '</div></div>';
+  showWhModal('whModal', html);
+}
+
+async function doWhAdjust() {
+  var d = {
+    warehouse_id: parseInt(document.getElementById('adjWh').value),
+    product_code: document.getElementById('adjCode').value.trim(),
+    product_name: document.getElementById('adjName').value.trim(),
+    new_quantity: parseInt(document.getElementById('adjQty').value),
+    reason: document.getElementById('adjReason').value.trim(),
+    operator: currentAuthUser ? currentAuthUser.name : ''
+  };
+  if (!d.product_code) { alert('품목코드를 입력하세요'); return; }
+  try {
+    var r = await authFetch('/api/warehouses/adjust', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
+    var res = await r.json();
+    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehouseInventory(); }
+    else alert('실패: ' + (res.error||res.message));
+  } catch(e) { alert('오류: ' + e.message); }
+}
+
+function openWhSettingsModal() {
+  var html = '<div style="padding:24px;max-width:600px;margin:auto">';
+  html += '<h3 style="margin:0 0 16px 0;font-size:16px;font-weight:700">⚙ 창고 설정</h3>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">';
+  html += '<thead><tr style="background:#f8fafc"><th style="padding:8px;text-align:left">코드</th><th style="padding:8px;text-align:left">이름</th><th style="padding:8px;text-align:left">위치</th><th style="padding:8px;text-align:center">상태</th><th style="padding:8px;text-align:center">기본</th><th style="padding:8px;text-align:center">작업</th></tr></thead><tbody>';
+  _whList.forEach(function(w) {
+    html += '<tr style="border-bottom:1px solid #f1f5f9">';
+    html += '<td style="padding:8px;font-family:monospace">' + esc(w.code) + '</td>';
+    html += '<td style="padding:8px">' + esc(w.name) + '</td>';
+    html += '<td style="padding:8px;color:#64748b">' + esc(w.location||'-') + '</td>';
+    html += '<td style="padding:8px;text-align:center">' + (w.status==='active'?'🟢':'🔴') + '</td>';
+    html += '<td style="padding:8px;text-align:center">' + (w.is_default?'⭐':'') + '</td>';
+    html += '<td style="padding:8px;text-align:center">';
+    if (!w.is_default) html += '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#ef4444;color:#fff" onclick="deleteWarehouse('+w.id+')">삭제</button>';
+    html += '</td></tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div style="border-top:1px solid #e5e7eb;padding-top:16px">';
+  html += '<h4 style="font-size:14px;font-weight:600;margin:0 0 12px 0">새 창고 추가</h4>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  html += '<input id="newWhCode" placeholder="창고코드 (예: WH-05)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
+  html += '<input id="newWhName" placeholder="창고이름" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
+  html += '<input id="newWhLoc" placeholder="위치 (선택)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
+  html += '<input id="newWhDesc" placeholder="설명 (선택)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px">';
+  html += '</div>';
+  html += '<button class="btn" onclick="addWarehouse()" style="margin-top:12px;padding:8px 20px;background:#059669;color:#fff;border-radius:6px">추가</button>';
+  html += '</div>';
+  html += '<div style="margin-top:16px;text-align:right"><button class="btn" onclick="closeModal(\'whModal\')" style="padding:8px 20px;background:#f1f5f9;color:#475569;border-radius:6px">닫기</button></div>';
+  html += '</div>';
+  showWhModal('whModal', html);
+}
+
+async function addWarehouse() {
+  var d = {
+    code: document.getElementById('newWhCode').value.trim(),
+    name: document.getElementById('newWhName').value.trim(),
+    location: document.getElementById('newWhLoc').value.trim(),
+    description: document.getElementById('newWhDesc').value.trim()
+  };
+  if (!d.code || !d.name) { alert('코드와 이름은 필수입니다'); return; }
+  try {
+    var r = await authFetch('/api/warehouses', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d) });
+    var res = await r.json();
+    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehousePage(); }
+    else alert('실패: ' + (res.error||res.message));
+  } catch(e) { alert('오류: ' + e.message); }
+}
+
+async function deleteWarehouse(id) {
+  if (!confirm('이 창고를 삭제하시겠습니까? 재고가 있으면 삭제할 수 없습니다.')) return;
+  try {
+    var r = await authFetch('/api/warehouses/' + id, { method:'DELETE' });
+    var res = await r.json();
+    if (r.ok) { alert(res.message); closeWhModal('whModal'); loadWarehousePage(); }
+    else alert('실패: ' + (res.error||res.message));
+  } catch(e) { alert('오류: ' + e.message); }
+}
+
+async function loadWhTransfers() {
+  document.getElementById('whKpi').innerHTML = '';
+  document.getElementById('whInvBody').innerHTML = '';
+  var area = document.getElementById('whHistoryArea');
+  area.style.display = 'block';
+  document.getElementById('whHistoryTitle').textContent = '🔄 재고 이동 이력 (최근 30일)';
+  try {
+    var r = await authFetch('/api/warehouses/transfers?days=30');
+    var rj = await r.json();
+    var data = rj.data || rj;
+    document.getElementById('whHistoryHead').innerHTML = '<tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left">일시</th><th style="padding:8px;text-align:left">출발</th><th style="padding:8px;text-align:left">도착</th><th style="padding:8px;text-align:left">품목코드</th><th style="padding:8px;text-align:left">품목명</th><th style="padding:8px;text-align:right">수량</th><th style="padding:8px;text-align:left">담당자</th><th style="padding:8px;text-align:left">메모</th></tr>';
+    var h = '';
+    if (!data.length) { h = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">이력 없음</td></tr>'; }
+    data.forEach(function(row) {
+      h += '<tr style="border-bottom:1px solid #f1f5f9">';
+      h += '<td style="padding:6px 8px;font-size:12px;white-space:nowrap">' + (row.created_at||'').slice(0,16) + '</td>';
+      h += '<td style="padding:6px 8px">' + esc(row.from_name) + '</td>';
+      h += '<td style="padding:6px 8px">' + esc(row.to_name) + '</td>';
+      h += '<td style="padding:6px 8px;font-family:monospace;font-size:11px">' + esc(row.product_code) + '</td>';
+      h += '<td style="padding:6px 8px">' + esc(row.product_name||'') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;font-weight:600">' + row.quantity.toLocaleString() + '</td>';
+      h += '<td style="padding:6px 8px;color:#64748b">' + esc(row.operator||'') + '</td>';
+      h += '<td style="padding:6px 8px;color:#64748b;font-size:11px">' + esc(row.memo||'') + '</td>';
+      h += '</tr>';
+    });
+    document.getElementById('whHistoryBody').innerHTML = h;
+  } catch(e) { console.error(e); }
+}
+
+async function loadWhAdjustments() {
+  document.getElementById('whKpi').innerHTML = '';
+  document.getElementById('whInvBody').innerHTML = '';
+  var area = document.getElementById('whHistoryArea');
+  area.style.display = 'block';
+  document.getElementById('whHistoryTitle').textContent = '📝 재고 조정 이력 (최근 30일)';
+  try {
+    var r = await authFetch('/api/warehouses/adjustments?days=30');
+    var rj = await r.json();
+    var data = rj.data || rj;
+    document.getElementById('whHistoryHead').innerHTML = '<tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left">일시</th><th style="padding:8px;text-align:left">창고</th><th style="padding:8px;text-align:left">품목코드</th><th style="padding:8px;text-align:left">품목명</th><th style="padding:8px;text-align:center">유형</th><th style="padding:8px;text-align:right">이전</th><th style="padding:8px;text-align:right">이후</th><th style="padding:8px;text-align:right">차이</th><th style="padding:8px;text-align:left">사유</th><th style="padding:8px;text-align:left">담당자</th></tr>';
+    var h = '';
+    if (!data.length) { h = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8">이력 없음</td></tr>'; }
+    data.forEach(function(row) {
+      var typeLabel = row.adj_type==='increase'?'<span style="color:#16a34a">증가</span>':row.adj_type==='decrease'?'<span style="color:#dc2626">감소</span>':'<span style="color:#64748b">변동없음</span>';
+      var diffColor = row.diff_qty>0?'#16a34a':row.diff_qty<0?'#dc2626':'#64748b';
+      h += '<tr style="border-bottom:1px solid #f1f5f9">';
+      h += '<td style="padding:6px 8px;font-size:12px;white-space:nowrap">' + (row.created_at||'').slice(0,16) + '</td>';
+      h += '<td style="padding:6px 8px">' + esc(row.warehouse_name) + '</td>';
+      h += '<td style="padding:6px 8px;font-family:monospace;font-size:11px">' + esc(row.product_code) + '</td>';
+      h += '<td style="padding:6px 8px">' + esc(row.product_name||'') + '</td>';
+      h += '<td style="padding:6px 8px;text-align:center">' + typeLabel + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right">' + row.before_qty.toLocaleString() + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;font-weight:600">' + row.after_qty.toLocaleString() + '</td>';
+      h += '<td style="padding:6px 8px;text-align:right;font-weight:600;color:'+diffColor+'">' + (row.diff_qty>0?'+':'') + row.diff_qty.toLocaleString() + '</td>';
+      h += '<td style="padding:6px 8px;color:#64748b;font-size:11px">' + esc(row.reason||'') + '</td>';
+      h += '<td style="padding:6px 8px;color:#64748b">' + esc(row.operator||'') + '</td>';
+      h += '</tr>';
+    });
+    document.getElementById('whHistoryBody').innerHTML = h;
+  } catch(e) { console.error(e); }
+}
+
+// 범용 모달 표시 (whModal)
+function showWhModal(id, html) {
+  var existing = document.getElementById(id);
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = id;
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.onclick = function(e) { if (e.target === overlay) closeWhModal(id); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:12px;max-height:90vh;overflow-y:auto;min-width:400px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.3)';
+  box.innerHTML = html;
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function closeWhModal(id) {
+  var el = document.getElementById(id);
+  if (el) el.remove();
 }
 
 // ===== 앱 시작: 인증 체크 =====

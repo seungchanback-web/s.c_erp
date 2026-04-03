@@ -1609,6 +1609,74 @@ db.exec(`CREATE TABLE IF NOT EXISTS gift_set_transactions (
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_set ON gift_set_transactions(set_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_created ON gift_set_transactions(created_at)");
 
+// ── 다중 창고 재고 관리 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS warehouses (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  location    TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  is_default  INTEGER DEFAULT 0,
+  status      TEXT DEFAULT 'active',
+  created_at  TEXT DEFAULT (datetime('now','localtime')),
+  updated_at  TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS warehouse_inventory (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  warehouse_id  INTEGER NOT NULL,
+  product_code  TEXT NOT NULL,
+  product_name  TEXT DEFAULT '',
+  quantity      INTEGER DEFAULT 0,
+  memo          TEXT DEFAULT '',
+  updated_at    TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(warehouse_id, product_code)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_wi_wh ON warehouse_inventory(warehouse_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_wi_pc ON warehouse_inventory(product_code)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS warehouse_transfers (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_warehouse  INTEGER NOT NULL,
+  to_warehouse    INTEGER NOT NULL,
+  product_code    TEXT NOT NULL,
+  product_name    TEXT DEFAULT '',
+  quantity        INTEGER NOT NULL,
+  operator        TEXT DEFAULT '',
+  memo            TEXT DEFAULT '',
+  created_at      TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_wt_from ON warehouse_transfers(from_warehouse)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_wt_to ON warehouse_transfers(to_warehouse)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_wt_created ON warehouse_transfers(created_at)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS warehouse_adjustments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  warehouse_id  INTEGER NOT NULL,
+  product_code  TEXT NOT NULL,
+  product_name  TEXT DEFAULT '',
+  adj_type      TEXT NOT NULL,
+  before_qty    INTEGER DEFAULT 0,
+  after_qty     INTEGER DEFAULT 0,
+  diff_qty      INTEGER DEFAULT 0,
+  reason        TEXT DEFAULT '',
+  operator      TEXT DEFAULT '',
+  created_at    TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_wa_wh ON warehouse_adjustments(warehouse_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_wa_created ON warehouse_adjustments(created_at)");
+
+// 기본 창고 초기화 (처음 실행 시)
+const whCount = db.prepare("SELECT COUNT(*) as cnt FROM warehouses").get();
+if (whCount.cnt === 0) {
+  const insertWh = db.prepare("INSERT INTO warehouses (code, name, location, description, is_default) VALUES (?, ?, ?, ?, ?)");
+  insertWh.run('WH-HQ', '본사창고', '본사', 'XERP 연동 기본 창고', 1);
+  insertWh.run('WH-02', '제2창고', '', '', 0);
+  insertWh.run('WH-03', '제3창고', '', '', 0);
+  insertWh.run('WH-04', '제4창고', '', '', 0);
+  console.log('[DB] 기본 창고 4개 초기화 완료');
+}
+
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
 let JWT_SECRET;
@@ -1706,16 +1774,17 @@ const ALL_PAGES = [
   { id: 'defects', name: '불량관리', group: '관리' },
   { id: 'analytics', name: '대시보드', group: '관리' },
   { id: 'user-mgmt', name: '사용자 관리', group: '관리' },
+  { id: 'warehouse', name: '창고관리', group: '재고' },
 ];
 
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
 const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
-  purchase: ['dashboard', 'inventory', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
+  purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log'],
-  production: ['dashboard', 'inventory', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
-  viewer: ['dashboard', 'inventory', 'shipments', 'po-list', 'notes'],
+  production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
+  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes'],
 };
 
 function hasPermission(role, page, userPermissions) {
@@ -7921,6 +7990,241 @@ async function handleRequest(req, res) {
       result.push({ id: s.id, set_code: s.set_code, set_name: s.set_name, current_stock: s.current_stock, max_production: maxProduction, bottleneck, components });
     }
     ok(res, result);
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  다중 창고 관리 API
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/warehouses — 창고 목록
+  if (pathname === '/api/warehouses' && method === 'GET') {
+    const rows = db.prepare("SELECT * FROM warehouses ORDER BY is_default DESC, id ASC").all();
+    ok(res, rows);
+    return;
+  }
+
+  // POST /api/warehouses — 창고 등록
+  if (pathname === '/api/warehouses' && method === 'POST') {
+    const { code, name, location, description } = body;
+    if (!code || !name) { fail(res, 400, '창고코드와 이름은 필수입니다'); return; }
+    try {
+      db.prepare("INSERT INTO warehouses (code, name, location, description) VALUES (?, ?, ?, ?)").run(code, name, location || '', description || '');
+      ok(res, { message: '창고 등록 완료' });
+    } catch (e) {
+      if (e.message.includes('UNIQUE')) fail(res, 409, '이미 존재하는 창고코드입니다');
+      else fail(res, 500, e.message);
+    }
+    return;
+  }
+
+  // PUT /api/warehouses/:id — 창고 수정
+  const whPutMatch = pathname.match(/^\/api\/warehouses\/(\d+)$/);
+  if (whPutMatch && method === 'PUT') {
+    const whId = parseInt(whPutMatch[1]);
+    const { name, location, description, status } = body;
+    const fields = [];
+    const vals = [];
+    if (name !== undefined) { fields.push('name=?'); vals.push(name); }
+    if (location !== undefined) { fields.push('location=?'); vals.push(location); }
+    if (description !== undefined) { fields.push('description=?'); vals.push(description); }
+    if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+    if (fields.length === 0) { fail(res, 400, '수정할 내용이 없습니다'); return; }
+    fields.push("updated_at=datetime('now','localtime')");
+    vals.push(whId);
+    db.prepare(`UPDATE warehouses SET ${fields.join(', ')} WHERE id=?`).run(...vals);
+    ok(res, { message: '창고 수정 완료' });
+    return;
+  }
+
+  // DELETE /api/warehouses/:id — 창고 삭제
+  const whDelMatch = pathname.match(/^\/api\/warehouses\/(\d+)$/);
+  if (whDelMatch && method === 'DELETE') {
+    const whId = parseInt(whDelMatch[1]);
+    const wh = db.prepare("SELECT * FROM warehouses WHERE id=?").get(whId);
+    if (!wh) { fail(res, 404, '창고를 찾을 수 없습니다'); return; }
+    if (wh.is_default) { fail(res, 400, '기본 창고는 삭제할 수 없습니다'); return; }
+    const invCount = db.prepare("SELECT COUNT(*) as cnt FROM warehouse_inventory WHERE warehouse_id=? AND quantity>0").get(whId);
+    if (invCount.cnt > 0) { fail(res, 400, '재고가 남아있는 창고는 삭제할 수 없습니다. 먼저 재고를 이동해주세요.'); return; }
+    db.prepare("DELETE FROM warehouse_inventory WHERE warehouse_id=?").run(whId);
+    db.prepare("DELETE FROM warehouses WHERE id=?").run(whId);
+    ok(res, { message: '창고 삭제 완료' });
+    return;
+  }
+
+  // GET /api/warehouses/inventory — 전체 창고 재고 (전체보기 + 창고별)
+  if (pathname === '/api/warehouses/inventory' && method === 'GET') {
+    const warehouseId = parsed.searchParams.get('warehouse_id');
+    const search = parsed.searchParams.get('search') || '';
+    let rows;
+    if (warehouseId) {
+      let sql = `SELECT wi.*, w.name as warehouse_name, w.code as warehouse_code
+        FROM warehouse_inventory wi JOIN warehouses w ON wi.warehouse_id=w.id
+        WHERE wi.warehouse_id=?`;
+      const args = [warehouseId];
+      if (search) { sql += " AND (wi.product_code LIKE ? OR wi.product_name LIKE ?)"; args.push(`%${search}%`, `%${search}%`); }
+      sql += " ORDER BY wi.product_code";
+      rows = db.prepare(sql).all(...args);
+    } else {
+      // 전체: 품목별 합산 + 창고별 내역
+      let sql = `SELECT wi.product_code, wi.product_name,
+        SUM(wi.quantity) as total_qty,
+        GROUP_CONCAT(w.name || ':' || wi.quantity, ' | ') as breakdown
+        FROM warehouse_inventory wi JOIN warehouses w ON wi.warehouse_id=w.id`;
+      const args = [];
+      if (search) { sql += " WHERE wi.product_code LIKE ? OR wi.product_name LIKE ?"; args.push(`%${search}%`, `%${search}%`); }
+      sql += " GROUP BY wi.product_code, wi.product_name ORDER BY wi.product_code";
+      rows = db.prepare(sql).all(...args);
+    }
+    ok(res, rows);
+    return;
+  }
+
+  // POST /api/warehouses/inventory — 재고 입력/수정 (단건)
+  if (pathname === '/api/warehouses/inventory' && method === 'POST') {
+    const { warehouse_id, product_code, product_name, quantity } = body;
+    if (!warehouse_id || !product_code) { fail(res, 400, '창고ID와 제품코드는 필수입니다'); return; }
+    const qty = parseInt(quantity) || 0;
+    const existing = db.prepare("SELECT * FROM warehouse_inventory WHERE warehouse_id=? AND product_code=?").get(warehouse_id, product_code);
+    if (existing) {
+      db.prepare("UPDATE warehouse_inventory SET quantity=?, product_name=?, updated_at=datetime('now','localtime') WHERE id=?").run(qty, product_name || existing.product_name, existing.id);
+    } else {
+      db.prepare("INSERT INTO warehouse_inventory (warehouse_id, product_code, product_name, quantity) VALUES (?, ?, ?, ?)").run(warehouse_id, product_code, product_name || '', qty);
+    }
+    ok(res, { message: '재고 저장 완료' });
+    return;
+  }
+
+  // POST /api/warehouses/inventory/bulk — 대량 재고 입력 (XERP 동기화 등)
+  if (pathname === '/api/warehouses/inventory/bulk' && method === 'POST') {
+    const { warehouse_id, items } = body;
+    if (!warehouse_id || !Array.isArray(items)) { fail(res, 400, '창고ID와 items 배열 필수'); return; }
+    const upsert = db.prepare(`INSERT INTO warehouse_inventory (warehouse_id, product_code, product_name, quantity)
+      VALUES (?, ?, ?, ?) ON CONFLICT(warehouse_id, product_code) DO UPDATE SET quantity=excluded.quantity, product_name=excluded.product_name, updated_at=datetime('now','localtime')`);
+    const tx = db.transaction((list) => {
+      let cnt = 0;
+      for (const it of list) {
+        upsert.run(warehouse_id, it.product_code, it.product_name || '', parseInt(it.quantity) || 0);
+        cnt++;
+      }
+      return cnt;
+    });
+    const count = tx(items);
+    ok(res, { message: `${count}건 저장 완료` });
+    return;
+  }
+
+  // POST /api/warehouses/transfer — 창고 간 재고 이동
+  if (pathname === '/api/warehouses/transfer' && method === 'POST') {
+    const { from_warehouse, to_warehouse, product_code, product_name, quantity, operator, memo } = body;
+    if (!from_warehouse || !to_warehouse || !product_code || !quantity) {
+      fail(res, 400, '출발창고, 도착창고, 제품코드, 수량은 필수입니다'); return;
+    }
+    if (from_warehouse === to_warehouse) { fail(res, 400, '같은 창고로는 이동할 수 없습니다'); return; }
+    const qty = parseInt(quantity);
+    if (qty <= 0) { fail(res, 400, '이동 수량은 1 이상이어야 합니다'); return; }
+
+    // 출발 창고 재고 확인
+    const fromInv = db.prepare("SELECT * FROM warehouse_inventory WHERE warehouse_id=? AND product_code=?").get(from_warehouse, product_code);
+    if (!fromInv || fromInv.quantity < qty) {
+      fail(res, 400, `출발 창고 재고 부족 (현재: ${fromInv ? fromInv.quantity : 0})`); return;
+    }
+
+    const tx = db.transaction(() => {
+      // 출발 창고 차감
+      db.prepare("UPDATE warehouse_inventory SET quantity=quantity-?, updated_at=datetime('now','localtime') WHERE warehouse_id=? AND product_code=?").run(qty, from_warehouse, product_code);
+      // 도착 창고 추가
+      const toInv = db.prepare("SELECT * FROM warehouse_inventory WHERE warehouse_id=? AND product_code=?").get(to_warehouse, product_code);
+      if (toInv) {
+        db.prepare("UPDATE warehouse_inventory SET quantity=quantity+?, updated_at=datetime('now','localtime') WHERE warehouse_id=? AND product_code=?").run(qty, to_warehouse, product_code);
+      } else {
+        db.prepare("INSERT INTO warehouse_inventory (warehouse_id, product_code, product_name, quantity) VALUES (?, ?, ?, ?)").run(to_warehouse, product_code, product_name || fromInv.product_name || '', qty);
+      }
+      // 이력 기록
+      db.prepare("INSERT INTO warehouse_transfers (from_warehouse, to_warehouse, product_code, product_name, quantity, operator, memo) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(from_warehouse, to_warehouse, product_code, product_name || fromInv.product_name || '', qty, operator || '', memo || '');
+    });
+    tx();
+    ok(res, { message: `${qty}개 이동 완료` });
+    return;
+  }
+
+  // GET /api/warehouses/transfers — 이동 이력
+  if (pathname === '/api/warehouses/transfers' && method === 'GET') {
+    const days = parseInt(parsed.searchParams.get('days') || '30');
+    const rows = db.prepare(`SELECT t.*, fw.name as from_name, tw.name as to_name
+      FROM warehouse_transfers t
+      JOIN warehouses fw ON t.from_warehouse=fw.id
+      JOIN warehouses tw ON t.to_warehouse=tw.id
+      WHERE t.created_at >= datetime('now','localtime','-${days} days')
+      ORDER BY t.created_at DESC`).all();
+    ok(res, rows);
+    return;
+  }
+
+  // POST /api/warehouses/adjust — 재고 조정
+  if (pathname === '/api/warehouses/adjust' && method === 'POST') {
+    const { warehouse_id, product_code, product_name, new_quantity, reason, operator } = body;
+    if (!warehouse_id || !product_code || new_quantity === undefined) {
+      fail(res, 400, '창고ID, 제품코드, 조정수량은 필수입니다'); return;
+    }
+    const newQty = parseInt(new_quantity);
+    const existing = db.prepare("SELECT * FROM warehouse_inventory WHERE warehouse_id=? AND product_code=?").get(warehouse_id, product_code);
+    const beforeQty = existing ? existing.quantity : 0;
+    const diff = newQty - beforeQty;
+    const adjType = diff > 0 ? 'increase' : diff < 0 ? 'decrease' : 'no_change';
+
+    const tx = db.transaction(() => {
+      if (existing) {
+        db.prepare("UPDATE warehouse_inventory SET quantity=?, updated_at=datetime('now','localtime') WHERE id=?").run(newQty, existing.id);
+      } else {
+        db.prepare("INSERT INTO warehouse_inventory (warehouse_id, product_code, product_name, quantity) VALUES (?, ?, ?, ?)").run(warehouse_id, product_code, product_name || '', newQty);
+      }
+      db.prepare("INSERT INTO warehouse_adjustments (warehouse_id, product_code, product_name, adj_type, before_qty, after_qty, diff_qty, reason, operator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(warehouse_id, product_code, product_name || (existing ? existing.product_name : ''), adjType, beforeQty, newQty, diff, reason || '', operator || '');
+    });
+    tx();
+    ok(res, { message: `재고 조정 완료 (${beforeQty} → ${newQty}, ${diff > 0 ? '+' : ''}${diff})` });
+    return;
+  }
+
+  // GET /api/warehouses/adjustments — 조정 이력
+  if (pathname === '/api/warehouses/adjustments' && method === 'GET') {
+    const days = parseInt(parsed.searchParams.get('days') || '30');
+    const rows = db.prepare(`SELECT a.*, w.name as warehouse_name
+      FROM warehouse_adjustments a JOIN warehouses w ON a.warehouse_id=w.id
+      WHERE a.created_at >= datetime('now','localtime','-${days} days')
+      ORDER BY a.created_at DESC`).all();
+    ok(res, rows);
+    return;
+  }
+
+  // POST /api/warehouses/sync-xerp — XERP 재고를 본사창고로 동기화
+  if (pathname === '/api/warehouses/sync-xerp' && method === 'POST') {
+    try {
+      const pool = await ensureXerpPool();
+      const result = await pool.request().query(`
+        SELECT mi.mmCode AS product_code, mi.mmName AS product_name, mi.AvailQty AS quantity
+        FROM XERP.dbo.mmInventory mi WHERE mi.AvailQty > 0
+      `);
+      const defaultWh = db.prepare("SELECT id FROM warehouses WHERE is_default=1 LIMIT 1").get();
+      if (!defaultWh) { fail(res, 500, '기본 창고가 설정되지 않았습니다'); return; }
+
+      const upsert = db.prepare(`INSERT INTO warehouse_inventory (warehouse_id, product_code, product_name, quantity)
+        VALUES (?, ?, ?, ?) ON CONFLICT(warehouse_id, product_code) DO UPDATE SET quantity=excluded.quantity, product_name=excluded.product_name, updated_at=datetime('now','localtime')`);
+      const tx = db.transaction((rows) => {
+        let cnt = 0;
+        for (const r of rows) {
+          upsert.run(defaultWh.id, r.product_code, r.product_name || '', parseInt(r.quantity) || 0);
+          cnt++;
+        }
+        return cnt;
+      });
+      const count = tx(result.recordset);
+      ok(res, { message: `XERP → 본사창고 동기화 완료 (${count}건)` });
+    } catch (e) {
+      fail(res, 500, 'XERP 동기화 실패: ' + e.message);
+    }
     return;
   }
 
