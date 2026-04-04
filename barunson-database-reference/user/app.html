@@ -5071,10 +5071,12 @@ function closeMegaMenu() { /* no-op */ }
 <div class="page" id="page-tax-invoice" style="background:#fff;color:#111">
   <div id="taxSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
   <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="taxTabs">
-    <div class="tab active" data-taxtab="list" onclick="switchTaxTab('list')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">계산서 목록</div>
+    <div class="tab active" data-taxtab="list" onclick="switchTaxTab('list')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">XERP 계산서</div>
+    <div class="tab" data-taxtab="hometax" onclick="switchTaxTab('hometax')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">홈택스 매입</div>
     <div class="tab" data-taxtab="monthly" onclick="switchTaxTab('monthly')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">월별 집계</div>
+    <div class="tab" data-taxtab="upload" onclick="switchTaxTab('upload')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">엑셀 업로드</div>
   </div>
-  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <div id="taxToolbar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
     <button class="btn btn-sm" onclick="setTaxRange(30)">30일</button>
     <button class="btn btn-sm" onclick="setTaxRange(90)">3개월</button>
     <input type="date" id="taxStart" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
@@ -5084,7 +5086,7 @@ function closeMegaMenu() { /* no-op */ }
       <option value="">전체</option><option value="AR">매출</option><option value="AP">매입</option>
     </select>
     <input type="text" id="taxSearch" placeholder="계산서번호/거래처" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:160px">
-    <button class="btn btn-sm" onclick="loadTaxInvoiceData()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="taxDoSearch()" style="background:#2563eb;color:#fff">조회</button>
     <button class="btn btn-sm" onclick="exportTaxExcel()">엑셀</button>
   </div>
   <div id="taxKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
@@ -7708,14 +7710,25 @@ function switchTaxTab(t) {
     el.style.color=isA?'#2563eb':'#64748b';el.style.fontWeight=isA?'600':'400';
     el.style.borderBottom=isA?'2px solid #2563eb':'2px solid transparent';
   });
+  var tb=document.getElementById('taxToolbar');
+  if(tb) tb.style.display=(t==='upload')?'none':'flex';
+  document.getElementById('taxKpi').innerHTML='';
+  document.getElementById('taxPaging').innerHTML='';
+  document.getElementById('taxDetail').style.display='none';
   if(t==='monthly') loadTaxMonthlySummary();
+  else if(t==='hometax') loadHometaxData();
+  else if(t==='upload') renderTaxUploadUI();
   else loadTaxInvoiceData();
+}
+function taxDoSearch() {
+  if(_taxTab==='hometax'){_htOffset=0;loadHometaxData();}
+  else {_taxOffset=0;loadTaxInvoiceData();}
 }
 function setTaxRange(days) {
   var now=new Date(),d=new Date(now);d.setDate(d.getDate()-days);
   var si=document.getElementById('taxStart'),ei=document.getElementById('taxEnd');
   if(si)si.value=d.toISOString().slice(0,10);if(ei)ei.value=now.toISOString().slice(0,10);
-  _taxOffset=0;loadTaxInvoiceData();
+  taxDoSearch();
 }
 async function loadTaxInvoiceData() {
   var from=((document.getElementById('taxStart')||{}).value||'').replace(/-/g,'');
@@ -7827,6 +7840,327 @@ function exportTaxExcel() {
   if(typeof XLSX==='undefined'){alert('SheetJS 미로드');return;}
   var rows=_taxData.map(function(inv){return{'계산서번호':inv.invoice_no,'발행일':inv.InvoiceDate,'구분':(inv.ArApGubun||'').trim()==='AR'?'매출':'매입','거래처':inv.cs_code,'공급가액':inv.supply_amt,'부가세':inv.vat_amt,'전자':(inv.EseroUp||'').trim()==='Y'?'Y':'N','전표':inv.doc_no};});
   var ws=XLSX.utils.json_to_sheet(rows);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'세금계산서');XLSX.writeFile(wb,'세금계산서_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ── 홈택스 업로드 + 조회 ──
+var _htOffset=0, _htData=[], _htTotal=0;
+
+function renderTaxUploadUI() {
+  var el=document.getElementById('taxContent');if(!el)return;
+  var h='<div style="max-width:700px;margin:0 auto">';
+  h+='<h3 style="font-size:16px;margin:0 0 16px">홈택스 세금계산서 업로드</h3>';
+  h+='<div style="background:#eff6ff;border:2px dashed #93c5fd;border-radius:12px;padding:40px;text-align:center;margin-bottom:20px;cursor:pointer" id="taxDropZone" onclick="document.getElementById(\'taxFileInput\').click()">';
+  h+='<div style="font-size:40px;margin-bottom:12px">📄</div>';
+  h+='<div style="font-size:14px;font-weight:600;color:#2563eb;margin-bottom:8px">파일을 드래그하거나 클릭하여 업로드</div>';
+  h+='<div style="font-size:12px;color:#64748b">홈택스에서 다운로드한 <b>엑셀(.xlsx/.xls/.csv)</b> 또는 <b>PDF</b> 파일</div>';
+  h+='<input type="file" id="taxFileInput" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="handleTaxFileSelect(this)">';
+  h+='</div>';
+
+  h+='<div style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:16px">';
+  h+='<div style="font-size:13px;font-weight:600;margin-bottom:8px">업로드 구분</div>';
+  h+='<div style="display:flex;gap:12px;margin-bottom:12px">';
+  h+='<label style="font-size:13px;display:flex;align-items:center;gap:4px"><input type="radio" name="taxUploadType" value="AP" checked> 매입 (거래처 발행)</label>';
+  h+='<label style="font-size:13px;display:flex;align-items:center;gap:4px"><input type="radio" name="taxUploadType" value="AR"> 매출 (우리 발행)</label>';
+  h+='</div>';
+  h+='</div>';
+
+  h+='<div style="background:#fefce8;border-radius:8px;padding:16px;margin-bottom:16px;border-left:4px solid #eab308">';
+  h+='<div style="font-size:13px;font-weight:600;margin-bottom:8px">💡 홈택스 다운로드 방법</div>';
+  h+='<ol style="margin:0;padding-left:20px;font-size:12px;color:#64748b;line-height:1.8">';
+  h+='<li>홈택스 접속 → 조회/발급 → 전자세금계산서</li>';
+  h+='<li>매입(매출) → 기간설정 → 조회</li>';
+  h+='<li><b>"엑셀 다운로드"</b> 클릭 (상세 목록)</li>';
+  h+='<li>다운로드된 파일을 여기에 업로드</li>';
+  h+='</ol></div>';
+
+  h+='<div id="taxUploadPreview" style="display:none;margin-bottom:16px"></div>';
+  h+='<div id="taxUploadResult" style="margin-bottom:16px"></div>';
+  h+='</div>';
+  el.innerHTML=h;
+
+  // drag & drop
+  var dz=document.getElementById('taxDropZone');
+  if(dz){
+    dz.addEventListener('dragover',function(e){e.preventDefault();dz.style.borderColor='#2563eb';dz.style.background='#dbeafe';});
+    dz.addEventListener('dragleave',function(e){e.preventDefault();dz.style.borderColor='#93c5fd';dz.style.background='#eff6ff';});
+    dz.addEventListener('drop',function(e){e.preventDefault();dz.style.borderColor='#93c5fd';dz.style.background='#eff6ff';if(e.dataTransfer.files.length>0) processTaxFile(e.dataTransfer.files[0]);});
+  }
+}
+
+function handleTaxFileSelect(input) {
+  if(input.files&&input.files[0]) processTaxFile(input.files[0]);
+}
+
+async function processTaxFile(file) {
+  var preview=document.getElementById('taxUploadPreview');
+  var result=document.getElementById('taxUploadResult');
+  if(preview)preview.style.display='block';
+  if(preview)preview.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">파일 분석 중... ('+esc(file.name)+')</div>';
+  if(result)result.innerHTML='';
+
+  var ext=file.name.split('.').pop().toLowerCase();
+  var rows=[];
+
+  try {
+    if(ext==='pdf') {
+      rows=await parseTaxPdf(file);
+    } else {
+      rows=await parseTaxExcel(file);
+    }
+
+    if(!rows||rows.length===0){
+      if(preview)preview.innerHTML='<div style="color:#ef4444;padding:12px">파싱된 데이터가 없습니다. 홈택스 표준 양식인지 확인해주세요.</div>';
+      return;
+    }
+
+    // 업로드 구분 적용
+    var arAp=document.querySelector('input[name="taxUploadType"]:checked');
+    var arApVal=arAp?arAp.value:'AP';
+    rows.forEach(function(r){if(!r.ar_ap)r.ar_ap=arApVal;});
+
+    // 미리보기
+    var h='<div style="font-size:13px;font-weight:600;margin-bottom:8px">미리보기 ('+rows.length+'건)</div>';
+    h+='<div style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px">';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;position:sticky;top:0"><th style="padding:6px">발행일</th><th style="padding:6px">거래처</th><th style="padding:6px">사업자번호</th><th style="padding:6px;text-align:right">공급가액</th><th style="padding:6px;text-align:right">부가세</th><th style="padding:6px">품목</th></tr></thead><tbody>';
+    rows.slice(0,50).forEach(function(r){
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 6px">'+esc(r.invoice_date||'')+'</td>';
+      h+='<td style="padding:4px 6px">'+esc(r.cs_name||'')+'</td>';
+      h+='<td style="padding:4px 6px;font-family:monospace;font-size:11px">'+esc(r.cs_reg_no||'')+'</td>';
+      h+='<td style="padding:4px 6px;text-align:right">'+fmtAmt(r.supply_amt)+'</td>';
+      h+='<td style="padding:4px 6px;text-align:right;color:#94a3b8">'+fmtAmt(r.vat_amt)+'</td>';
+      h+='<td style="padding:4px 6px;font-size:11px;color:#64748b">'+esc((r.item_name||'').slice(0,30))+'</td></tr>';
+    });
+    if(rows.length>50) h+='<tr><td colspan="6" style="padding:8px;text-align:center;color:#94a3b8">...외 '+(rows.length-50)+'건</td></tr>';
+    h+='</tbody></table></div>';
+    h+='<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-sm" onclick="uploadTaxRows()" style="background:#2563eb;color:#fff;padding:8px 24px">업로드 확정 ('+rows.length+'건)</button>';
+    h+='<button class="btn btn-sm" onclick="renderTaxUploadUI()">취소</button></div>';
+    if(preview)preview.innerHTML=h;
+
+    window._taxUploadRows=rows;
+  } catch(e) {
+    if(preview)preview.innerHTML='<div style="color:#ef4444;padding:12px">파일 파싱 오류: '+esc(e.message)+'</div>';
+  }
+}
+
+function parseTaxExcel(file) {
+  return new Promise(function(resolve,reject){
+    if(typeof XLSX==='undefined'){reject(new Error('SheetJS 미로드'));return;}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try {
+        var wb=XLSX.read(e.target.result,{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var json=XLSX.utils.sheet_to_json(ws,{defval:''});
+        if(!json||json.length===0){resolve([]);return;}
+
+        // 홈택스 엑셀 컬럼 자동 매핑 (다양한 양식 대응)
+        var rows=json.map(function(row){
+          var r={};
+          var keys=Object.keys(row);
+
+          // 발행일 찾기
+          var dateKey=keys.find(function(k){return /발[급행]일|작성일|날짜|일자/.test(k);});
+          if(dateKey) r.invoice_date=normalizeTaxDate(row[dateKey]);
+
+          // 계산서 번호
+          var noKey=keys.find(function(k){return /승인번호|계산서.*번호|세금계산서.*번호|전자.*번호/.test(k);});
+          if(noKey) r.invoice_no=String(row[noKey]).trim();
+
+          // 거래처명
+          var nameKey=keys.find(function(k){return /상호|거래처|공급자.*상호|공급받는.*상호/.test(k);});
+          if(nameKey) r.cs_name=String(row[nameKey]).trim();
+
+          // 사업자번호
+          var regKey=keys.find(function(k){return /사업자.*번호|사업자.*등록/.test(k);});
+          if(regKey) r.cs_reg_no=String(row[regKey]).replace(/-/g,'').trim();
+
+          // 공급가액
+          var supKey=keys.find(function(k){return /공급가액|공급가|금액/.test(k)&&!/세액|부가|합계/.test(k);});
+          if(supKey) r.supply_amt=parseFloat(String(row[supKey]).replace(/[,원\s]/g,''))||0;
+
+          // 부가세
+          var vatKey=keys.find(function(k){return /세액|부가세|VAT/.test(k)&&!/합계/.test(k);});
+          if(vatKey) r.vat_amt=parseFloat(String(row[vatKey]).replace(/[,원\s]/g,''))||0;
+
+          // 합계
+          var totalKey=keys.find(function(k){return /합계|총액|합계금액/.test(k);});
+          r.total_amt=totalKey?parseFloat(String(row[totalKey]).replace(/[,원\s]/g,''))||0:(r.supply_amt||0)+(r.vat_amt||0);
+
+          // 품목
+          var itemKey=keys.find(function(k){return /품목|품명|적요|비고/.test(k);});
+          if(itemKey) r.item_name=String(row[itemKey]).trim();
+
+          // 전자여부
+          var eKey=keys.find(function(k){return /전자|구분/.test(k);});
+          r.electronic=eKey&&/전자/.test(String(row[eKey]))?'Y':'Y';
+
+          return r;
+        }).filter(function(r){return r.invoice_date&&(r.supply_amt||r.vat_amt||r.total_amt);});
+
+        resolve(rows);
+      } catch(ex){reject(ex);}
+    };
+    reader.onerror=function(){reject(new Error('파일 읽기 실패'));};
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseTaxPdf(file) {
+  // PDF에서 텍스트를 추출하여 테이블 데이터 파싱
+  // pdf.js가 없으면 서버에서 처리하지 않고 클라이언트에서 텍스트 추출 시도
+  if(typeof pdfjsLib==='undefined') {
+    // pdf.js 동적 로드
+    await new Promise(function(resolve,reject){
+      var s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload=function(){
+        pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve();
+      };
+      s.onerror=function(){reject(new Error('PDF.js 로드 실패'));};
+      document.head.appendChild(s);
+    });
+  }
+  var arrayBuf=await file.arrayBuffer();
+  var pdf=await pdfjsLib.getDocument({data:arrayBuf}).promise;
+  var allText='';
+  for(var i=1;i<=pdf.numPages;i++){
+    var page=await pdf.getPage(i);
+    var tc=await page.getTextContent();
+    var lines=[];
+    var lastY=null;
+    tc.items.forEach(function(item){
+      var y=Math.round(item.transform[5]);
+      if(lastY!==null&&Math.abs(y-lastY)>3){lines.push('\n');}
+      lines.push(item.str);
+      lastY=y;
+    });
+    allText+=lines.join(' ')+'\n';
+  }
+  // 홈택스 PDF 텍스트에서 세금계산서 행 추출
+  var rows=[];
+  var dateReg=/(\d{4}[-./]\d{2}[-./]\d{2})/g;
+  var amtReg=/[\d,]+/g;
+  var lines=allText.split('\n').filter(function(l){return l.trim();});
+
+  for(var li=0;li<lines.length;li++){
+    var line=lines[li];
+    // 날짜를 포함하고 금액이 있는 줄 = 데이터행 가능
+    var dm=line.match(dateReg);
+    if(!dm)continue;
+    // 사업자번호 패턴 (10자리 연속숫자 또는 xxx-xx-xxxxx)
+    var bizMatch=line.match(/(\d{3})-?(\d{2})-?(\d{5})/);
+    // 금액 패턴 (콤마 포함 숫자들)
+    var amounts=line.match(/([\d,]{2,})/g);
+    if(!amounts||amounts.length<1)continue;
+    // 금액에서 숫자만 추출
+    var nums=amounts.map(function(a){return parseInt(a.replace(/,/g,''),10);}).filter(function(n){return n>0&&n<999999999999;});
+    if(nums.length<1)continue;
+
+    var r={};
+    r.invoice_date=normalizeTaxDate(dm[0]);
+    if(bizMatch) r.cs_reg_no=bizMatch[1]+bizMatch[2]+bizMatch[3];
+    // 금액 할당 (큰 순서: 합계, 공급가액, 세액)
+    if(nums.length>=3){r.supply_amt=nums[nums.length-3];r.vat_amt=nums[nums.length-2];r.total_amt=nums[nums.length-1];}
+    else if(nums.length===2){r.supply_amt=nums[0];r.vat_amt=nums[1];r.total_amt=nums[0]+nums[1];}
+    else {r.supply_amt=nums[0];r.vat_amt=0;r.total_amt=nums[0];}
+    // 거래처명 추출 시도 (사업자번호 뒤의 텍스트)
+    if(bizMatch){
+      var afterBiz=line.substring(line.indexOf(bizMatch[0])+bizMatch[0].length).trim();
+      var nameMatch=afterBiz.match(/^[\s]*([^\d,]{2,20})/);
+      if(nameMatch) r.cs_name=nameMatch[1].trim();
+    }
+    r.electronic='Y';
+    if(r.invoice_date&&r.supply_amt) rows.push(r);
+  }
+  return rows;
+}
+
+function normalizeTaxDate(val) {
+  if(!val)return '';
+  var s=String(val).trim();
+  // 엑셀 시리얼 날짜 처리
+  if(/^\d{5}$/.test(s)){
+    var d=new Date((parseInt(s)-25569)*86400000);
+    return d.toISOString().slice(0,10).replace(/-/g,'');
+  }
+  // YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  s=s.replace(/[.\/]/g,'-');
+  var m=s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1]+('0'+m[2]).slice(-2)+('0'+m[3]).slice(-2);
+  // YYYYMMDD
+  if(/^\d{8}$/.test(s)) return s;
+  return s.replace(/-/g,'').slice(0,8);
+}
+
+async function uploadTaxRows() {
+  var rows=window._taxUploadRows;
+  if(!rows||rows.length===0){alert('업로드할 데이터가 없습니다.');return;}
+  var result=document.getElementById('taxUploadResult');
+  if(result)result.innerHTML='<div style="text-align:center;padding:12px;color:#94a3b8">업로드 중...</div>';
+  try {
+    var resp=await authFetch('/api/tax-invoice/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows})});
+    var r=await resp.json();
+    if(!r.ok){if(result)result.innerHTML='<div style="color:#ef4444;padding:12px">업로드 실패: '+esc(r.error||'')+'</div>';return;}
+    var d=r.data;
+    if(result)result.innerHTML='<div style="background:#f0fdf4;border-radius:8px;padding:16px;border-left:4px solid #22c55e">'
+      +'<div style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:4px">업로드 완료!</div>'
+      +'<div style="font-size:13px;color:#64748b">신규: <b>'+d.inserted+'건</b> / 중복 스킵: '+d.skipped+'건 / 전체: '+d.total+'건</div></div>';
+    window._taxUploadRows=null;
+    document.getElementById('taxUploadPreview').style.display='none';
+  } catch(e){if(result)result.innerHTML='<div style="color:#ef4444;padding:12px">'+esc(e.message)+'</div>';}
+}
+
+async function loadHometaxData() {
+  var from=((document.getElementById('taxStart')||{}).value||'').replace(/-/g,'');
+  var to=((document.getElementById('taxEnd')||{}).value||'').replace(/-/g,'');
+  var type=(document.getElementById('taxType')||{}).value||'';
+  var search=(document.getElementById('taxSearch')||{}).value||'';
+  var el=document.getElementById('taxContent');
+  if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try {
+    var url='/api/tax-invoice/hometax?from='+from+'&to='+to+'&offset='+_htOffset+'&limit=100';
+    if(type) url+='&type='+type;
+    if(search) url+='&search='+encodeURIComponent(search);
+    var resp=await authFetch(url);
+    var r=await resp.json();
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    _htData=r.data.invoices||[];_htTotal=r.data.totalCount||0;
+    var t=r.data.totals||{};
+    var kpi=document.getElementById('taxKpi');
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#fff7ed;border-radius:8px;border-left:4px solid #f97316"><div style="font-size:11px;color:#64748b">홈택스 건수</div><div style="font-size:20px;font-weight:700">'+fmtAmt(t.count)+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">공급가액 합계</div><div style="font-size:20px;font-weight:700">'+fmtAmt(t.supply)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">부가세 합계</div><div style="font-size:20px;font-weight:700">'+fmtAmt(t.vat)+'</div></div>',
+    ].join('');
+    var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#fff7ed;border-bottom:2px solid #fed7aa"><th style="padding:10px;text-align:left">발행일</th><th style="text-align:left;padding:10px">거래처</th><th style="text-align:left;padding:10px">사업자번호</th><th style="text-align:center;padding:10px">구분</th><th style="text-align:right;padding:10px">공급가액</th><th style="text-align:right;padding:10px">부가세</th><th style="text-align:right;padding:10px">합계</th><th style="text-align:left;padding:10px">품목</th></tr></thead><tbody>';
+    _htData.forEach(function(inv){
+      var dt=inv.invoice_date||'';if(dt.length===8) dt=dt.slice(0,4)+'-'+dt.slice(4,6)+'-'+dt.slice(6,8);
+      var isAR=inv.ar_ap==='AR';
+      h+='<tr style="border-bottom:1px solid #f1f5f9">';
+      h+='<td style="padding:8px">'+esc(dt)+'</td>';
+      h+='<td style="padding:8px;font-weight:500">'+esc(inv.cs_name||'')+'</td>';
+      h+='<td style="padding:8px;font-family:monospace;font-size:11px">'+esc(inv.cs_reg_no||'')+'</td>';
+      h+='<td style="padding:8px;text-align:center"><span style="padding:2px 8px;border-radius:4px;font-size:11px;background:'+(isAR?'#dbeafe':'#fce7f3')+';color:'+(isAR?'#2563eb':'#dc2626')+'">'+(isAR?'매출':'매입')+'</span></td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(inv.supply_amt)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#94a3b8">'+fmtAmt(inv.vat_amt)+'</td>';
+      h+='<td style="padding:8px;text-align:right;font-weight:600">'+fmtAmt(inv.total_amt)+'</td>';
+      h+='<td style="padding:8px;font-size:11px;color:#64748b;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(inv.item_name||'')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(_htData.length===0) h='<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:40px;margin-bottom:12px">📄</div><div>업로드된 홈택스 데이터가 없습니다.</div><div style="margin-top:8px"><button class="btn btn-sm" onclick="switchTaxTab(\'upload\')" style="background:#f97316;color:#fff">엑셀/PDF 업로드</button></div></div>';
+    if(el)el.innerHTML=h;
+    // Paging
+    var pg=document.getElementById('taxPaging');
+    if(pg){var tp=Math.ceil(_htTotal/100),cp=Math.floor(_htOffset/100)+1;
+      if(tp<=1){pg.innerHTML='';} else {
+        var ph='';if(cp>1) ph+='<button class="btn btn-sm" onclick="_htOffset-=100;loadHometaxData()">◀ 이전</button>';
+        ph+='<span style="padding:6px 12px;font-size:13px;color:#64748b">'+cp+'/'+tp+' ('+fmtAmt(_htTotal)+'건)</span>';
+        if(cp<tp) ph+='<button class="btn btn-sm" onclick="_htOffset+=100;loadHometaxData()">다음 ▶</button>';
+        pg.innerHTML=ph;
+      }
+    }
+  } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
 }
 
 // ── 작업지시 ──

@@ -1953,6 +1953,28 @@ db.exec(`CREATE TABLE IF NOT EXISTS work_order_logs (
   created_at  TEXT DEFAULT (datetime('now','localtime'))
 )`);
 
+// ── 홈택스 세금계산서 업로드 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS hometax_invoices (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_no    TEXT DEFAULT '',
+  invoice_date  TEXT NOT NULL DEFAULT '',
+  ar_ap         TEXT DEFAULT 'AP',
+  cs_name       TEXT DEFAULT '',
+  cs_reg_no     TEXT DEFAULT '',
+  supply_amt    REAL DEFAULT 0,
+  vat_amt       REAL DEFAULT 0,
+  total_amt     REAL DEFAULT 0,
+  item_name     TEXT DEFAULT '',
+  remark        TEXT DEFAULT '',
+  electronic    TEXT DEFAULT 'Y',
+  source        TEXT DEFAULT 'hometax',
+  uploaded_by   TEXT DEFAULT '',
+  uploaded_at   TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(invoice_no, invoice_date, cs_reg_no, supply_amt)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_hometax_date ON hometax_invoices(invoice_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_hometax_arap ON hometax_invoices(ar_ap, invoice_date)");
+
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
 let JWT_SECRET;
@@ -10926,6 +10948,71 @@ async function handleRequest(req, res) {
       monthly = r.recordset;
     } catch (e) { sources.xerp = 'error: ' + e.message; }
     ok(res, { year, monthly, sources }); return;
+  }
+
+  // ── POST /api/tax-invoice/upload ── 홈택스 엑셀 업로드
+  if (pathname === '/api/tax-invoice/upload' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    try {
+      const body = await parseBody(req);
+      const rows = body.rows; // [{invoice_no, invoice_date, ar_ap, cs_name, cs_reg_no, supply_amt, vat_amt, total_amt, item_name, remark, electronic}]
+      if (!rows || !Array.isArray(rows) || rows.length === 0) { fail(res, 400, '업로드 데이터 없음'); return; }
+      const stmt = db.prepare(`INSERT OR IGNORE INTO hometax_invoices
+        (invoice_no, invoice_date, ar_ap, cs_name, cs_reg_no, supply_amt, vat_amt, total_amt, item_name, remark, electronic, uploaded_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      let inserted = 0, skipped = 0;
+      const txn = db.transaction((items) => {
+        for (const r of items) {
+          const info = stmt.run(
+            (r.invoice_no||'').trim(), (r.invoice_date||'').replace(/-/g,'').trim(),
+            (r.ar_ap||'AP').trim(), (r.cs_name||'').trim(), (r.cs_reg_no||'').replace(/-/g,'').trim(),
+            parseFloat(r.supply_amt)||0, parseFloat(r.vat_amt)||0, parseFloat(r.total_amt)||0,
+            (r.item_name||'').trim(), (r.remark||'').trim(),
+            (r.electronic||'Y').trim(), decoded.name || decoded.email || ''
+          );
+          if (info.changes > 0) inserted++; else skipped++;
+        }
+      });
+      txn(rows);
+      ok(res, { inserted, skipped, total: rows.length }); return;
+    } catch (e) { fail(res, 500, e.message); return; }
+  }
+
+  // ── GET /api/tax-invoice/hometax ── 홈택스 업로드 세금계산서 목록
+  if (pathname === '/api/tax-invoice/hometax' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || (() => { const d = new Date(); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const arAp = qs.get('type') || '';
+    const search = qs.get('search') || '';
+    const offset = parseInt(qs.get('offset') || '0', 10);
+    const limit = Math.min(parseInt(qs.get('limit') || '100', 10), 500);
+    let where = 'invoice_date >= ? AND invoice_date <= ?';
+    const params = [from, to];
+    if (arAp) { where += ' AND ar_ap = ?'; params.push(arAp); }
+    if (search) { where += ' AND (invoice_no LIKE ? OR cs_name LIKE ? OR cs_reg_no LIKE ?)'; params.push('%'+search+'%','%'+search+'%','%'+search+'%'); }
+    const totalCount = db.prepare('SELECT COUNT(*) AS cnt FROM hometax_invoices WHERE ' + where).get(...params).cnt;
+    const invoices = db.prepare('SELECT * FROM hometax_invoices WHERE ' + where + ' ORDER BY invoice_date DESC, id DESC LIMIT ? OFFSET ?').all(...params, limit, offset);
+    const totals = {
+      count: totalCount,
+      supply: invoices.reduce((s,r) => s + (r.supply_amt||0), 0),
+      vat: invoices.reduce((s,r) => s + (r.vat_amt||0), 0),
+    };
+    ok(res, { invoices, totalCount, offset, limit, totals, sources: { hometax: 'ok' } }); return;
+  }
+
+  // ── DELETE /api/tax-invoice/hometax ── 홈택스 데이터 삭제 (기간)
+  if (pathname === '/api/tax-invoice/hometax' && method === 'DELETE') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from'), to = qs.get('to');
+    if (!from || !to) { fail(res, 400, 'from/to 필수'); return; }
+    const info = db.prepare('DELETE FROM hometax_invoices WHERE invoice_date >= ? AND invoice_date <= ?').run(from, to);
+    ok(res, { deleted: info.changes }); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
