@@ -1413,7 +1413,13 @@ var _megaData = {
       {icon:'🧾',bg:'#f5f5f4',fg:'#78716c',name:'거래명세서',desc:'월별 명세서 발행',page:'invoices'},
       {icon:'📊',bg:'#fff1f2',fg:'#e11d48',name:'원재료 매입',desc:'매입 현황 분석',page:'mat-purchase'},
       {icon:'📑',bg:'#ecfdf5',fg:'#059669',name:'원가관리',desc:'원가/마진 분석',page:'cost-mgmt'},
-      {icon:'📋',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 검증',page:'closing'}
+      {icon:'📋',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 검증',page:'closing'},
+      {icon:'📂',bg:'#fef9c3',fg:'#a16207',name:'계정과목',desc:'계정과목 트리/검색',page:'chart-of-accounts'},
+      {icon:'📖',bg:'#dbeafe',fg:'#1d4ed8',name:'분개장',desc:'전표 조회/검증',page:'journal'},
+      {icon:'📒',bg:'#dcfce7',fg:'#15803d',name:'총계정원장',desc:'계정별 거래내역',page:'general-ledger'},
+      {icon:'⚖️',bg:'#fce7f3',fg:'#be185d',name:'시산표',desc:'차대 잔액 검증',page:'trial-balance'},
+      {icon:'📊',bg:'#e0e7ff',fg:'#4338ca',name:'재무제표',desc:'BS/IS 보고서',page:'financial-statements'},
+      {icon:'💳',bg:'#fff7ed',fg:'#c2410c',name:'채권/채무',desc:'AR/AP 관리',page:'ar-ap'}
     ]
   },
   master: {
@@ -4945,6 +4951,120 @@ function closeMegaMenu() { /* no-op */ }
   </div>
 </div>
 
+<!-- ========== 계정과목 (Chart of Accounts) PAGE ========== -->
+<div class="page" id="page-chart-of-accounts" style="background:#fff;color:#111">
+  <div id="coaSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0" id="coaTabs">
+      <div class="tab active" data-coatab="tree" onclick="switchCoaTab('tree')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">계정 트리</div>
+      <div class="tab" data-coatab="list" onclick="switchCoaTab('list')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">전체 목록</div>
+      <div class="tab" data-coatab="stats" onclick="switchCoaTab('stats')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">사용 통계</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-sm" onclick="seedAccounts()" style="background:#f59e0b;color:#fff">계정 동기화</button>
+      <input type="text" id="coaSearch" placeholder="계정코드/명 검색" oninput="filterCoaTree()" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:200px">
+    </div>
+  </div>
+  <div id="coaContent" style="min-height:400px"></div>
+</div>
+
+<!-- ========== 분개장 (Journal) PAGE ========== -->
+<div class="page" id="page-journal" style="background:#fff;color:#111">
+  <div id="jnlSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn btn-sm" onclick="setJnlRange(7)">7일</button>
+    <button class="btn btn-sm" onclick="setJnlRange(30)">30일</button>
+    <button class="btn btn-sm" onclick="setJnlRange(90)">3개월</button>
+    <input type="date" id="jnlStart" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <span>~</span>
+    <input type="date" id="jnlEnd" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <select id="jnlStatus" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+      <option value="Y">승인</option><option value="N">미승인</option><option value="">전체</option>
+    </select>
+    <input type="text" id="jnlSearch" placeholder="전표번호/적요" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:160px">
+    <button class="btn btn-sm" onclick="loadJournalData()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="exportJournalExcel()">엑셀</button>
+  </div>
+  <div id="jnlKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="jnlList" style="min-height:300px"></div>
+  <div id="jnlDetail" style="display:none;border-top:2px solid #e2e8f0;padding-top:16px;margin-top:16px"></div>
+  <div id="jnlPaging" style="display:flex;justify-content:center;gap:8px;margin-top:12px"></div>
+</div>
+
+<!-- ========== 총계정원장 (General Ledger) PAGE ========== -->
+<div class="page" id="page-general-ledger" style="background:#fff;color:#111">
+  <div id="glSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <select id="glAccSelect" style="width:320px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px" onchange="loadGLData()">
+      <option value="">-- 계정 선택 --</option>
+    </select>
+    <input type="date" id="glStart" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <span>~</span>
+    <input type="date" id="glEnd" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <input type="text" id="glCsFilter" placeholder="거래처 필터" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:140px">
+    <button class="btn btn-sm" onclick="loadGLData()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="exportGLExcel()">엑셀</button>
+  </div>
+  <div id="glSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="glContent" style="min-height:400px;overflow-x:auto"></div>
+</div>
+
+<!-- ========== 시산표 (Trial Balance) PAGE ========== -->
+<div class="page" id="page-trial-balance" style="background:#fff;color:#111">
+  <div id="tbSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <select id="tbYear" onchange="loadTrialBalance()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px"></select>
+    <select id="tbMonth" onchange="loadTrialBalance()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px"></select>
+    <button class="btn btn-sm" onclick="loadTrialBalance()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="loadTrialBalance(true)">새로고침</button>
+    <button class="btn btn-sm" onclick="exportTBExcel()">엑셀</button>
+  </div>
+  <div id="tbKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="tbContent" style="min-height:400px;overflow-x:auto"></div>
+</div>
+
+<!-- ========== 재무제표 (Financial Statements) PAGE ========== -->
+<div class="page" id="page-financial-statements" style="background:#fff;color:#111">
+  <div id="fsSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="fsTabs">
+    <div class="tab active" data-fstab="bs" onclick="switchFsTab('bs')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">재무상태표</div>
+    <div class="tab" data-fstab="is" onclick="switchFsTab('is')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">손익계산서</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <select id="fsYear" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px"></select>
+    <select id="fsMonth" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px"></select>
+    <select id="fsCompare" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+      <option value="">단일기간</option><option value="mom">전월비교</option><option value="yoy">전년동월비교</option>
+    </select>
+    <button class="btn btn-sm" onclick="loadFinancialStatements()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="exportFSExcel()">엑셀</button>
+  </div>
+  <div id="fsKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="fsContent" style="min-height:500px;overflow-x:auto"></div>
+</div>
+
+<!-- ========== 채권/채무 (AR/AP) PAGE ========== -->
+<div class="page" id="page-ar-ap" style="background:#fff;color:#111">
+  <div id="arapSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="arapTabs">
+    <div class="tab active" data-araptab="ar" onclick="switchArapTab('ar')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">매출채권</div>
+    <div class="tab" data-araptab="ap" onclick="switchArapTab('ap')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">매입채무</div>
+    <div class="tab" data-araptab="aging" onclick="switchArapTab('aging')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">에이징 분석</div>
+    <div class="tab" data-araptab="detail" onclick="switchArapTab('detail')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">거래처 상세</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <input type="date" id="arapStart" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <span>~</span>
+    <input type="date" id="arapEnd" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+    <input type="text" id="arapCsFilter" placeholder="거래처 코드" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:140px">
+    <button class="btn btn-sm" onclick="loadArapData()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="exportArapExcel()">엑셀</button>
+  </div>
+  <div id="arapKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="arapContent" style="min-height:400px;overflow-x:auto"></div>
+  <canvas id="arapChart" style="max-height:300px;margin-top:16px;display:none"></canvas>
+</div>
+
 <!-- ========== SALES (통합매출) PAGE ========== -->
 <div class="page" id="page-sales" style="background:#fff;color:#111">
   <div id="salesSourceBar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"></div>
@@ -5724,7 +5844,9 @@ var pageTitles={
   'sales-dd':'DD 매출현황','sales-gift':'더기프트 매출현황','cost-mgmt':'원가관리',
   'board':'공지/게시판','audit-log':'감사로그','exec-dashboard':'경영대시보드',
   'customer-orders':'고객주문','shipping':'배송추적','po-mgmt':'발주서 관리','warehouse':'창고별 재고',
-  'tasks':'업무관리','meeting-log':'미팅일지','trends':'경영추이'
+  'tasks':'업무관리','meeting-log':'미팅일지','trends':'경영추이',
+  'chart-of-accounts':'계정과목','journal':'분개장','general-ledger':'총계정원장',
+  'trial-balance':'시산표','financial-statements':'재무제표','ar-ap':'채권/채무'
 };
 
 // ===== GLOBAL STATE =====
@@ -6805,6 +6927,8 @@ function showPage(page, opts){
     'inventory':'stock','warehouse':'stock','shipments':'stock',
     'production-req':'production','production-stock':'production','mrp':'production',
     'invoices':'accounting','mat-purchase':'accounting','cost-mgmt':'accounting','closing':'accounting',
+    'chart-of-accounts':'accounting','journal':'accounting','general-ledger':'accounting',
+    'trial-balance':'accounting','financial-statements':'accounting','ar-ap':'accounting',
     'vendors':'master','product-mgmt':'master','bom':'master','post-process':'master',
     'analytics':'analysis','exec-dashboard':'analysis','report':'analysis','defects':'analysis',
     'tasks':'work','notes':'work','board':'work',
@@ -6893,7 +7017,628 @@ function showPage(page, opts){
     }
     renderClosingPage();
   }
+  if(page==='chart-of-accounts') loadChartOfAccountsPage();
+  if(page==='journal') loadJournalPage();
+  if(page==='general-ledger') loadGeneralLedgerPage();
+  if(page==='trial-balance') loadTrialBalancePage();
+  if(page==='financial-statements') loadFinancialStatementsPage();
+  if(page==='ar-ap') loadArApPage();
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  복식부기 회계 모듈 JS (Chart of Accounts, Journal, GL, TB, FS, AR/AP)
+// ═══════════════════════════════════════════════════════════════
+
+var _coaTab = 'tree', _coaAccounts = [];
+var _jnlData = [], _jnlOffset = 0, _jnlTotal = 0;
+var _fsTab = 'bs', _fsData = null;
+var _arapTab = 'ar', _arapChart = null;
+
+function acctSourceBadge(sources) {
+  return Object.entries(sources||{}).map(function(e){
+    var color = e[1]==='ok' ? '#22c55e' : (e[1].startsWith && e[1].startsWith('error') ? '#ef4444' : '#f59e0b');
+    return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:99px;font-size:11px;background:'+(color==='#22c55e'?'#f0fdf4':color==='#ef4444'?'#fef2f2':'#fffbeb')+';color:'+color+'"><span style="width:6px;height:6px;border-radius:50%;background:'+color+'"></span>'+e[0].toUpperCase()+'</span>';
+  }).join(' ');
+}
+function fmtAmt(v) { if(v==null) return '-'; return Math.round(v).toLocaleString('ko-KR'); }
+function fmtAmtColor(v) { if(v==null) return '-'; var c=v<0?'#ef4444':'#111'; return '<span style="color:'+c+'">'+fmtAmt(v)+'</span>'; }
+
+// ── 계정과목 ──
+async function loadChartOfAccountsPage() {
+  var el=document.getElementById('coaContent');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try {
+    var r=await authFetch('/api/acct/accounts');
+    if(r.ok){_coaAccounts=r.data.accounts;renderCoaTab();}
+    else if(el) el.innerHTML='<div style="color:#ef4444;padding:20px">'+esc(r.error||'로드 실패')+'</div>';
+  } catch(e){ if(el) el.innerHTML='<div style="color:#ef4444;padding:20px">'+esc(e.message)+'</div>'; }
+}
+function switchCoaTab(t) {
+  _coaTab=t;
+  document.querySelectorAll('#coaTabs .tab').forEach(function(el){
+    var isA=el.getAttribute('data-coatab')===t;
+    el.style.color=isA?'#2563eb':'#64748b';el.style.fontWeight=isA?'600':'400';
+    el.style.borderBottom=isA?'2px solid #2563eb':'2px solid transparent';
+  });
+  renderCoaTab();
+}
+function renderCoaTab() {
+  var el=document.getElementById('coaContent');
+  if(!el) return;
+  if(_coaAccounts.length===0){el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">계정과목이 없습니다. [계정 동기화] 버튼을 클릭하세요.</div>';return;}
+  if(_coaTab==='tree') renderCoaTree(el);
+  else if(_coaTab==='list') renderCoaList(el);
+  else if(_coaTab==='stats') loadCoaStats(el);
+}
+function renderCoaTree(el) {
+  var groups={};
+  _coaAccounts.forEach(function(a){
+    var g=a.acc_group||'기타';
+    if(!groups[g])groups[g]=[];groups[g].push(a);
+  });
+  var h='';
+  var typeOrder=['유동자산','비유동자산','유동부채','비유동부채','자본','매출','매출원가','판매비와관리비','영업외수익','영업외비용','법인세비용','기타'];
+  var sorted=Object.keys(groups).sort(function(a,b){var ai=typeOrder.indexOf(a),bi=typeOrder.indexOf(b);if(ai<0)ai=99;if(bi<0)bi=99;return ai-bi;});
+  var typeColors={'asset':'#2563eb','liability':'#dc2626','equity':'#7c3aed','revenue':'#059669','expense':'#ea580c','other':'#64748b'};
+  sorted.forEach(function(g){
+    var items=groups[g];
+    var typ=(items[0]||{}).acc_type||'other';
+    var color=typeColors[typ]||'#64748b';
+    h+='<div style="margin-bottom:16px"><div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;padding:10px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;display:flex;justify-content:space-between;align-items:center">';
+    h+='<span style="font-weight:700;color:'+color+'">'+esc(g)+' <span style="font-size:11px;color:#94a3b8">('+items.length+')</span></span>';
+    h+='<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+color+'22;color:'+color+'">'+typ+'</span></div>';
+    h+='<div style="display:block;padding:8px 0">';
+    items.forEach(function(a){
+      h+='<div style="display:flex;justify-content:space-between;padding:6px 16px 6px '+(24+a.depth*16)+'px;border-bottom:1px solid #f1f5f9;font-size:13px;cursor:pointer" onclick="showPage(\'general-ledger\');setTimeout(function(){var s=document.getElementById(\'glAccSelect\');if(s){s.value=\''+esc(a.acc_code)+'\';loadGLData();}},200)">';
+      h+='<span><span style="color:#94a3b8;margin-right:8px;font-family:monospace">'+esc(a.acc_code)+'</span>'+esc(a.acc_name||'(미등록)')+'</span>';
+      h+='<span style="color:#94a3b8;font-size:11px">'+esc(a.acc_group)+'</span></div>';
+    });
+    h+='</div></div>';
+  });
+  el.innerHTML=h;
+}
+function renderCoaList(el) {
+  var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">코드</th><th style="text-align:left;padding:10px">계정명</th><th style="text-align:left;padding:10px">유형</th><th style="text-align:left;padding:10px">그룹</th><th style="text-align:center;padding:10px">상태</th></tr></thead><tbody>';
+  _coaAccounts.forEach(function(a){
+    h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:8px;font-family:monospace">'+esc(a.acc_code)+'</td><td style="padding:8px">'+esc(a.acc_name||'-')+'</td><td style="padding:8px">'+esc(a.acc_type)+'</td><td style="padding:8px">'+esc(a.acc_group)+'</td><td style="padding:8px;text-align:center">'+(a.is_active?'<span style="color:#22c55e">활성</span>':'<span style="color:#94a3b8">비활성</span>')+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+async function loadCoaStats(el) {
+  el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">통계 로딩 중...</div>';
+  try {
+    var r=await authFetch('/api/acct/account-stats?year='+new Date().getFullYear());
+    if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    document.getElementById('coaSourceBar').innerHTML=acctSourceBadge(r.data.sources);
+    var stats=r.data.stats||[];
+    var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">코드</th><th style="text-align:left;padding:10px">계정명</th><th style="text-align:left;padding:10px">유형</th><th style="text-align:right;padding:10px">거래건수</th><th style="text-align:right;padding:10px">차변 합계</th><th style="text-align:right;padding:10px">대변 합계</th></tr></thead><tbody>';
+    stats.slice(0,100).forEach(function(s){
+      h+='<tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="showPage(\'general-ledger\');setTimeout(function(){var sel=document.getElementById(\'glAccSelect\');if(sel){sel.value=\''+esc(s.acc_code)+'\';loadGLData();}},200)"><td style="padding:8px;font-family:monospace">'+esc(s.acc_code)+'</td><td style="padding:8px">'+esc(s.acc_name||'-')+'</td><td style="padding:8px">'+esc(s.acc_type)+'</td><td style="padding:8px;text-align:right">'+fmtAmt(s.txn_count)+'</td><td style="padding:8px;text-align:right;color:#2563eb">'+fmtAmt(s.total_dr)+'</td><td style="padding:8px;text-align:right;color:#dc2626">'+fmtAmt(s.total_cr)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+  } catch(e){el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+async function seedAccounts() {
+  if(!confirm('XERP에서 계정과목을 동기화합니다. 진행하시겠습니까?')) return;
+  try {
+    var r=await authFetch('/api/acct/seed-accounts');
+    if(r.ok) { alert('동기화 완료: '+r.data.seeded+'개 계정 (총 '+r.data.total+'개)'); loadChartOfAccountsPage(); }
+    else alert('실패: '+(r.error||''));
+  } catch(e){alert('오류: '+e.message);}
+}
+function filterCoaTree() {
+  var q=(document.getElementById('coaSearch')||{}).value||'';
+  q=q.toLowerCase();
+  if(!q){renderCoaTab();return;}
+  var filtered=_coaAccounts.filter(function(a){return (a.acc_code+'').toLowerCase().indexOf(q)>=0||(a.acc_name||'').toLowerCase().indexOf(q)>=0;});
+  var el=document.getElementById('coaContent');
+  if(!el)return;
+  var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">코드</th><th style="text-align:left;padding:10px">계정명</th><th style="text-align:left;padding:10px">유형</th><th style="text-align:left;padding:10px">그룹</th></tr></thead><tbody>';
+  filtered.forEach(function(a){
+    h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:8px;font-family:monospace">'+esc(a.acc_code)+'</td><td style="padding:8px">'+esc(a.acc_name||'-')+'</td><td style="padding:8px">'+esc(a.acc_type)+'</td><td style="padding:8px">'+esc(a.acc_group)+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h+'<div style="font-size:12px;color:#94a3b8;margin-top:8px">검색 결과: '+filtered.length+'건</div>';
+}
+
+// ── 분개장 ──
+function loadJournalPage() {
+  var now=new Date(), d30=new Date(now);d30.setDate(d30.getDate()-30);
+  var si=document.getElementById('jnlStart'),ei=document.getElementById('jnlEnd');
+  if(si&&!si.value) si.value=d30.toISOString().slice(0,10);
+  if(ei&&!ei.value) ei.value=now.toISOString().slice(0,10);
+  _jnlOffset=0;
+  loadJournalData();
+}
+function setJnlRange(days) {
+  var now=new Date(),d=new Date(now);d.setDate(d.getDate()-days);
+  var si=document.getElementById('jnlStart'),ei=document.getElementById('jnlEnd');
+  if(si) si.value=d.toISOString().slice(0,10);
+  if(ei) ei.value=now.toISOString().slice(0,10);
+  _jnlOffset=0;loadJournalData();
+}
+async function loadJournalData() {
+  var si=document.getElementById('jnlStart'),ei=document.getElementById('jnlEnd');
+  var from=(si?si.value:'').replace(/-/g,''),to=(ei?ei.value:'').replace(/-/g,'');
+  var status=(document.getElementById('jnlStatus')||{}).value||'Y';
+  var search=(document.getElementById('jnlSearch')||{}).value||'';
+  var el=document.getElementById('jnlList');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try {
+    var url='/api/acct/vouchers?from='+from+'&to='+to+'&status='+status+'&offset='+_jnlOffset+'&limit=100';
+    if(search) url+='&search='+encodeURIComponent(search);
+    var r=await authFetch(url);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    document.getElementById('jnlSourceBar').innerHTML=acctSourceBadge(r.data.sources);
+    _jnlData=r.data.vouchers||[];_jnlTotal=r.data.totalCount||0;
+    // KPI
+    var kpi=document.getElementById('jnlKpi');
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">조회 전표</div><div style="font-size:20px;font-weight:700">'+fmtAmt(_jnlTotal)+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">총 차변</div><div style="font-size:20px;font-weight:700;color:#2563eb">'+fmtAmt(_jnlData.reduce(function(s,v){return s+(v.total_debit||0)},0))+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">총 대변</div><div style="font-size:20px;font-weight:700;color:#ef4444">'+fmtAmt(_jnlData.reduce(function(s,v){return s+(v.total_credit||0)},0))+'</div></div>',
+      '<div style="padding:12px 16px;background:#f8fafc;border-radius:8px;border-left:4px solid #94a3b8"><div style="font-size:11px;color:#64748b">현재 페이지</div><div style="font-size:20px;font-weight:700">'+_jnlData.length+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>'
+    ].join('');
+    renderJournalList();
+    renderJnlPaging();
+  } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function renderJournalList() {
+  var el=document.getElementById('jnlList');if(!el)return;
+  if(_jnlData.length===0){el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">전표가 없습니다.</div>';return;}
+  var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">전표번호</th><th style="text-align:left;padding:10px">전표일</th><th style="text-align:left;padding:10px">적요</th><th style="text-align:center;padding:10px">승인</th><th style="text-align:right;padding:10px">차변</th><th style="text-align:right;padding:10px">대변</th><th style="text-align:center;padding:10px">대차</th><th style="text-align:center;padding:10px">라인</th></tr></thead><tbody>';
+  _jnlData.forEach(function(v){
+    var bal=Math.abs((v.total_debit||0)-(v.total_credit||0))<1;
+    var docDate=(v.DocDate||'').trim();if(docDate.length===8) docDate=docDate.slice(0,4)+'-'+docDate.slice(4,6)+'-'+docDate.slice(6,8);
+    h+='<tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="loadVoucherDetail(\''+esc(v.DocNo)+'\')">';
+    h+='<td style="padding:8px;font-family:monospace;color:#2563eb">'+esc(v.DocNo||'')+'</td>';
+    h+='<td style="padding:8px">'+esc(docDate)+'</td>';
+    h+='<td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(v.DocDescr||'-')+'</td>';
+    h+='<td style="padding:8px;text-align:center">'+(v.RelCheck==='Y'?'<span style="color:#22c55e">✓</span>':'<span style="color:#f59e0b">-</span>')+'</td>';
+    h+='<td style="padding:8px;text-align:right;color:#2563eb">'+fmtAmt(v.total_debit)+'</td>';
+    h+='<td style="padding:8px;text-align:right;color:#dc2626">'+fmtAmt(v.total_credit)+'</td>';
+    h+='<td style="padding:8px;text-align:center">'+(bal?'<span style="color:#22c55e;font-weight:700">✓</span>':'<span style="color:#ef4444;font-weight:700">✗</span>')+'</td>';
+    h+='<td style="padding:8px;text-align:center;color:#94a3b8">'+v.line_count+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+function renderJnlPaging() {
+  var el=document.getElementById('jnlPaging');if(!el)return;
+  var totalPages=Math.ceil(_jnlTotal/100),currentPage=Math.floor(_jnlOffset/100)+1;
+  if(totalPages<=1){el.innerHTML='';return;}
+  var h='';
+  if(currentPage>1) h+='<button class="btn btn-sm" onclick="_jnlOffset-=100;loadJournalData()">◀ 이전</button>';
+  h+='<span style="padding:6px 12px;font-size:13px;color:#64748b">'+currentPage+' / '+totalPages+' ('+fmtAmt(_jnlTotal)+'건)</span>';
+  if(currentPage<totalPages) h+='<button class="btn btn-sm" onclick="_jnlOffset+=100;loadJournalData()">다음 ▶</button>';
+  el.innerHTML=h;
+}
+async function loadVoucherDetail(docNo) {
+  var el=document.getElementById('jnlDetail');if(!el)return;
+  el.style.display='block';
+  el.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">전표 상세 로딩 중...</div>';
+  try {
+    var r=await authFetch('/api/acct/voucher/'+encodeURIComponent(docNo));
+    if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data,hdr=d.header||{};
+    var docDate=(hdr.DocDate||'').trim();if(docDate.length===8) docDate=docDate.slice(0,4)+'-'+docDate.slice(4,6)+'-'+docDate.slice(6,8);
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0;font-size:16px">전표: '+esc(hdr.DocNo||docNo)+'</h3><button class="btn btn-sm" onclick="document.getElementById(\'jnlDetail\').style.display=\'none\'">닫기</button></div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:16px;font-size:13px">';
+    h+='<div><span style="color:#94a3b8">전표일:</span> '+esc(docDate)+'</div>';
+    h+='<div><span style="color:#94a3b8">구분:</span> '+esc(hdr.DocGubun||'-')+'</div>';
+    h+='<div><span style="color:#94a3b8">승인:</span> '+(hdr.RelCheck==='Y'?'<span style="color:#22c55e">승인</span>':'<span style="color:#f59e0b">미승인</span>')+'</div>';
+    h+='<div><span style="color:#94a3b8">원본번호:</span> '+esc(hdr.OriginNo||'-')+'</div>';
+    h+='<div style="grid-column:span 2"><span style="color:#94a3b8">적요:</span> '+esc(hdr.DocDescr||'-')+'</div></div>';
+    // 차대 요약
+    var balOk=d.balanced;
+    h+='<div style="display:flex;gap:16px;margin-bottom:12px;padding:12px;background:'+(balOk?'#f0fdf4':'#fef2f2')+';border-radius:8px;font-size:14px">';
+    h+='<span style="font-weight:700;color:#2563eb">차변 합계: '+fmtAmt(d.totalDr)+'</span>';
+    h+='<span style="font-weight:700;color:#dc2626">대변 합계: '+fmtAmt(d.totalCr)+'</span>';
+    h+='<span style="font-weight:700;color:'+(balOk?'#22c55e':'#ef4444')+'">'+(balOk?'✓ 대차 일치':'✗ 대차 불일치 (차이: '+fmtAmt(d.totalDr-d.totalCr)+')')+'</span></div>';
+    // 라인 테이블
+    h+='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:center">#</th><th style="text-align:left;padding:8px">계정코드</th><th style="text-align:left;padding:8px">계정명</th><th style="text-align:center;padding:8px">차/대</th><th style="text-align:right;padding:8px">금액</th><th style="text-align:left;padding:8px">적요</th><th style="text-align:left;padding:8px">거래처</th></tr></thead><tbody>';
+    (d.items||[]).forEach(function(it){
+      var isDr=it.DrCr==='D';
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px;text-align:center;color:#94a3b8">'+it.DocSerNo+'</td>';
+      h+='<td style="padding:6px;font-family:monospace">'+esc(it.acc_code)+'</td>';
+      h+='<td style="padding:6px">'+esc(it.acc_name||'-')+'</td>';
+      h+='<td style="padding:6px;text-align:center"><span style="padding:2px 8px;border-radius:4px;font-size:11px;background:'+(isDr?'#dbeafe':'#fce7f3')+';color:'+(isDr?'#2563eb':'#dc2626')+'">'+(isDr?'차변':'대변')+'</span></td>';
+      h+='<td style="padding:6px;text-align:right;font-weight:600;color:'+(isDr?'#2563eb':'#dc2626')+'">'+fmtAmt(it.DocAmnt)+'</td>';
+      h+='<td style="padding:6px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(it.DocDescr||'-')+'</td>';
+      h+='<td style="padding:6px">'+esc(it.cs_name||it.cs_code||'-')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+    el.scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function exportJournalExcel() {
+  if(typeof XLSX==='undefined'){alert('SheetJS 미로드');return;}
+  var rows=_jnlData.map(function(v){return{'전표번호':v.DocNo,'전표일':v.DocDate,'적요':v.DocDescr||'','승인':v.RelCheck,'차변':v.total_debit,'대변':v.total_credit,'라인수':v.line_count};});
+  var ws=XLSX.utils.json_to_sheet(rows);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'분개장');XLSX.writeFile(wb,'분개장_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ── 총계정원장 ──
+async function loadGeneralLedgerPage() {
+  // 계정 드롭다운 채우기
+  var sel=document.getElementById('glAccSelect');
+  if(sel&&sel.options.length<=1){
+    try {
+      var r=await authFetch('/api/acct/accounts');
+      if(r.ok){
+        r.data.accounts.forEach(function(a){
+          var opt=document.createElement('option');opt.value=a.acc_code;opt.textContent=a.acc_code+' '+a.acc_name;sel.appendChild(opt);
+        });
+      }
+    } catch(e){}
+  }
+  var now=new Date(),m1=new Date(now);m1.setMonth(m1.getMonth()-1);
+  var si=document.getElementById('glStart'),ei=document.getElementById('glEnd');
+  if(si&&!si.value) si.value=m1.toISOString().slice(0,10);
+  if(ei&&!ei.value) ei.value=now.toISOString().slice(0,10);
+}
+async function loadGLData() {
+  var acc=(document.getElementById('glAccSelect')||{}).value;
+  if(!acc){document.getElementById('glContent').innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">계정을 선택하세요.</div>';return;}
+  var from=((document.getElementById('glStart')||{}).value||'').replace(/-/g,'');
+  var to=((document.getElementById('glEnd')||{}).value||'').replace(/-/g,'');
+  var cs=(document.getElementById('glCsFilter')||{}).value||'';
+  var el=document.getElementById('glContent');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try {
+    var url='/api/acct/gl?acc='+acc+'&from='+from+'&to='+to;
+    if(cs) url+='&cs='+encodeURIComponent(cs);
+    var r=await authFetch(url);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data;
+    document.getElementById('glSourceBar').innerHTML=acctSourceBadge(d.sources);
+    // Summary
+    var sm=document.getElementById('glSummary');
+    if(sm) sm.innerHTML=[
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">기초잔액</div><div style="font-size:18px;font-weight:700">'+fmtAmtColor(d.openingBalance)+'</div></div>',
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">차변 발생</div><div style="font-size:18px;font-weight:700;color:#2563eb">'+fmtAmt(d.periodDr)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">대변 발생</div><div style="font-size:18px;font-weight:700;color:#dc2626">'+fmtAmt(d.periodCr)+'</div></div>',
+      '<div style="padding:12px 16px;background:#faf5ff;border-radius:8px;border-left:4px solid #7c3aed"><div style="font-size:11px;color:#64748b">기말잔액</div><div style="font-size:18px;font-weight:700">'+fmtAmtColor(d.closingBalance)+'</div></div>'
+    ].join('');
+    // Table
+    var txns=d.transactions||[];
+    var h='<div style="font-size:13px;color:#64748b;margin-bottom:8px">'+esc(d.acc_name||acc)+' ('+d.acc_type+') — '+txns.length+'건</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left">일자</th><th style="text-align:left;padding:8px">전표번호</th><th style="text-align:left;padding:8px">적요</th><th style="text-align:left;padding:8px">거래처</th><th style="text-align:right;padding:8px">차변</th><th style="text-align:right;padding:8px">대변</th><th style="text-align:right;padding:8px">잔액</th></tr></thead><tbody>';
+    h+='<tr style="background:#eff6ff;font-weight:600"><td style="padding:8px" colspan="4">기초잔액</td><td colspan="2"></td><td style="padding:8px;text-align:right">'+fmtAmtColor(d.openingBalance)+'</td></tr>';
+    txns.forEach(function(t){
+      var docDate=(t.DocDate||'').trim();if(docDate.length>=8) docDate=docDate.slice(0,4)+'-'+docDate.slice(4,6)+'-'+docDate.slice(6,8);
+      h+='<tr style="border-bottom:1px solid #f1f5f9">';
+      h+='<td style="padding:6px">'+esc(docDate)+'</td>';
+      h+='<td style="padding:6px;font-family:monospace;color:#2563eb;cursor:pointer" onclick="loadVoucherDetail(\''+esc(t.DocNo)+'\')">'+esc(t.DocNo)+'</td>';
+      h+='<td style="padding:6px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.item_descr||t.header_descr||'-')+'</td>';
+      h+='<td style="padding:6px">'+esc(t.cs_code||'-')+'</td>';
+      h+='<td style="padding:6px;text-align:right;color:#2563eb">'+(t.DrCr==='D'?fmtAmt(t.DocAmnt):'')+'</td>';
+      h+='<td style="padding:6px;text-align:right;color:#dc2626">'+(t.DrCr==='C'?fmtAmt(t.DocAmnt):'')+'</td>';
+      h+='<td style="padding:6px;text-align:right;font-weight:600">'+fmtAmtColor(t.balance)+'</td></tr>';
+    });
+    h+='<tr style="background:#faf5ff;font-weight:700"><td style="padding:8px" colspan="4">기말잔액</td><td style="padding:8px;text-align:right;color:#2563eb">'+fmtAmt(d.periodDr)+'</td><td style="padding:8px;text-align:right;color:#dc2626">'+fmtAmt(d.periodCr)+'</td><td style="padding:8px;text-align:right">'+fmtAmtColor(d.closingBalance)+'</td></tr>';
+    h+='</tbody></table>';
+    if(el) el.innerHTML=h;
+  } catch(e){if(el) el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function exportGLExcel() {
+  if(typeof XLSX==='undefined'){alert('SheetJS 미로드');return;}
+  var rows=document.querySelectorAll('#glContent table tbody tr');
+  alert('총계정원장 엑셀 내보내기는 조회 후 사용 가능합니다.');
+}
+
+// ── 시산표 ──
+function loadTrialBalancePage(refresh) {
+  var ys=document.getElementById('tbYear'),ms=document.getElementById('tbMonth');
+  if(ys&&ys.options.length===0){
+    for(var y=2026;y>=2020;y--){var o=document.createElement('option');o.value=y;o.textContent=y+'년';ys.appendChild(o);}
+    ys.value=new Date().getFullYear();
+  }
+  if(ms&&ms.options.length===0){
+    for(var m=1;m<=12;m++){var o=document.createElement('option');o.value=m;o.textContent=m+'월';ms.appendChild(o);}
+    ms.value=new Date().getMonth()+1;
+  }
+  loadTrialBalance(refresh);
+}
+async function loadTrialBalance(refresh) {
+  var year=(document.getElementById('tbYear')||{}).value||new Date().getFullYear();
+  var month=(document.getElementById('tbMonth')||{}).value||(new Date().getMonth()+1);
+  var el=document.getElementById('tbContent');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">시산표 로딩 중... (대량 데이터 처리 중)</div>';
+  try {
+    var url='/api/acct/trial-balance?year='+year+'&month='+month;
+    if(refresh) url+='&refresh=1';
+    var r=await authFetch(url);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data;
+    document.getElementById('tbSourceBar').innerHTML=acctSourceBadge(d.sources);
+    // KPI
+    var kpi=document.getElementById('tbKpi');
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">당기 차변 합계</div><div style="font-size:18px;font-weight:700;color:#2563eb">'+fmtAmt(d.totals.period_dr)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">당기 대변 합계</div><div style="font-size:18px;font-weight:700;color:#dc2626">'+fmtAmt(d.totals.period_cr)+'</div></div>',
+      '<div style="padding:12px 16px;background:'+(d.totals.balanced?'#f0fdf4':'#fef2f2')+';border-radius:8px;border-left:4px solid '+(d.totals.balanced?'#22c55e':'#ef4444')+'"><div style="font-size:11px;color:#64748b">대차 검증</div><div style="font-size:18px;font-weight:700;color:'+(d.totals.balanced?'#22c55e':'#ef4444')+'">'+(d.totals.balanced?'✓ 일치':'✗ 불일치')+'</div></div>',
+      '<div style="padding:12px 16px;background:#f8fafc;border-radius:8px;border-left:4px solid #94a3b8"><div style="font-size:11px;color:#64748b">활성 계정</div><div style="font-size:18px;font-weight:700">'+d.count+'<span style="font-size:12px;color:#94a3b8"> 개</span></div></div>'
+    ].join('');
+    // Table
+    var rows=d.rows||[];
+    var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left" rowspan="2">계정코드</th><th style="text-align:left;padding:8px" rowspan="2">계정명</th><th style="text-align:left;padding:8px" rowspan="2">그룹</th><th colspan="2" style="text-align:center;padding:4px;border-bottom:1px solid #e2e8f0">기초</th><th colspan="2" style="text-align:center;padding:4px;border-bottom:1px solid #e2e8f0">당기발생</th><th colspan="2" style="text-align:center;padding:4px;border-bottom:1px solid #e2e8f0">기말</th></tr>';
+    h+='<tr style="background:#f8fafc"><th style="text-align:right;padding:4px 8px;color:#2563eb;font-size:11px">차변</th><th style="text-align:right;padding:4px 8px;color:#dc2626;font-size:11px">대변</th><th style="text-align:right;padding:4px 8px;color:#2563eb;font-size:11px">차변</th><th style="text-align:right;padding:4px 8px;color:#dc2626;font-size:11px">대변</th><th style="text-align:right;padding:4px 8px;color:#2563eb;font-size:11px">차변</th><th style="text-align:right;padding:4px 8px;color:#dc2626;font-size:11px">대변</th></tr></thead><tbody>';
+    var lastGroup='';
+    rows.forEach(function(r){
+      if(r.acc_group!==lastGroup){lastGroup=r.acc_group;h+='<tr style="background:#f1f5f9"><td colspan="9" style="padding:6px 8px;font-weight:700;font-size:12px;color:#475569">'+esc(r.acc_group)+'</td></tr>';}
+      h+='<tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="showPage(\'general-ledger\');setTimeout(function(){var s=document.getElementById(\'glAccSelect\');if(s){s.value=\''+esc(r.acc_code)+'\';loadGLData();}},200)">';
+      h+='<td style="padding:6px 8px;font-family:monospace;font-size:11px">'+esc(r.acc_code)+'</td>';
+      h+='<td style="padding:6px 8px">'+esc(r.acc_name||'-')+'</td>';
+      h+='<td style="padding:6px 8px;font-size:11px;color:#94a3b8">'+esc(r.acc_type)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right">'+fmtAmt(r.opening_dr)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right">'+fmtAmt(r.opening_cr)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;color:#2563eb">'+fmtAmt(r.period_dr)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;color:#dc2626">'+fmtAmt(r.period_cr)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right">'+fmtAmt(r.closing_dr)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right">'+fmtAmt(r.closing_cr)+'</td></tr>';
+    });
+    // 합계
+    h+='<tr style="background:#1e293b;color:#fff;font-weight:700"><td colspan="3" style="padding:8px">합계</td>';
+    h+='<td style="padding:8px;text-align:right">'+fmtAmt(d.totals.opening_dr)+'</td><td style="padding:8px;text-align:right">'+fmtAmt(d.totals.opening_cr)+'</td>';
+    h+='<td style="padding:8px;text-align:right">'+fmtAmt(d.totals.period_dr)+'</td><td style="padding:8px;text-align:right">'+fmtAmt(d.totals.period_cr)+'</td>';
+    h+='<td style="padding:8px;text-align:right">'+fmtAmt(d.totals.closing_dr)+'</td><td style="padding:8px;text-align:right">'+fmtAmt(d.totals.closing_cr)+'</td></tr>';
+    h+='</tbody></table>';
+    if(el) el.innerHTML=h;
+  } catch(e){if(el) el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function exportTBExcel() { alert('시산표 엑셀 내보내기: 조회 후 사용 가능합니다.'); }
+
+// ── 재무제표 ──
+function loadFinancialStatementsPage() {
+  var ys=document.getElementById('fsYear'),ms=document.getElementById('fsMonth');
+  if(ys&&ys.options.length===0){for(var y=2026;y>=2020;y--){var o=document.createElement('option');o.value=y;o.textContent=y+'년';ys.appendChild(o);}ys.value=new Date().getFullYear();}
+  if(ms&&ms.options.length===0){for(var m=1;m<=12;m++){var o=document.createElement('option');o.value=m;o.textContent=m+'월';ms.appendChild(o);}ms.value=new Date().getMonth()+1;}
+  loadFinancialStatements();
+}
+function switchFsTab(t) {
+  _fsTab=t;
+  document.querySelectorAll('#fsTabs .tab').forEach(function(el){
+    var isA=el.getAttribute('data-fstab')===t;
+    el.style.color=isA?'#2563eb':'#64748b';el.style.fontWeight=isA?'600':'400';
+    el.style.borderBottom=isA?'2px solid #2563eb':'2px solid transparent';
+  });
+  if(_fsData) renderFsContent(_fsData);
+}
+async function loadFinancialStatements() {
+  var year=(document.getElementById('fsYear')||{}).value||new Date().getFullYear();
+  var month=(document.getElementById('fsMonth')||{}).value||(new Date().getMonth()+1);
+  var compare=(document.getElementById('fsCompare')||{}).value||'';
+  var el=document.getElementById('fsContent');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">재무제표 생성 중...</div>';
+  try {
+    var url='/api/acct/financial-statements?year='+year+'&month='+month;
+    if(compare) url+='&compare='+compare;
+    var r=await authFetch(url);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    _fsData=r.data;
+    document.getElementById('fsSourceBar').innerHTML=acctSourceBadge(r.data.sources);
+    renderFsKpi(r.data);
+    renderFsContent(r.data);
+  } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function renderFsKpi(d) {
+  var kpi=document.getElementById('fsKpi');if(!kpi)return;
+  var cur=d.current||{};var bs=cur.bs||{};var is=cur.is||{};
+  kpi.innerHTML=[
+    '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">총자산</div><div style="font-size:18px;font-weight:700">'+fmtAmt(bs.totalAssets)+'</div></div>',
+    '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #dc2626"><div style="font-size:11px;color:#64748b">총부채</div><div style="font-size:18px;font-weight:700">'+fmtAmt(bs.totalLiabilities)+'</div></div>',
+    '<div style="padding:12px 16px;background:#faf5ff;border-radius:8px;border-left:4px solid #7c3aed"><div style="font-size:11px;color:#64748b">총자본</div><div style="font-size:18px;font-weight:700">'+fmtAmt(bs.totalEquity)+'</div></div>',
+    '<div style="padding:12px 16px;background:'+(is.netIncome>=0?'#f0fdf4':'#fef2f2')+';border-radius:8px;border-left:4px solid '+(is.netIncome>=0?'#22c55e':'#ef4444')+'"><div style="font-size:11px;color:#64748b">당기순이익</div><div style="font-size:18px;font-weight:700">'+fmtAmtColor(is.netIncome)+'</div></div>'
+  ].join('');
+}
+function renderFsContent(d) {
+  var el=document.getElementById('fsContent');if(!el)return;
+  var cur=d.current||{};var comp=d.compare;
+  if(_fsTab==='bs') renderBalanceSheet(el,cur.bs,comp?comp.bs:null,d.compareLabel);
+  else renderIncomeStatement(el,cur.is,comp?comp.is:null,d.compareLabel);
+}
+function renderBalanceSheet(el,bs,compBs,label) {
+  if(!bs){el.innerHTML='<div style="color:#94a3b8;text-align:center;padding:40px">데이터 없음</div>';return;}
+  var hasComp=!!compBs;
+  var h='<h3 style="font-size:16px;margin:0 0 16px">재무상태표 (Balance Sheet)</h3>';
+  h+='<div style="padding:8px 12px;margin-bottom:12px;border-radius:6px;background:'+(bs.balanced?'#f0fdf4':'#fef2f2')+';font-size:13px;color:'+(bs.balanced?'#22c55e':'#ef4444')+'">'+(bs.balanced?'✓ 자산 = 부채 + 자본 (대차균형)':'✗ 대차 불균형 (차이: '+fmtAmt(bs.totalAssets-(bs.totalLiabilities+bs.totalEquity))+')')+'</div>';
+  function renderSection(title,items,total,compTotal) {
+    var s='<tr style="background:#1e293b;color:#fff"><td style="padding:8px;font-weight:700" colspan="'+(hasComp?4:2)+'">'+title+'</td></tr>';
+    items.forEach(function(it){
+      s+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px 8px 6px 24px;font-size:13px">'+esc(it.acc_name||it.acc_code)+'</td><td style="padding:6px 8px;text-align:right;font-size:13px">'+fmtAmt(it.balance)+'</td>';
+      if(hasComp){var cv=compBs?(compBs[title==='자산'?'assets':title==='부채'?'liabilities':'equity']||[]).find(function(x){return x.acc_code===it.acc_code;}):null;s+='<td style="padding:6px 8px;text-align:right;font-size:13px;color:#94a3b8">'+(cv?fmtAmt(cv.balance):'-')+'</td><td style="padding:6px 8px;text-align:right;font-size:13px">'+fmtAmtColor(cv?(it.balance-(cv.balance||0)):it.balance)+'</td>';}
+      s+='</tr>';
+    });
+    s+='<tr style="background:#f8fafc;font-weight:700"><td style="padding:8px">합계</td><td style="padding:8px;text-align:right">'+fmtAmt(total)+'</td>';
+    if(hasComp) s+='<td style="padding:8px;text-align:right;color:#94a3b8">'+(compTotal!=null?fmtAmt(compTotal):'-')+'</td><td style="padding:8px;text-align:right">'+fmtAmtColor(compTotal!=null?total-compTotal:total)+'</td>';
+    s+='</tr>';
+    return s;
+  }
+  h+='<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="text-align:left;padding:8px">계정</th><th style="text-align:right;padding:8px">당기</th>';
+  if(hasComp) h+='<th style="text-align:right;padding:8px">'+esc(label||'비교')+'</th><th style="text-align:right;padding:8px">증감</th>';
+  h+='</tr></thead><tbody>';
+  h+=renderSection('자산',bs.assets,bs.totalAssets,compBs?compBs.totalAssets:null);
+  h+=renderSection('부채',bs.liabilities,bs.totalLiabilities,compBs?compBs.totalLiabilities:null);
+  h+=renderSection('자본',bs.equity,bs.totalEquity,compBs?compBs.totalEquity:null);
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+function renderIncomeStatement(el,is,compIs,label) {
+  if(!is){el.innerHTML='<div style="color:#94a3b8;text-align:center;padding:40px">데이터 없음</div>';return;}
+  var hasComp=!!compIs;
+  var h='<h3 style="font-size:16px;margin:0 0 16px">손익계산서 (Income Statement)</h3>';
+  h+='<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="text-align:left;padding:8px">계정</th><th style="text-align:right;padding:8px">당기</th>';
+  if(hasComp) h+='<th style="text-align:right;padding:8px">'+esc(label||'비교')+'</th><th style="text-align:right;padding:8px">증감</th>';
+  h+='</tr></thead><tbody>';
+  h+='<tr style="background:#1e293b;color:#fff"><td style="padding:8px;font-weight:700" colspan="'+(hasComp?4:2)+'">수익 (매출)</td></tr>';
+  (is.revenue||[]).forEach(function(it){
+    h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px 8px 6px 24px;font-size:13px">'+esc(it.acc_name||it.acc_code)+'</td><td style="padding:6px 8px;text-align:right;font-size:13px;color:#059669">'+fmtAmt(it.periodOnly)+'</td>';
+    if(hasComp){var cv=(compIs.revenue||[]).find(function(x){return x.acc_code===it.acc_code;});h+='<td style="padding:6px 8px;text-align:right;font-size:13px;color:#94a3b8">'+(cv?fmtAmt(cv.periodOnly):'-')+'</td><td style="padding:6px 8px;text-align:right;font-size:13px">'+fmtAmtColor(cv?it.periodOnly-cv.periodOnly:it.periodOnly)+'</td>';}
+    h+='</tr>';
+  });
+  h+='<tr style="background:#f0fdf4;font-weight:700"><td style="padding:8px">수익 합계</td><td style="padding:8px;text-align:right;color:#059669">'+fmtAmt(is.totalRevenue)+'</td>';
+  if(hasComp) h+='<td style="padding:8px;text-align:right;color:#94a3b8">'+fmtAmt(compIs.totalRevenue)+'</td><td style="padding:8px;text-align:right">'+fmtAmtColor(is.totalRevenue-compIs.totalRevenue)+'</td>';
+  h+='</tr>';
+  h+='<tr style="background:#1e293b;color:#fff"><td style="padding:8px;font-weight:700" colspan="'+(hasComp?4:2)+'">비용</td></tr>';
+  (is.expense||[]).forEach(function(it){
+    h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px 8px 6px 24px;font-size:13px">'+esc(it.acc_name||it.acc_code)+'</td><td style="padding:6px 8px;text-align:right;font-size:13px;color:#dc2626">'+fmtAmt(it.periodOnly)+'</td>';
+    if(hasComp){var cv=(compIs.expense||[]).find(function(x){return x.acc_code===it.acc_code;});h+='<td style="padding:6px 8px;text-align:right;font-size:13px;color:#94a3b8">'+(cv?fmtAmt(cv.periodOnly):'-')+'</td><td style="padding:6px 8px;text-align:right;font-size:13px">'+fmtAmtColor(cv?it.periodOnly-cv.periodOnly:it.periodOnly)+'</td>';}
+    h+='</tr>';
+  });
+  h+='<tr style="background:#fef2f2;font-weight:700"><td style="padding:8px">비용 합계</td><td style="padding:8px;text-align:right;color:#dc2626">'+fmtAmt(is.totalExpense)+'</td>';
+  if(hasComp) h+='<td style="padding:8px;text-align:right;color:#94a3b8">'+fmtAmt(compIs.totalExpense)+'</td><td style="padding:8px;text-align:right">'+fmtAmtColor(is.totalExpense-compIs.totalExpense)+'</td>';
+  h+='</tr>';
+  h+='<tr style="background:#1e293b;color:#fff;font-size:16px"><td style="padding:12px;font-weight:700">당기순이익</td><td style="padding:12px;text-align:right;font-weight:700">'+fmtAmt(is.netIncome)+'</td>';
+  if(hasComp) h+='<td style="padding:12px;text-align:right">'+fmtAmt(compIs.netIncome)+'</td><td style="padding:12px;text-align:right">'+fmtAmtColor(is.netIncome-compIs.netIncome)+'</td>';
+  h+='</tr></tbody></table>';
+  el.innerHTML=h;
+}
+function exportFSExcel() { alert('재무제표 엑셀 내보내기: 조회 후 사용 가능합니다.'); }
+
+// ── 채권/채무 ──
+function loadArApPage() {
+  var now=new Date(),m3=new Date(now);m3.setMonth(m3.getMonth()-3);
+  var si=document.getElementById('arapStart'),ei=document.getElementById('arapEnd');
+  if(si&&!si.value) si.value=m3.toISOString().slice(0,10);
+  if(ei&&!ei.value) ei.value=now.toISOString().slice(0,10);
+  loadArapData();
+}
+function switchArapTab(t) {
+  _arapTab=t;
+  document.querySelectorAll('#arapTabs .tab').forEach(function(el){
+    var isA=el.getAttribute('data-araptab')===t;
+    el.style.color=isA?'#2563eb':'#64748b';el.style.fontWeight=isA?'600':'400';
+    el.style.borderBottom=isA?'2px solid #2563eb':'2px solid transparent';
+  });
+  loadArapData();
+}
+async function loadArapData() {
+  var el=document.getElementById('arapContent');
+  if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  if(_arapTab==='aging') { loadAgingData(); return; }
+  if(_arapTab==='detail') { loadArapDetail(); return; }
+  var from=((document.getElementById('arapStart')||{}).value||'').replace(/-/g,'');
+  var to=((document.getElementById('arapEnd')||{}).value||'').replace(/-/g,'');
+  var type=_arapTab==='ap'?'AP':'AR';
+  try {
+    var r=await authFetch('/api/acct/ar-summary?from='+from+'&to='+to+'&type='+type);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data;
+    document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
+    var t=d.totals||{};
+    var kpi=document.getElementById('arapKpi');
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">총 청구액</div><div style="font-size:18px;font-weight:700">'+fmtAmt(t.total_billed)+'</div></div>',
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">수금/지급액</div><div style="font-size:18px;font-weight:700">'+fmtAmt(t.total_collected)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fff7ed;border-radius:8px;border-left:4px solid #f59e0b"><div style="font-size:11px;color:#64748b">미수/미지급</div><div style="font-size:18px;font-weight:700;color:#ea580c">'+fmtAmt(t.outstanding)+'</div></div>',
+      '<div style="padding:12px 16px;background:#f8fafc;border-radius:8px;border-left:4px solid #94a3b8"><div style="font-size:11px;color:#64748b">수금률</div><div style="font-size:18px;font-weight:700">'+(t.total_billed>0?((t.total_collected/(t.total_billed+t.total_vat))*100).toFixed(1):'0')+'%</div></div>'
+    ].join('');
+    var summary=d.summary||[];
+    var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">거래처코드</th><th style="text-align:right;padding:10px">청구건수</th><th style="text-align:right;padding:10px">청구액</th><th style="text-align:right;padding:10px">VAT</th><th style="text-align:right;padding:10px">수금액</th><th style="text-align:right;padding:10px">미수액</th></tr></thead><tbody>';
+    summary.forEach(function(s){
+      h+='<tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="document.getElementById(\'arapCsFilter\').value=\''+esc(s.cs_code)+'\';switchArapTab(\'detail\')">';
+      h+='<td style="padding:8px;font-family:monospace">'+esc(s.cs_code)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(s.bill_count)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(s.total_billed)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#94a3b8">'+fmtAmt(s.total_vat)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#22c55e">'+fmtAmt(s.total_collected)+'</td>';
+      h+='<td style="padding:8px;text-align:right;font-weight:600;color:'+(s.outstanding>0?'#ea580c':'#22c55e')+'">'+fmtAmt(s.outstanding)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(el) el.innerHTML=h;
+  } catch(e){if(el) el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+async function loadAgingData() {
+  var el=document.getElementById('arapContent');
+  try {
+    var r=await authFetch('/api/acct/aging');
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data;
+    document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
+    var t=d.totals||{};
+    var kpi=document.getElementById('arapKpi');
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">정상</div><div style="font-size:18px;font-weight:700;color:#22c55e">'+fmtAmt(t.current_amt)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef9c3;border-radius:8px;border-left:4px solid #eab308"><div style="font-size:11px;color:#64748b">30일 이내</div><div style="font-size:18px;font-weight:700;color:#eab308">'+fmtAmt(t.days_30)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fff7ed;border-radius:8px;border-left:4px solid #f59e0b"><div style="font-size:11px;color:#64748b">60일 이내</div><div style="font-size:18px;font-weight:700;color:#f59e0b">'+fmtAmt(t.days_60)+'</div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">90일 초과</div><div style="font-size:18px;font-weight:700;color:#ef4444">'+fmtAmt(t.over_90)+'</div></div>'
+    ].join('');
+    var aging=d.aging||[];
+    var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:10px;text-align:left">거래처</th><th style="text-align:right;padding:10px;color:#22c55e">정상</th><th style="text-align:right;padding:10px;color:#eab308">~30일</th><th style="text-align:right;padding:10px;color:#f59e0b">~60일</th><th style="text-align:right;padding:10px;color:#ea580c">~90일</th><th style="text-align:right;padding:10px;color:#ef4444">90일+</th><th style="text-align:right;padding:10px;font-weight:700">합계</th></tr></thead><tbody>';
+    aging.slice(0,50).forEach(function(a){
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:8px;font-family:monospace">'+esc(a.cs_code)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(a.current_amt)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(a.days_30)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(a.days_60)+'</td>';
+      h+='<td style="padding:8px;text-align:right">'+fmtAmt(a.days_90)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#ef4444;font-weight:600">'+fmtAmt(a.over_90)+'</td>';
+      h+='<td style="padding:8px;text-align:right;font-weight:700">'+fmtAmt(a.total_outstanding)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(el) el.innerHTML=h;
+    // Chart
+    renderAgingChart(aging.slice(0,10));
+  } catch(e){if(el) el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function renderAgingChart(data) {
+  var canvas=document.getElementById('arapChart');if(!canvas||typeof Chart==='undefined')return;
+  canvas.style.display='block';
+  if(_arapChart){_arapChart.destroy();_arapChart=null;}
+  _arapChart=new Chart(canvas.getContext('2d'),{type:'bar',data:{
+    labels:data.map(function(d){return d.cs_code;}),
+    datasets:[
+      {label:'정상',data:data.map(function(d){return d.current_amt||0;}),backgroundColor:'#22c55e'},
+      {label:'~30일',data:data.map(function(d){return d.days_30||0;}),backgroundColor:'#eab308'},
+      {label:'~60일',data:data.map(function(d){return d.days_60||0;}),backgroundColor:'#f59e0b'},
+      {label:'~90일',data:data.map(function(d){return d.days_90||0;}),backgroundColor:'#ea580c'},
+      {label:'90일+',data:data.map(function(d){return d.over_90||0;}),backgroundColor:'#ef4444'}
+    ]},options:{responsive:true,plugins:{title:{display:true,text:'거래처별 채권 에이징 (Top 10)'}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:function(v){return (v/10000).toFixed(0)+'만';}}}}}});
+}
+async function loadArapDetail() {
+  var cs=(document.getElementById('arapCsFilter')||{}).value;
+  var el=document.getElementById('arapContent');
+  if(!cs){if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">거래처 코드를 입력하세요.</div>';return;}
+  var from=((document.getElementById('arapStart')||{}).value||'').replace(/-/g,'');
+  var to=((document.getElementById('arapEnd')||{}).value||'').replace(/-/g,'');
+  try {
+    var r=await authFetch('/api/acct/ar-detail?cs='+encodeURIComponent(cs)+'&from='+from+'&to='+to);
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var d=r.data;
+    document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
+    var h='<h3 style="font-size:16px;margin:0 0 16px">거래처: '+esc(d.cs_code)+' 상세</h3>';
+    // 청구 내역
+    h+='<h4 style="font-size:14px;margin:16px 0 8px;color:#475569">청구 내역 ('+((d.bills||[]).length)+'건)</h4>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left">청구번호</th><th style="text-align:left;padding:8px">일자</th><th style="text-align:center;padding:8px">AR/AP</th><th style="text-align:right;padding:8px">청구액</th><th style="text-align:right;padding:8px">VAT</th><th style="text-align:right;padding:8px">수금액</th><th style="text-align:left;padding:8px">적요</th></tr></thead><tbody>';
+    (d.bills||[]).forEach(function(b){
+      var dt=(b.BillDate||'').trim();if(dt.length>=8) dt=dt.slice(0,4)+'-'+dt.slice(4,6)+'-'+dt.slice(6,8);
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(b.BillNo||'')+'</td>';
+      h+='<td style="padding:6px">'+esc(dt)+'</td>';
+      h+='<td style="padding:6px;text-align:center"><span style="padding:2px 6px;border-radius:4px;font-size:11px;background:'+(b.ArApGubun==='AR'?'#dbeafe':'#fce7f3')+';color:'+(b.ArApGubun==='AR'?'#2563eb':'#dc2626')+'">'+esc(b.ArApGubun)+'</span></td>';
+      h+='<td style="padding:6px;text-align:right">'+fmtAmt(b.bill_amt)+'</td>';
+      h+='<td style="padding:6px;text-align:right;color:#94a3b8">'+fmtAmt(b.vat_amt)+'</td>';
+      h+='<td style="padding:6px;text-align:right;color:#22c55e">'+fmtAmt(b.collected)+'</td>';
+      h+='<td style="padding:6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.BillDescr||'-')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    // 수금/지급 이력
+    h+='<h4 style="font-size:14px;margin:24px 0 8px;color:#475569">수금/지급 이력 ('+((d.payments||[]).length)+'건)</h4>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0"><th style="padding:8px;text-align:left">원본번호</th><th style="text-align:left;padding:8px">배분일</th><th style="text-align:right;padding:8px">배분액</th><th style="text-align:left;padding:8px">결제수단</th><th style="text-align:center;padding:8px">AR/AP</th></tr></thead><tbody>';
+    (d.payments||[]).forEach(function(p){
+      var dt=(p.AllocDate||'').trim();if(dt.length>=8) dt=dt.slice(0,4)+'-'+dt.slice(4,6)+'-'+dt.slice(6,8);
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(p.OriginNo||'')+'</td>';
+      h+='<td style="padding:6px">'+esc(dt)+'</td>';
+      h+='<td style="padding:6px;text-align:right;color:#22c55e;font-weight:600">'+fmtAmt(p.alloc_amt)+'</td>';
+      h+='<td style="padding:6px">'+esc(p.PayCode||'-')+'</td>';
+      h+='<td style="padding:6px;text-align:center">'+esc(p.ArApGubun||'-')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(el) el.innerHTML=h;
+  } catch(e){if(el) el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+function exportArapExcel() { alert('채권/채무 엑셀 내보내기: 조회 후 사용 가능합니다.'); }
 
 // ===== 업무관리 =====
 let _tkStatus = 'all';

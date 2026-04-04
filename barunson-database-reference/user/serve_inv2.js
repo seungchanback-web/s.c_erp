@@ -26,6 +26,10 @@ const SALES_CACHE_TTL = 30 * 60 * 1000; // 30분
 // ── 원가관리 캐시 ──
 let costSummaryCache = null, costSummaryCacheTime = 0;
 const COST_CACHE_TTL = 30 * 60 * 1000; // 30분
+// ── 회계 모듈 캐시 ──
+let acctStatsCache = null, acctStatsCacheTime = 0;
+let trialBalanceCache = null, trialBalanceCacheTime = 0;
+const ACCT_CACHE_TTL = 30 * 60 * 1000; // 30분
 const DEPT_GUBUN_LABELS = {'SB':'쇼핑몰B','BR':'바른손','ST':'스토어','SS':'쇼핑몰S','SA':'쇼핑몰A','OB':'기타B','DE':'기타'};
 const BRAND_LABELS = {'B':'바른손카드','S':'비핸즈','C':'더카드','X':'디얼디어','W':'W카드','N':'네이처','I':'이니스','H':'비핸즈프리미엄','F':'플라워','D':'디자인카드','P':'프리미어','M':'모바일','G':'글로벌','U':'유니세프','Y':'유니크','K':'BK','T':'프리미어더카드','A':'기타'};
 // .env를 여러 위치에서 탐색
@@ -1788,6 +1792,124 @@ db.exec(`CREATE TABLE IF NOT EXISTS notice_reads (
 )`);
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nr_unique ON notice_reads(notice_id, user_id)");
 
+// ── 회계 모듈 SQLite 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS gl_account_map (
+  acc_code    TEXT PRIMARY KEY,
+  acc_name    TEXT NOT NULL DEFAULT '',
+  acc_type    TEXT NOT NULL DEFAULT '',
+  acc_group   TEXT DEFAULT '',
+  parent_code TEXT DEFAULT '',
+  depth       INTEGER DEFAULT 0,
+  sort_order  INTEGER DEFAULT 0,
+  is_active   INTEGER DEFAULT 1,
+  updated_at  TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS gl_balance_cache (
+  acc_code   TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  opening_dr REAL DEFAULT 0, opening_cr REAL DEFAULT 0,
+  period_dr  REAL DEFAULT 0, period_cr  REAL DEFAULT 0,
+  closing_dr REAL DEFAULT 0, closing_cr REAL DEFAULT 0,
+  cached_at  TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(acc_code, year_month)
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS accounting_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS cs_code_cache (
+  cs_code   TEXT PRIMARY KEY,
+  cs_name   TEXT DEFAULT '',
+  cached_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+// 계정과목 한글명 매핑 (XERP 주요 계정)
+const KNOWN_ACCOUNTS = {
+  '11110101':'현금','11110151':'보통예금','11110152':'보통예금2','11110153':'보통예금3',
+  '11120101':'받을어음','11125101':'외상매출금','11125102':'외상매출금(수출)',
+  '11130101':'단기대여금','11135101':'미수금','11135102':'미수수익',
+  '11140101':'선급금','11145101':'선급비용','11150101':'재고자산',
+  '11151101':'상품','11152101':'제품','11153101':'재공품','11154101':'원재료','11155101':'저장품',
+  '11160101':'부가세대급금','11199101':'기타유동자산',
+  '12110101':'토지','12120101':'건물','12125101':'건물감가상각누계액',
+  '12130101':'기계장치','12135101':'기계장치감가상각누계액',
+  '12140101':'차량운반구','12145101':'차량운반구감가상각누계액',
+  '12150101':'비품','12155101':'비품감가상각누계액',
+  '12160101':'건설중인자산','12170101':'무형자산','12175101':'영업권',
+  '12180101':'장기투자증권','12190101':'장기대여금','12199101':'기타비유동자산',
+  '21110101':'외상매입금','21120101':'지급어음','21130101':'단기차입금',
+  '21140101':'미지급금','21145101':'미지급비용','21150101':'선수금',
+  '21155101':'예수금','21160101':'부가세예수금','21170101':'유동성장기부채',
+  '21199101':'기타유동부채','21210101':'미지급법인세',
+  '21310101':'선수금(카드)','21320101':'선수금(현금)','21330101':'선수금',
+  '22110101':'장기차입금','22120101':'사채','22130101':'퇴직급여충당부채',
+  '22199101':'기타비유동부채',
+  '31110101':'자본금','31120101':'자본잉여금','31130101':'이익잉여금',
+  '31140101':'자본조정','31150101':'기타포괄손익누계액',
+  '41110101':'상품매출','41110102':'상품매출(수출)','41120101':'제품매출',
+  '51110101':'상품매출원가','51120101':'제품매출원가','51130101':'원재료비',
+  '51140101':'노무비','51150101':'제조경비',
+  '61110101':'상품매출','61110121':'상품매출(온라인)','61115101':'제품매출',
+  '61120101':'임대수입','61130101':'수수료수입',
+  '64110101':'이자수익','64120101':'배당금수익','64130101':'외환차익',
+  '64140101':'외화환산이익','64150101':'유형자산처분이익','64199101':'잡이익',
+  '71110101':'급여','71120101':'퇴직급여','71130101':'복리후생비',
+  '71140101':'여비교통비','71150101':'접대비','71160101':'통신비',
+  '71170101':'수도광열비','71180101':'세금과공과','71190101':'감가상각비',
+  '71200101':'임차료','71210101':'수선비','71220101':'보험료',
+  '71230101':'차량유지비','71240101':'운반비','71250101':'교육훈련비',
+  '71260101':'도서인쇄비','71270101':'소모품비','71280101':'지급수수료',
+  '71290101':'광고선전비','71300101':'대손상각비','71310101':'무형자산상각비',
+  '71399101':'기타판관비',
+  '73110101':'포장비','73120101':'운반비(판매)','73130101':'판매수수료',
+  '73140101':'판매촉진비','73150101':'판매보증비',
+  '73183104':'판매수수료',
+  '74110101':'이자비용','74120101':'외환차손','74130101':'외화환산손실',
+  '74140101':'유형자산처분손실','74199101':'잡손실',
+  '81110101':'법인세비용'
+};
+
+function classifyAccount(code) {
+  const c = code.replace(/\s/g, '');
+  const first = c.charAt(0);
+  const first2 = c.substring(0, 2);
+  let acc_type = '', acc_group = '', sort_order = 0;
+  if (first === '1') {
+    acc_type = 'asset';
+    if (first2 === '11') { acc_group = '유동자산'; sort_order = 1000; }
+    else { acc_group = '비유동자산'; sort_order = 2000; }
+  } else if (first === '2') {
+    acc_type = 'liability';
+    if (first2 === '21') { acc_group = '유동부채'; sort_order = 3000; }
+    else { acc_group = '비유동부채'; sort_order = 4000; }
+  } else if (first === '3') {
+    acc_type = 'equity'; acc_group = '자본'; sort_order = 5000;
+  } else if (first === '4' || first2 === '61') {
+    acc_type = 'revenue'; acc_group = '매출'; sort_order = 6000;
+  } else if (first === '5' || first2 === '51') {
+    acc_type = 'expense'; acc_group = '매출원가'; sort_order = 7000;
+  } else if (first2 === '64') {
+    acc_type = 'revenue'; acc_group = '영업외수익'; sort_order = 6500;
+  } else if (first === '6') {
+    acc_type = 'revenue'; acc_group = '매출'; sort_order = 6000;
+  } else if (first2 === '71' || first2 === '72' || first2 === '73') {
+    acc_type = 'expense'; acc_group = '판매비와관리비'; sort_order = 8000;
+  } else if (first2 === '74') {
+    acc_type = 'expense'; acc_group = '영업외비용'; sort_order = 8500;
+  } else if (first === '7') {
+    acc_type = 'expense'; acc_group = '비용'; sort_order = 8000;
+  } else if (first === '8') {
+    acc_type = 'expense'; acc_group = '법인세비용'; sort_order = 9000;
+  } else {
+    acc_type = 'other'; acc_group = '기타'; sort_order = 9999;
+  }
+  const parent_code = c.substring(0, 5);
+  const depth = c.length <= 5 ? 1 : (c.length <= 6 ? 2 : 3);
+  const name = KNOWN_ACCOUNTS[c] || '';
+  return { acc_type, acc_group, parent_code, depth, sort_order, acc_name: name };
+}
+
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
 let JWT_SECRET;
@@ -1888,6 +2010,12 @@ const ALL_PAGES = [
   { id: 'mat-purchase', name: '원재료 매입', group: '회계' },
   { id: 'cost-mgmt', name: '원가관리', group: '회계' },
   { id: 'closing', name: '마감현황', group: '회계' },
+  { id: 'chart-of-accounts', name: '계정과목', group: '회계' },
+  { id: 'journal', name: '분개장', group: '회계' },
+  { id: 'general-ledger', name: '총계정원장', group: '회계' },
+  { id: 'trial-balance', name: '시산표', group: '회계' },
+  { id: 'financial-statements', name: '재무제표', group: '회계' },
+  { id: 'ar-ap', name: '채권/채무', group: '회계' },
   // 기준정보
   { id: 'vendors', name: '거래처 관리', group: '기준정보' },
   { id: 'product-mgmt', name: '품목관리', group: '기준정보' },
@@ -1913,9 +2041,11 @@ const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
   purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
-    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping'],
+    'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping',
+    'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
   production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
-  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping'],
+  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
+    'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
 };
 
 function hasPermission(role, page, userPermissions) {
@@ -10641,6 +10771,599 @@ async function handleRequest(req, res) {
     db.prepare("UPDATE notices SET status = 'deleted', updated_at = datetime('now','localtime') WHERE id = ?").run(id);
     auditLog(decoded.userId, decoded.username, 'notice_delete', 'notices', id, '공지 삭제', clientIP);
     ok(res, { message: '공지 삭제 완료' }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  복식부기 회계 API (Double-Entry Bookkeeping)
+  // ════════════════════════════════════════════════════════════════════
+
+  // ── GET /api/acct/seed-accounts ── XERP에서 계정코드 추출 → SQLite 시드
+  if (pathname === '/api/acct/seed-accounts' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const sources = { xerp: 'unknown', sqlite: 'ok' };
+    let seeded = 0;
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const result = await pool.request().query(`
+        SELECT DISTINCT RTRIM(AccCode) AS acc_code
+        FROM glDocItem WITH (NOLOCK)
+        WHERE SiteCode = 'BK10' AND AccCode IS NOT NULL AND RTRIM(AccCode) != ''
+      `);
+      const upsert = db.prepare(`INSERT INTO gl_account_map (acc_code, acc_name, acc_type, acc_group, parent_code, depth, sort_order, updated_at)
+        VALUES (?,?,?,?,?,?,?,datetime('now','localtime'))
+        ON CONFLICT(acc_code) DO UPDATE SET
+          acc_name=CASE WHEN excluded.acc_name!='' THEN excluded.acc_name ELSE gl_account_map.acc_name END,
+          acc_type=excluded.acc_type, acc_group=excluded.acc_group,
+          parent_code=excluded.parent_code, depth=excluded.depth, sort_order=excluded.sort_order,
+          updated_at=datetime('now','localtime')`);
+      const tx = db.transaction(() => {
+        for (const row of result.recordset) {
+          const code = row.acc_code.trim();
+          if (!code) continue;
+          const cls = classifyAccount(code);
+          upsert.run(code, cls.acc_name, cls.acc_type, cls.acc_group, cls.parent_code, cls.depth, cls.sort_order);
+          seeded++;
+        }
+      });
+      tx();
+    } catch (e) {
+      sources.xerp = 'error: ' + e.message;
+    }
+    const total = db.prepare('SELECT COUNT(*) AS cnt FROM gl_account_map').get().cnt;
+    ok(res, { seeded, total, sources }); return;
+  }
+
+  // ── GET /api/acct/accounts ── 계정과목 트리 (SQLite)
+  if (pathname === '/api/acct/accounts' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const accounts = db.prepare(`SELECT acc_code, acc_name, acc_type, acc_group, parent_code, depth, sort_order, is_active
+      FROM gl_account_map ORDER BY sort_order, acc_code`).all();
+    ok(res, { accounts, total: accounts.length }); return;
+  }
+
+  // ── PUT /api/acct/accounts/:code ── 계정명 수정
+  if (pathname.match(/^\/api\/acct\/accounts\/(.+)$/) && method === 'PUT') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const code = decodeURIComponent(pathname.match(/^\/api\/acct\/accounts\/(.+)$/)[1]);
+    const body = await parseBody(req);
+    if (body.acc_name !== undefined) {
+      db.prepare(`UPDATE gl_account_map SET acc_name=?, updated_at=datetime('now','localtime') WHERE acc_code=?`).run(body.acc_name, code);
+    }
+    ok(res, { message: '계정 수정 완료' }); return;
+  }
+
+  // ── GET /api/acct/account-stats ── XERP 계정별 거래 통계
+  if (pathname === '/api/acct/account-stats' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const year = qs.get('year') || new Date().getFullYear().toString();
+    const cacheKey = 'acctStats_' + year;
+    if (acctStatsCache && acctStatsCache._key === cacheKey && Date.now() - acctStatsCacheTime < ACCT_CACHE_TTL && !qs.get('refresh')) {
+      ok(res, acctStatsCache); return;
+    }
+    const sources = { xerp: 'unknown', sqlite: 'ok' };
+    let stats = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const fromDate = year + '0101';
+      const toDate = year + '1231';
+      const result = await pool.request()
+        .input('fromDate', fromDate).input('toDate', toDate)
+        .query(`
+          SELECT RTRIM(i.AccCode) AS acc_code,
+                 COUNT(*) AS txn_count,
+                 SUM(CASE WHEN i.DrCr = 'D' THEN i.DocAmnt ELSE 0 END) AS total_dr,
+                 SUM(CASE WHEN i.DrCr = 'C' THEN i.DocAmnt ELSE 0 END) AS total_cr
+          FROM glDocHeader h WITH (NOLOCK)
+          JOIN glDocItem i WITH (NOLOCK) ON h.SiteCode = i.SiteCode AND h.DocNo = i.DocNo
+          WHERE h.SiteCode = 'BK10' AND h.RelCheck = 'Y'
+            AND h.RelDate >= @fromDate AND h.RelDate <= @toDate
+          GROUP BY RTRIM(i.AccCode)
+          ORDER BY SUM(i.DocAmnt) DESC
+        `);
+      stats = result.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    // 계정명 조인
+    const accMap = {};
+    db.prepare('SELECT acc_code, acc_name, acc_type, acc_group FROM gl_account_map').all().forEach(a => { accMap[a.acc_code] = a; });
+    stats = stats.map(s => ({
+      ...s,
+      acc_name: (accMap[s.acc_code] || {}).acc_name || '',
+      acc_type: (accMap[s.acc_code] || {}).acc_type || '',
+      acc_group: (accMap[s.acc_code] || {}).acc_group || ''
+    }));
+    const resp = { year, stats, sources, _key: cacheKey };
+    acctStatsCache = resp; acctStatsCacheTime = Date.now();
+    ok(res, resp); return;
+  }
+
+  // ── GET /api/acct/vouchers ── 분개장 전표 목록
+  if (pathname === '/api/acct/vouchers' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const status = qs.get('status') || 'Y';
+    const offset = parseInt(qs.get('offset') || '0', 10);
+    const limit = Math.min(parseInt(qs.get('limit') || '100', 10), 500);
+    const search = qs.get('search') || '';
+    const sources = { xerp: 'unknown' };
+    let vouchers = [], totalCount = 0;
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      let whereExtra = '';
+      const req2 = pool.request().input('fromDate', from).input('toDate', to).input('offset', offset).input('limit', limit);
+      if (status) { whereExtra += ' AND h.RelCheck = @status'; req2.input('status', status); }
+      if (search) { whereExtra += " AND (h.DocNo LIKE @search OR h.DocDescr LIKE @search)"; req2.input('search', '%' + search + '%'); }
+      const countResult = await req2.query(`
+        SELECT COUNT(*) AS cnt FROM glDocHeader h WITH (NOLOCK)
+        WHERE h.SiteCode = 'BK10' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
+      `);
+      totalCount = countResult.recordset[0].cnt;
+      const req3 = pool.request().input('fromDate', from).input('toDate', to).input('offset', offset).input('limit', limit);
+      if (status) req3.input('status', status);
+      if (search) req3.input('search', '%' + search + '%');
+      const result = await req3.query(`
+        SELECT h.DocNo, h.DocDate, h.DocGubun, h.DocDescr, h.RelCheck, h.RelDate, h.OriginNo,
+          (SELECT SUM(CASE WHEN i2.DrCr='D' THEN i2.DocAmnt ELSE 0 END)
+           FROM glDocItem i2 WITH(NOLOCK) WHERE i2.SiteCode=h.SiteCode AND i2.DocNo=h.DocNo) AS total_debit,
+          (SELECT SUM(CASE WHEN i2.DrCr='C' THEN i2.DocAmnt ELSE 0 END)
+           FROM glDocItem i2 WITH(NOLOCK) WHERE i2.SiteCode=h.SiteCode AND i2.DocNo=h.DocNo) AS total_credit,
+          (SELECT COUNT(*) FROM glDocItem i3 WITH(NOLOCK) WHERE i3.SiteCode=h.SiteCode AND i3.DocNo=h.DocNo) AS line_count
+        FROM glDocHeader h WITH(NOLOCK)
+        WHERE h.SiteCode='BK10' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
+        ORDER BY h.RelDate DESC, h.DocNo DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
+      vouchers = result.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    ok(res, { vouchers, totalCount, offset, limit, sources }); return;
+  }
+
+  // ── GET /api/acct/voucher/:docNo ── 전표 상세 (차변/대변)
+  if (pathname.match(/^\/api\/acct\/voucher\/(.+)$/) && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const docNo = decodeURIComponent(pathname.match(/^\/api\/acct\/voucher\/(.+)$/)[1]);
+    const sources = { xerp: 'unknown' };
+    let header = null, items = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const hResult = await pool.request().input('docNo', docNo).query(`
+        SELECT h.DocNo, h.DocDate, h.DocGubun, h.DocType, h.DocDescr,
+               h.RelCheck, h.RelDate, h.EmpCode, h.OriginNo, h.DeptCode
+        FROM glDocHeader h WITH(NOLOCK)
+        WHERE h.SiteCode='BK10' AND h.DocNo=@docNo
+      `);
+      if (hResult.recordset.length > 0) header = hResult.recordset[0];
+      const iResult = await pool.request().input('docNo', docNo).query(`
+        SELECT i.DocSerNo, RTRIM(i.AccCode) AS acc_code, i.DrCr, i.DocAmnt,
+               i.DocDescr, RTRIM(i.CsCode) AS cs_code, i.VatBillNo, i.TeCode
+        FROM glDocItem i WITH(NOLOCK)
+        WHERE i.SiteCode='BK10' AND i.DocNo=@docNo
+        ORDER BY i.DocSerNo
+      `);
+      items = iResult.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    // 계정명 + 거래처명 보강
+    const accMap = {};
+    db.prepare('SELECT acc_code, acc_name FROM gl_account_map').all().forEach(a => { accMap[a.acc_code] = a.acc_name; });
+    const csMap = {};
+    db.prepare('SELECT cs_code, cs_name FROM cs_code_cache').all().forEach(c => { csMap[c.cs_code] = c.cs_name; });
+    items = items.map(it => ({
+      ...it,
+      acc_name: accMap[it.acc_code] || '',
+      cs_name: csMap[it.cs_code] || ''
+    }));
+    const totalDr = items.filter(i => i.DrCr === 'D').reduce((s, i) => s + (i.DocAmnt || 0), 0);
+    const totalCr = items.filter(i => i.DrCr === 'C').reduce((s, i) => s + (i.DocAmnt || 0), 0);
+    const balanced = Math.abs(totalDr - totalCr) < 1;
+    ok(res, { header, items, totalDr, totalCr, balanced, sources }); return;
+  }
+
+  // ── GET /api/acct/gl ── 총계정원장 (계정별 거래내역 + 잔액 누계)
+  if (pathname === '/api/acct/gl' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const acc = qs.get('acc');
+    if (!acc) { fail(res, 400, 'acc 파라미터 필요'); return; }
+    const from = qs.get('from') || (() => { const d = new Date(); return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + '01'; })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const csFilter = qs.get('cs') || '';
+    const sources = { xerp: 'unknown' };
+    let openingDr = 0, openingCr = 0, transactions = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      // 기초잔액: from 이전 모든 거래 합산
+      const openReq = pool.request().input('acc', acc).input('fromDate', from);
+      const openResult = await openReq.query(`
+        SELECT SUM(CASE WHEN i.DrCr='D' THEN i.DocAmnt ELSE 0 END) AS total_dr,
+               SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS total_cr
+        FROM glDocHeader h WITH(NOLOCK)
+        JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+          AND RTRIM(i.AccCode)=@acc AND h.RelDate < @fromDate
+      `);
+      if (openResult.recordset[0]) {
+        openingDr = openResult.recordset[0].total_dr || 0;
+        openingCr = openResult.recordset[0].total_cr || 0;
+      }
+      // 당기 거래
+      const txReq = pool.request().input('acc', acc).input('fromDate', from).input('toDate', to);
+      let csWhere = '';
+      if (csFilter) { csWhere = " AND RTRIM(i.CsCode) LIKE @csFilter"; txReq.input('csFilter', '%' + csFilter + '%'); }
+      const txResult = await txReq.query(`
+        SELECT h.DocNo, h.DocDate, h.DocDescr AS header_descr,
+               i.DocSerNo, i.DrCr, i.DocAmnt, i.DocDescr AS item_descr,
+               RTRIM(i.CsCode) AS cs_code, i.VatBillNo
+        FROM glDocHeader h WITH(NOLOCK)
+        JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+          AND RTRIM(i.AccCode)=@acc
+          AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${csWhere}
+        ORDER BY h.RelDate, h.DocNo, i.DocSerNo
+      `);
+      transactions = txResult.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    // 계정 유형 확인 (자산/비용은 Dr+, 부채/자본/수익은 Cr+)
+    const accInfo = db.prepare('SELECT acc_type, acc_name FROM gl_account_map WHERE acc_code=?').get(acc) || {};
+    const isDebitNature = ['asset', 'expense'].includes(accInfo.acc_type);
+    // 잔액 누계 계산
+    let runBal = isDebitNature ? (openingDr - openingCr) : (openingCr - openingDr);
+    const openingBalance = runBal;
+    transactions = transactions.map(t => {
+      if (t.DrCr === 'D') runBal += t.DocAmnt;
+      else runBal -= (isDebitNature ? t.DocAmnt : -t.DocAmnt);
+      if (!isDebitNature) {
+        if (t.DrCr === 'D') runBal = openingBalance + transactions.filter(x => x === t || transactions.indexOf(x) < transactions.indexOf(t)).reduce((s, x) => s + (x.DrCr === 'C' ? x.DocAmnt : -x.DocAmnt), 0);
+      }
+      return { ...t, balance: runBal };
+    });
+    // 재계산: 정확한 러닝밸런스
+    let rb = openingBalance;
+    transactions = transactions.map(t => {
+      if (isDebitNature) rb += (t.DrCr === 'D' ? t.DocAmnt : -t.DocAmnt);
+      else rb += (t.DrCr === 'C' ? t.DocAmnt : -t.DocAmnt);
+      return { ...t, balance: rb };
+    });
+    const closingBalance = rb;
+    const periodDr = transactions.filter(t => t.DrCr === 'D').reduce((s, t) => s + (t.DocAmnt || 0), 0);
+    const periodCr = transactions.filter(t => t.DrCr === 'C').reduce((s, t) => s + (t.DocAmnt || 0), 0);
+    ok(res, { acc, acc_name: accInfo.acc_name || '', acc_type: accInfo.acc_type || '',
+      openingBalance, closingBalance, periodDr, periodCr, isDebitNature,
+      transactions, count: transactions.length, sources }); return;
+  }
+
+  // ── GET /api/acct/trial-balance ── 시산표
+  if (pathname === '/api/acct/trial-balance' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const year = qs.get('year') || new Date().getFullYear().toString();
+    const month = qs.get('month') || String(new Date().getMonth() + 1);
+    const fromDate = year + String(month).padStart(2, '0') + '01';
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const toDate = year + String(month).padStart(2, '0') + String(lastDay);
+    const fiscalStart = year + '0101';
+    const cacheKey = 'tb_' + fromDate;
+    if (trialBalanceCache && trialBalanceCache._key === cacheKey && Date.now() - trialBalanceCacheTime < ACCT_CACHE_TTL && !qs.get('refresh')) {
+      ok(res, trialBalanceCache); return;
+    }
+    const sources = { xerp: 'unknown', sqlite: 'ok' };
+    let periodData = [], priorData = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      // 당기 발생액
+      const pResult = await pool.request().input('fromDate', fromDate).input('toDate', toDate).query(`
+        SELECT RTRIM(i.AccCode) AS acc_code,
+               SUM(CASE WHEN i.DrCr='D' THEN i.DocAmnt ELSE 0 END) AS period_dr,
+               SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS period_cr
+        FROM glDocHeader h WITH(NOLOCK)
+        JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+          AND h.RelDate >= @fromDate AND h.RelDate <= @toDate
+        GROUP BY RTRIM(i.AccCode)
+      `);
+      periodData = pResult.recordset;
+      // 기초잔액 (회계연도 시작~당월 직전)
+      if (fromDate !== fiscalStart) {
+        const beforeDate = fromDate; // fromDate 미만
+        const oResult = await pool.request().input('fiscalStart', fiscalStart).input('beforeDate', beforeDate).query(`
+          SELECT RTRIM(i.AccCode) AS acc_code,
+                 SUM(CASE WHEN i.DrCr='D' THEN i.DocAmnt ELSE 0 END) AS prior_dr,
+                 SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS prior_cr
+          FROM glDocHeader h WITH(NOLOCK)
+          JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+          WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+            AND h.RelDate >= @fiscalStart AND h.RelDate < @beforeDate
+          GROUP BY RTRIM(i.AccCode)
+        `);
+        priorData = oResult.recordset;
+      }
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    // 계정명 매핑
+    const accMap = {};
+    db.prepare('SELECT acc_code, acc_name, acc_type, acc_group, sort_order FROM gl_account_map').all()
+      .forEach(a => { accMap[a.acc_code] = a; });
+    // 통합
+    const allCodes = new Set([...periodData.map(p => p.acc_code), ...priorData.map(p => p.acc_code)]);
+    const priorMap = {}; priorData.forEach(p => { priorMap[p.acc_code] = p; });
+    const periodMap = {}; periodData.forEach(p => { periodMap[p.acc_code] = p; });
+    const rows = [];
+    for (const code of allCodes) {
+      const info = accMap[code] || classifyAccount(code);
+      const prior = priorMap[code] || { prior_dr: 0, prior_cr: 0 };
+      const period = periodMap[code] || { period_dr: 0, period_cr: 0 };
+      const isDebitNature = ['asset', 'expense'].includes(info.acc_type);
+      const openBal = isDebitNature ? (prior.prior_dr - prior.prior_cr) : (prior.prior_cr - prior.prior_dr);
+      const periodNet = isDebitNature ? (period.period_dr - period.period_cr) : (period.period_cr - period.period_dr);
+      const closeBal = openBal + periodNet;
+      rows.push({
+        acc_code: code,
+        acc_name: info.acc_name || '',
+        acc_type: info.acc_type || '',
+        acc_group: info.acc_group || '',
+        sort_order: info.sort_order || 9999,
+        opening_dr: prior.prior_dr || 0, opening_cr: prior.prior_cr || 0,
+        period_dr: period.period_dr || 0, period_cr: period.period_cr || 0,
+        closing_dr: (prior.prior_dr || 0) + (period.period_dr || 0),
+        closing_cr: (prior.prior_cr || 0) + (period.period_cr || 0),
+        opening_balance: openBal, closing_balance: closeBal
+      });
+    }
+    rows.sort((a, b) => (a.sort_order - b.sort_order) || a.acc_code.localeCompare(b.acc_code));
+    const totals = {
+      opening_dr: rows.reduce((s, r) => s + r.opening_dr, 0),
+      opening_cr: rows.reduce((s, r) => s + r.opening_cr, 0),
+      period_dr: rows.reduce((s, r) => s + r.period_dr, 0),
+      period_cr: rows.reduce((s, r) => s + r.period_cr, 0),
+      closing_dr: rows.reduce((s, r) => s + r.closing_dr, 0),
+      closing_cr: rows.reduce((s, r) => s + r.closing_cr, 0),
+    };
+    totals.balanced = Math.abs(totals.period_dr - totals.period_cr) < 1;
+    const resp = { year, month, rows, totals, count: rows.length, sources, _key: cacheKey };
+    trialBalanceCache = resp; trialBalanceCacheTime = Date.now();
+    // 캐시 저장
+    const upsertBal = db.prepare(`INSERT INTO gl_balance_cache (acc_code,year_month,opening_dr,opening_cr,period_dr,period_cr,closing_dr,closing_cr)
+      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(acc_code,year_month) DO UPDATE SET
+      opening_dr=excluded.opening_dr,opening_cr=excluded.opening_cr,
+      period_dr=excluded.period_dr,period_cr=excluded.period_cr,
+      closing_dr=excluded.closing_dr,closing_cr=excluded.closing_cr,
+      cached_at=datetime('now','localtime')`);
+    const txBal = db.transaction(() => {
+      const ym = year + String(month).padStart(2, '0');
+      for (const r of rows) { upsertBal.run(r.acc_code, ym, r.opening_dr, r.opening_cr, r.period_dr, r.period_cr, r.closing_dr, r.closing_cr); }
+    });
+    try { txBal(); } catch (e) { /* 캐시 저장 실패는 무시 */ }
+    ok(res, resp); return;
+  }
+
+  // ── GET /api/acct/financial-statements ── 재무제표 (BS + IS)
+  if (pathname === '/api/acct/financial-statements' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const year = qs.get('year') || new Date().getFullYear().toString();
+    const month = qs.get('month') || String(new Date().getMonth() + 1);
+    const compare = qs.get('compare') || ''; // mom, yoy, ''
+    const sources = { xerp: 'unknown', sqlite: 'ok' };
+
+    // 내부 함수: 특정 월의 시산표 데이터 가져오기
+    async function getTrialData(y, m) {
+      const fromDate = y + String(m).padStart(2, '0') + '01';
+      const lastDay = new Date(parseInt(y), parseInt(m), 0).getDate();
+      const toDate = y + String(m).padStart(2, '0') + String(lastDay);
+      const fiscalStart = y + '0101';
+      try {
+        const pool = await ensureXerpPool();
+        sources.xerp = 'ok';
+        const [pRes, oRes] = await Promise.all([
+          pool.request().input('f', fromDate).input('t', toDate).query(`
+            SELECT RTRIM(i.AccCode) AS acc_code,
+                   SUM(CASE WHEN i.DrCr='D' THEN i.DocAmnt ELSE 0 END) AS pd,
+                   SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS pc
+            FROM glDocHeader h WITH(NOLOCK)
+            JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+            WHERE h.SiteCode='BK10' AND h.RelCheck='Y' AND h.RelDate>=@f AND h.RelDate<=@t
+            GROUP BY RTRIM(i.AccCode)`),
+          fromDate !== fiscalStart ?
+            pool.request().input('fs', fiscalStart).input('bf', fromDate).query(`
+              SELECT RTRIM(i.AccCode) AS acc_code,
+                     SUM(CASE WHEN i.DrCr='D' THEN i.DocAmnt ELSE 0 END) AS od,
+                     SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS oc
+              FROM glDocHeader h WITH(NOLOCK)
+              JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
+              WHERE h.SiteCode='BK10' AND h.RelCheck='Y' AND h.RelDate>=@fs AND h.RelDate<@bf
+              GROUP BY RTRIM(i.AccCode)`)
+            : Promise.resolve({ recordset: [] })
+        ]);
+        return { period: pRes.recordset, prior: oRes.recordset };
+      } catch (e) { sources.xerp = 'error: ' + e.message; return { period: [], prior: [] }; }
+    }
+
+    const accMap = {};
+    db.prepare('SELECT acc_code, acc_name, acc_type, acc_group, sort_order FROM gl_account_map').all()
+      .forEach(a => { accMap[a.acc_code] = a; });
+
+    function buildStatement(periodArr, priorArr) {
+      const priorMap = {}; priorArr.forEach(p => { priorMap[p.acc_code] = p; });
+      const bs = { assets: [], liabilities: [], equity: [], totalAssets: 0, totalLiabilities: 0, totalEquity: 0 };
+      const is = { revenue: [], expense: [], totalRevenue: 0, totalExpense: 0, netIncome: 0 };
+      const allCodes = new Set([...periodArr.map(p => p.acc_code), ...priorArr.map(p => p.acc_code)]);
+      for (const code of allCodes) {
+        const info = accMap[code] || classifyAccount(code);
+        const prior = priorMap[code] || { od: 0, oc: 0 };
+        const period = periodArr.find(p => p.acc_code === code) || { pd: 0, pc: 0 };
+        const isDebitNature = ['asset', 'expense'].includes(info.acc_type);
+        // BS 계정: 누적잔액 = 전기이월 + 당기
+        // IS 계정: 당기 발생만
+        const totalDr = (prior.od || 0) + (period.pd || 0);
+        const totalCr = (prior.oc || 0) + (period.pc || 0);
+        const balance = isDebitNature ? (totalDr - totalCr) : (totalCr - totalDr);
+        const periodOnly = isDebitNature ? ((period.pd||0) - (period.pc||0)) : ((period.pc||0) - (period.pd||0));
+        const row = { acc_code: code, acc_name: info.acc_name || code, acc_group: info.acc_group || '', balance, periodOnly, sort_order: info.sort_order || 9999 };
+        if (info.acc_type === 'asset') { bs.assets.push(row); bs.totalAssets += balance; }
+        else if (info.acc_type === 'liability') { bs.liabilities.push(row); bs.totalLiabilities += balance; }
+        else if (info.acc_type === 'equity') { bs.equity.push(row); bs.totalEquity += balance; }
+        else if (info.acc_type === 'revenue') { is.revenue.push(row); is.totalRevenue += periodOnly; }
+        else if (info.acc_type === 'expense') { is.expense.push(row); is.totalExpense += periodOnly; }
+      }
+      is.netIncome = is.totalRevenue - is.totalExpense;
+      bs.totalEquity += is.netIncome; // 당기순이익 반영
+      bs.assets.sort((a, b) => a.sort_order - b.sort_order);
+      bs.liabilities.sort((a, b) => a.sort_order - b.sort_order);
+      bs.equity.sort((a, b) => a.sort_order - b.sort_order);
+      is.revenue.sort((a, b) => a.sort_order - b.sort_order);
+      is.expense.sort((a, b) => a.sort_order - b.sort_order);
+      bs.balanced = Math.abs(bs.totalAssets - (bs.totalLiabilities + bs.totalEquity)) < 100;
+      return { bs, is };
+    }
+
+    const current = await getTrialData(year, month);
+    const stmt = buildStatement(current.period, current.prior);
+    let compareStmt = null, compareLabel = '';
+    if (compare === 'mom') {
+      let cm = parseInt(month) - 1, cy = parseInt(year);
+      if (cm < 1) { cm = 12; cy--; }
+      const prev = await getTrialData(String(cy), String(cm));
+      compareStmt = buildStatement(prev.period, prev.prior);
+      compareLabel = cy + '년 ' + cm + '월';
+    } else if (compare === 'yoy') {
+      const prev = await getTrialData(String(parseInt(year) - 1), month);
+      compareStmt = buildStatement(prev.period, prev.prior);
+      compareLabel = (parseInt(year) - 1) + '년 ' + month + '월';
+    }
+    ok(res, { year, month, current: stmt, compare: compareStmt, compareLabel, sources }); return;
+  }
+
+  // ── GET /api/acct/ar-summary ── 채권/채무 요약
+  if (pathname === '/api/acct/ar-summary' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || (() => { const d = new Date(); return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + '01'; })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const arAp = qs.get('type') || 'AR'; // AR or AP
+    const sources = { xerp: 'unknown' };
+    let summary = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const result = await pool.request().input('from', from).input('to', to).input('arAp', arAp).query(`
+        SELECT RTRIM(h.CsCode) AS cs_code,
+               COUNT(*) AS bill_count,
+               ISNULL(SUM(h.BillAmnt),0) AS total_billed,
+               ISNULL(SUM(h.VatAmnt),0) AS total_vat,
+               ISNULL(SUM(h.MoneySumAmnt),0) AS total_collected
+        FROM rpBillHeader h WITH(NOLOCK)
+        WHERE h.SiteCode='BK10' AND h.ArApGubun=@arAp
+          AND h.BillDate >= @from AND h.BillDate <= @to
+        GROUP BY RTRIM(h.CsCode)
+        ORDER BY SUM(h.BillAmnt) DESC
+      `);
+      summary = result.recordset.map(r => ({
+        ...r,
+        outstanding: (r.total_billed + r.total_vat) - r.total_collected
+      }));
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    const totals = {
+      total_billed: summary.reduce((s, r) => s + r.total_billed, 0),
+      total_vat: summary.reduce((s, r) => s + r.total_vat, 0),
+      total_collected: summary.reduce((s, r) => s + r.total_collected, 0),
+      outstanding: summary.reduce((s, r) => s + r.outstanding, 0),
+    };
+    ok(res, { type: arAp, summary, totals, sources }); return;
+  }
+
+  // ── GET /api/acct/aging ── 채권 에이징 분석
+  if (pathname === '/api/acct/aging' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const sources = { xerp: 'unknown' };
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const d30 = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const d60 = (() => { const d = new Date(); d.setDate(d.getDate() - 60); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const d90 = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    let aging = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const result = await pool.request()
+        .input('today', today).input('d30', d30).input('d60', d60).input('d90', d90)
+        .query(`
+          SELECT RTRIM(me.CsCode) AS cs_code,
+            SUM(CASE WHEN me.ExpectDate >= @today THEN me.ExpectRemainAmnt ELSE 0 END) AS current_amt,
+            SUM(CASE WHEN me.ExpectDate < @today AND me.ExpectDate >= @d30 THEN me.ExpectRemainAmnt ELSE 0 END) AS days_30,
+            SUM(CASE WHEN me.ExpectDate < @d30 AND me.ExpectDate >= @d60 THEN me.ExpectRemainAmnt ELSE 0 END) AS days_60,
+            SUM(CASE WHEN me.ExpectDate < @d60 AND me.ExpectDate >= @d90 THEN me.ExpectRemainAmnt ELSE 0 END) AS days_90,
+            SUM(CASE WHEN me.ExpectDate < @d90 THEN me.ExpectRemainAmnt ELSE 0 END) AS over_90,
+            SUM(me.ExpectRemainAmnt) AS total_outstanding
+          FROM rpMoneyExpect me WITH(NOLOCK)
+          WHERE me.SiteCode='BK10' AND me.ExpectRemainAmnt > 0
+          GROUP BY RTRIM(me.CsCode)
+          HAVING SUM(me.ExpectRemainAmnt) > 0
+          ORDER BY SUM(me.ExpectRemainAmnt) DESC
+        `);
+      aging = result.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    const totals = {
+      current_amt: aging.reduce((s, r) => s + (r.current_amt || 0), 0),
+      days_30: aging.reduce((s, r) => s + (r.days_30 || 0), 0),
+      days_60: aging.reduce((s, r) => s + (r.days_60 || 0), 0),
+      days_90: aging.reduce((s, r) => s + (r.days_90 || 0), 0),
+      over_90: aging.reduce((s, r) => s + (r.over_90 || 0), 0),
+      total: aging.reduce((s, r) => s + (r.total_outstanding || 0), 0),
+    };
+    ok(res, { aging, totals, sources }); return;
+  }
+
+  // ── GET /api/acct/ar-detail ── 거래처별 채권/채무 상세
+  if (pathname === '/api/acct/ar-detail' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const cs = qs.get('cs');
+    if (!cs) { fail(res, 400, 'cs 파라미터 필요'); return; }
+    const from = qs.get('from') || (() => { const d = new Date(); d.setMonth(d.getMonth()-3); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const sources = { xerp: 'unknown' };
+    let bills = [], payments = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      const bResult = await pool.request().input('cs', cs).input('from', from).input('to', to).query(`
+        SELECT h.BillNo, h.BillDate, h.ArApGubun,
+               ISNULL(h.BillAmnt,0) AS bill_amt, ISNULL(h.VatAmnt,0) AS vat_amt,
+               ISNULL(h.MoneySumAmnt,0) AS collected, h.BillDescr
+        FROM rpBillHeader h WITH(NOLOCK)
+        WHERE h.SiteCode='BK10' AND RTRIM(h.CsCode)=@cs
+          AND h.BillDate >= @from AND h.BillDate <= @to
+        ORDER BY h.BillDate DESC
+      `);
+      bills = bResult.recordset;
+      const pResult = await pool.request().input('cs', cs).query(`
+        SELECT ma.OriginNo, ma.AllocDate, ISNULL(ma.AllocAmnt,0) AS alloc_amt, ma.PayCode, me.ArApGubun
+        FROM rpExpectMoneyAlloc ma WITH(NOLOCK)
+        JOIN rpMoneyExpect me WITH(NOLOCK) ON ma.SiteCode=me.SiteCode AND ma.OriginNo=me.OriginNo AND ma.OriginSerNo=me.OriginSerNo
+        WHERE me.SiteCode='BK10' AND RTRIM(me.CsCode)=@cs
+        ORDER BY ma.AllocDate DESC
+        OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY
+      `);
+      payments = pResult.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+    ok(res, { cs_code: cs, bills, payments, sources }); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
