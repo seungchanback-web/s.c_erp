@@ -1843,43 +1843,53 @@ function logError(level, message, stack, url, method, userId) {
 // 전체 페이지 목록 (관리자 권한 UI용)
 const ALL_PAGES = [
   { id: 'dashboard', name: '홈', group: '기본' },
+  // 구매
+  { id: 'auto-order', name: '자동발주', group: '구매' },
+  { id: 'create-po', name: '발주생성', group: '구매' },
+  { id: 'po-list', name: '발주현황', group: '구매' },
+  { id: 'po-mgmt', name: '발주서 관리', group: '구매' },
+  { id: 'china-shipment', name: '중국선적', group: '구매' },
+  { id: 'delivery-schedule', name: '입고일정', group: '구매' },
+  { id: 'receipts', name: '입고관리', group: '구매' },
+  { id: 'os-register', name: 'OS등록', group: '구매' },
+  // 판매
+  { id: 'sales', name: '통합매출', group: '판매' },
+  { id: 'sales-barun', name: '바른손매출', group: '판매' },
+  { id: 'sales-dd', name: 'DD매출', group: '판매' },
+  { id: 'sales-gift', name: '더기프트매출', group: '판매' },
+  { id: 'customer-orders', name: '고객주문', group: '판매' },
+  { id: 'shipping', name: '배송추적', group: '판매' },
+  // 재고
   { id: 'inventory', name: '재고현황', group: '재고' },
-  { id: 'shipments', name: '출고현황', group: '재고' },
-  { id: 'closing', name: '마감현황', group: '재고' },
-  { id: 'report', name: '보고서', group: '재고' },
-  { id: 'auto-order', name: '자동발주', group: '발주' },
-  { id: 'create-po', name: '발주생성', group: '발주' },
-  { id: 'po-list', name: '발주현황', group: '발주' },
-  { id: 'po-mgmt', name: '발주서 관리', group: '발주' },
-  { id: 'china-shipment', name: '중국선적', group: '발주' },
-  { id: 'delivery-schedule', name: '입고일정', group: '입고' },
-  { id: 'receipts', name: '입고관리', group: '입고' },
-  { id: 'os-register', name: 'OS등록', group: '입고' },
+  { id: 'warehouse', name: '창고별 재고', group: '재고' },
+  { id: 'shipments', name: '입출고 현황', group: '재고' },
+  // 생산
   { id: 'production-req', name: '생산요청', group: '생산' },
   { id: 'production-stock', name: '생산재고', group: '생산' },
   { id: 'mrp', name: 'MRP', group: '생산' },
+  // 회계
+  { id: 'invoices', name: '거래명세서', group: '회계' },
+  { id: 'mat-purchase', name: '원재료 매입', group: '회계' },
+  { id: 'cost-mgmt', name: '원가관리', group: '회계' },
+  { id: 'closing', name: '마감현황', group: '회계' },
+  // 기준정보
+  { id: 'vendors', name: '거래처 관리', group: '기준정보' },
+  { id: 'product-mgmt', name: '품목관리', group: '기준정보' },
+  { id: 'bom', name: 'BOM 관리', group: '기준정보' },
+  { id: 'post-process', name: '후공정 단가', group: '기준정보' },
+  // 경영분석
+  { id: 'analytics', name: '대시보드', group: '경영분석' },
+  { id: 'exec-dashboard', name: '경영대시보드', group: '경영분석' },
+  { id: 'report', name: '보고서', group: '경영분석' },
+  { id: 'defects', name: '불량관리', group: '경영분석' },
+  // 업무
   { id: 'tasks', name: '업무관리', group: '업무' },
-  { id: 'meeting-log', name: '미팅일지', group: '업무' },
-  { id: 'invoices', name: '거래명세서', group: '관리' },
-  { id: 'mat-purchase', name: '원재료 매입', group: '관리' },
-  { id: 'notes', name: '거래처 관리', group: '관리' },
-  { id: 'product-mgmt', name: '품목관리', group: '관리' },
-  { id: 'bom', name: 'BOM 관리', group: '관리' },
-  { id: 'post-process', name: '후공정 단가', group: '관리' },
-  { id: 'defects', name: '불량관리', group: '관리' },
-  { id: 'analytics', name: '대시보드', group: '관리' },
-  { id: 'user-mgmt', name: '사용자 관리', group: '관리' },
-  { id: 'warehouse', name: '창고관리', group: '재고' },
-  { id: 'sales', name: '통합매출', group: '매출' },
-  { id: 'sales-barun', name: '바른손매출', group: '매출' },
-  { id: 'sales-dd', name: 'DD매출', group: '매출' },
-  { id: 'sales-gift', name: '더기프트매출', group: '매출' },
-  { id: 'cost-mgmt', name: '원가관리', group: '매출' },
+  { id: 'notes', name: '미팅일지', group: '업무' },
   { id: 'board', name: '공지/게시판', group: '업무' },
-  { id: 'audit-log', name: '감사로그', group: '관리' },
-  { id: 'exec-dashboard', name: '경영대시보드', group: '관리' },
-  { id: 'customer-orders', name: '고객주문', group: '매출' },
-  { id: 'shipping', name: '배송추적', group: '매출' },
+  // 시스템
+  { id: 'settings', name: '설정', group: '시스템' },
+  { id: 'user-mgmt', name: '사용자 관리', group: '시스템' },
+  { id: 'audit-log', name: '감사로그', group: '시스템' },
 ];
 
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
@@ -2862,6 +2872,41 @@ async function handleRequest(req, res) {
       }
       fail(res, 500, 'XERP 재고 조회 오류: ' + e.message);
     }
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  품목별 미입고 잔량 API (발주 트래킹 — 중복발주 방지)
+  // ════════════════════════════════════════════════════════════════════
+  if (pathname === '/api/inventory/pending-orders' && method === 'GET') {
+    try {
+      const rows = db.prepare(`
+        SELECT i.product_code,
+               SUM(i.ordered_qty - COALESCE(i.received_qty,0)) as pending_qty,
+               GROUP_CONCAT(DISTINCT h.os_number) as os_numbers,
+               GROUP_CONCAT(DISTINCT h.po_number) as po_numbers,
+               MIN(h.expected_date) as earliest_due,
+               h.status as latest_status,
+               MAX(h.po_date) as latest_po_date
+        FROM po_items i
+        JOIN po_header h ON h.po_id = i.po_id
+        WHERE h.status NOT IN ('cancelled','completed','received')
+          AND (i.ordered_qty - COALESCE(i.received_qty,0)) > 0
+        GROUP BY i.product_code
+      `).all();
+      const map = {};
+      rows.forEach(r => {
+        map[r.product_code] = {
+          pending_qty: r.pending_qty || 0,
+          os_numbers: (r.os_numbers || '').split(',').filter(Boolean),
+          po_numbers: (r.po_numbers || '').split(',').filter(Boolean),
+          earliest_due: r.earliest_due || '',
+          status: r.latest_status || '',
+          last_order_date: r.latest_po_date || ''
+        };
+      });
+      ok(res, map);
+    } catch(e) { ok(res, {}); }
     return;
   }
 

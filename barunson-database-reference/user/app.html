@@ -1268,13 +1268,15 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
   <span class="topbar-logo" onclick="showPage('dashboard');closeMegaMenu()">바른컴퍼니<span class="sub" id="guideDesc">발주기준: 3개월 매출/3</span></span>
   <nav class="topbar-nav">
     <div class="topbar-tab" onclick="showPage('dashboard');closeMegaMenu()" data-page="dashboard"><span class="icon">🏠</span>홈</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('sales')" data-cat="sales"><span class="icon">💰</span>매출</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('purchase')" data-cat="purchase"><span class="icon">🛒</span>구매</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('sales')" data-cat="sales"><span class="icon">💰</span>판매</div>
     <div class="topbar-tab" onclick="toggleMegaCat('stock')" data-cat="stock"><span class="icon">📦</span>재고</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('order')" data-cat="order"><span class="icon">📝</span>발주</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('inbound')" data-cat="inbound"><span class="icon">📥</span>입고</div>
     <div class="topbar-tab" onclick="toggleMegaCat('production')" data-cat="production"><span class="icon">🏭</span>생산</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('accounting')" data-cat="accounting"><span class="icon">🧾</span>회계</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('master')" data-cat="master"><span class="icon">📋</span>기준정보</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('analysis')" data-cat="analysis"><span class="icon">📈</span>경영분석</div>
     <div class="topbar-tab" onclick="toggleMegaCat('work')" data-cat="work"><span class="icon">✅</span>업무</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('mgmt')" data-cat="mgmt"><span class="icon">⚙</span>관리</div>
+    <div class="topbar-tab" onclick="toggleMegaCat('system')" data-cat="system"><span class="icon">🔧</span>시스템</div>
   </nav>
   <div class="topbar-right">
     <span id="erpSyncBadge2" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500"></span>
@@ -1294,31 +1296,36 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
 <script>
 var _megaOpen = null;
 var _megaData = {
-  stock: {
-    title: '재고',
-    items: [
-      {icon:'📦',bg:'#fef2f2',fg:'#ef4444',name:'재고현황',desc:'XERP 실시간 재고',page:'inventory',badgeId:'qmInventory'},
-      {icon:'🚚',bg:'#fff7ed',fg:'#ea580c',name:'출고현황',desc:'SO/MO/SI/MI 조회',page:'shipments'},
-      {icon:'📑',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 보고',page:'closing'},
-      {icon:'🏢',bg:'#ecfdf5',fg:'#059669',name:'창고관리',desc:'다중 창고 재고/이동',page:'warehouse'}
-    ]
-  },
-  order: {
-    title: '발주',
+  purchase: {
+    title: '구매',
     items: [
       {icon:'🔄',bg:'#eef2ff',fg:'#6366f1',name:'자동발주',desc:'전략발주 + 단가 최적화',page:'auto-order',origins:['한국','더기프트']},
       {icon:'📝',bg:'#eff6ff',fg:'#2563eb',name:'발주생성',desc:'수동 발주 + 엑셀',page:'create-po',origins:['한국','중국','더기프트']},
       {icon:'📋',bg:'#f0fdf4',fg:'#16a34a',name:'발주현황',desc:'PO 상태 관리',page:'po-list',origins:['한국','중국','더기프트'],badgeId:'qmPOList'},
       {icon:'📄',bg:'#f5f3ff',fg:'#7c3aed',name:'발주서 관리',desc:'발주서 출력 + 이력',page:'po-mgmt',badgeId:'qmPOMgmt'},
-      {icon:'🚢',bg:'#fef2f2',fg:'#dc2626',name:'중국선적',desc:'交期表 + BL추적',page:'china-shipment',clickOrigin:'중국'}
-    ]
-  },
-  inbound: {
-    title: '입고',
-    items: [
-      {icon:'📅',bg:'#ecfdf5',fg:'#0d9488',name:'입고일정',desc:'완료 기준 입고 예정',page:'delivery-schedule',origins:['한국','중국','더기프트']},
+      {icon:'🚢',bg:'#fef2f2',fg:'#dc2626',name:'중국선적',desc:'交期表 + BL추적',page:'china-shipment',clickOrigin:'중국'},
+      {icon:'📅',bg:'#ecfdf5',fg:'#0d9488',name:'입고일정',desc:'입고 예정 일정',page:'delivery-schedule',origins:['한국','중국','더기프트']},
       {icon:'📥',bg:'#f0fdf4',fg:'#059669',name:'입고관리',desc:'수령 처리 + 불량 기록',page:'receipts',origins:['한국','중국','더기프트']},
       {icon:'🏷',bg:'#f5f3ff',fg:'#8b5cf6',name:'OS등록',desc:'외주 생산 등록',page:'os-register'}
+    ]
+  },
+  sales: {
+    title: '판매',
+    items: [
+      {icon:'💰',bg:'#fef3c7',fg:'#d97706',name:'통합매출',desc:'전체 매출 통합 현황',page:'sales'},
+      {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출',page:'sales-barun'},
+      {icon:'💳',bg:'#fce7f3',fg:'#db2777',name:'DD매출',desc:'디얼디어 매출',page:'sales-dd'},
+      {icon:'🎁',bg:'#ecfdf5',fg:'#059669',name:'더기프트매출',desc:'답례품 매출',page:'sales-gift'},
+      {icon:'🛒',bg:'#f5f3ff',fg:'#7c3aed',name:'고객주문',desc:'주문 조회/현황',page:'customer-orders'},
+      {icon:'🚛',bg:'#fff7ed',fg:'#ea580c',name:'배송추적',desc:'배송 현황/추적',page:'shipping'}
+    ]
+  },
+  stock: {
+    title: '재고',
+    items: [
+      {icon:'📦',bg:'#fef2f2',fg:'#ef4444',name:'재고현황',desc:'XERP 실시간 재고',page:'inventory',badgeId:'qmInventory'},
+      {icon:'🏢',bg:'#ecfdf5',fg:'#059669',name:'창고별 재고',desc:'창고별 현황/이동/조정',page:'warehouse'},
+      {icon:'🔄',bg:'#fff7ed',fg:'#ea580c',name:'입출고 현황',desc:'입고/출고 내역 조회',page:'shipments'}
     ]
   },
   production: {
@@ -1329,6 +1336,33 @@ var _megaData = {
       {icon:'🏭',bg:'#e0e7ff',fg:'#4338ca',name:'MRP',desc:'자재소요 + 생산계획',page:'mrp'}
     ]
   },
+  accounting: {
+    title: '회계',
+    items: [
+      {icon:'🧾',bg:'#f5f5f4',fg:'#78716c',name:'거래명세서',desc:'월별 명세서 발행',page:'invoices'},
+      {icon:'📊',bg:'#fff1f2',fg:'#e11d48',name:'원재료 매입',desc:'매입 현황 분석',page:'mat-purchase'},
+      {icon:'📑',bg:'#ecfdf5',fg:'#059669',name:'원가관리',desc:'원가/마진 분석',page:'cost-mgmt'},
+      {icon:'📋',bg:'#f0f9ff',fg:'#0284c7',name:'마감현황',desc:'월별 매입 마감 검증',page:'closing'}
+    ]
+  },
+  master: {
+    title: '기준정보',
+    items: [
+      {icon:'👥',bg:'#fef3c7',fg:'#b45309',name:'거래처 관리',desc:'업체 정보 + 포털',page:'vendors',badgeId:'qmVendors'},
+      {icon:'📦',bg:'#f5f3ff',fg:'#7c3aed',name:'품목관리',desc:'품목 마스터',page:'product-mgmt',badgeId:'qmProducts'},
+      {icon:'🧩',bg:'#ede9fe',fg:'#6d28d9',name:'BOM 관리',desc:'자재명세서 관리',page:'bom'},
+      {icon:'💰',bg:'#fff7ed',fg:'#c2410c',name:'후공정 단가',desc:'단가 관리',page:'post-process'}
+    ]
+  },
+  analysis: {
+    title: '경영분석',
+    items: [
+      {icon:'📊',bg:'#eff6ff',fg:'#2563eb',name:'대시보드',desc:'현황 집계 + 통계',page:'analytics'},
+      {icon:'📈',bg:'#ecfdf5',fg:'#059669',name:'경영대시보드',desc:'매출/마진/KPI 종합',page:'exec-dashboard'},
+      {icon:'📄',bg:'#ecfdf5',fg:'#047857',name:'보고서',desc:'단가 협상 + 분석 보고',page:'report'},
+      {icon:'🔍',bg:'#fef2f2',fg:'#ef4444',name:'불량관리',desc:'접수 + 대응',page:'defects',badgeId:'qmDefects'}
+    ]
+  },
   work: {
     title: '업무',
     items: [
@@ -1337,34 +1371,12 @@ var _megaData = {
       {icon:'📢',bg:'#fef2f2',fg:'#dc2626',name:'공지/게시판',desc:'공지사항 + 팝업 관리',page:'board'}
     ]
   },
-  sales: {
-    title: '매출',
+  system: {
+    title: '시스템',
     items: [
-      {icon:'💰',bg:'#fef3c7',fg:'#d97706',name:'통합매출',desc:'전체 매출 통합 현황',page:'sales'},
-      {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출 현황',page:'sales-barun'},
-      {icon:'💳',bg:'#fce7f3',fg:'#db2777',name:'DD매출',desc:'디얼디어 매출 현황',page:'sales-dd'},
-      {icon:'🎁',bg:'#ecfdf5',fg:'#059669',name:'더기프트매출',desc:'더기프트 답례품 매출',page:'sales-gift'},
-      {icon:'📊',bg:'#fef2f2',fg:'#ef4444',name:'원가관리',desc:'원가/마진 분석',page:'cost-mgmt'},
-      {icon:'🛒',bg:'#f5f3ff',fg:'#7c3aed',name:'고객주문',desc:'주문 조회/현황',page:'customer-orders'},
-      {icon:'🚛',bg:'#ecfdf5',fg:'#059669',name:'배송추적',desc:'배송 현황/추적',page:'shipping'}
-    ]
-  },
-  mgmt: {
-    title: '관리',
-    items: [
-      {icon:'🧾',bg:'#f5f5f4',fg:'#78716c',name:'거래명세서',desc:'월별 명세서',page:'invoices'},
-      {icon:'📊',bg:'#fff1f2',fg:'#e11d48',name:'원재료 매입',desc:'매입 현황 분석',page:'mat-purchase'},
-      {icon:'👥',bg:'#fef3c7',fg:'#b45309',name:'거래처 관리',desc:'업체 정보 + 포털',page:'vendors',badgeId:'qmVendors'},
-      {icon:'📦',bg:'#f5f3ff',fg:'#7c3aed',name:'품목관리',desc:'품목 마스터',page:'product-mgmt',badgeId:'qmProducts'},
-      {icon:'🧩',bg:'#ede9fe',fg:'#6d28d9',name:'BOM 관리',desc:'자재명세서 관리',page:'bom'},
-      {icon:'💰',bg:'#fff7ed',fg:'#c2410c',name:'후공정 단가',desc:'단가 관리',page:'post-process'},
-      {icon:'🔍',bg:'#fef2f2',fg:'#ef4444',name:'불량관리',desc:'접수 + 대응',page:'defects',badgeId:'qmDefects'},
-      {icon:'📊',bg:'#eff6ff',fg:'#2563eb',name:'대시보드',desc:'현황 집계 + 통계',page:'analytics'},
-      {icon:'📄',bg:'#ecfdf5',fg:'#047857',name:'보고서',desc:'단가 협상 + 분석 보고',page:'report'},
       {icon:'⚙',bg:'#f1f5f9',fg:'#64748b',name:'설정',desc:'시스템 설정',page:'settings'},
       {icon:'👤',bg:'#fef3c7',fg:'#92400e',name:'사용자 관리',desc:'권한 + 계정 관리',page:'user-mgmt'},
-      {icon:'🔒',bg:'#f0f9ff',fg:'#0369a1',name:'감사로그',desc:'사용자 활동 추적',page:'audit-log'},
-      {icon:'📈',bg:'#ecfdf5',fg:'#059669',name:'경영대시보드',desc:'매출/마진/KPI 종합',page:'exec-dashboard'}
+      {icon:'🔒',bg:'#f0f9ff',fg:'#0369a1',name:'감사로그',desc:'사용자 활동 추적',page:'audit-log'}
     ]
   }
 };
@@ -1496,7 +1508,7 @@ function closeMegaMenu() {
       </div>
       <div class="hm-item" data-page="shipments" onclick="showPage('shipments')">
         <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🚚</div>
-        <div><div class="hm-name">출고현황</div><div class="hm-desc">SO/MO/SI/MI 조회</div></div>
+        <div><div class="hm-name">입출고 현황</div><div class="hm-desc">입고/출고 내역 조회</div></div>
       </div>
       <div class="hm-item" data-page="closing" onclick="showPage('closing')">
         <div class="hm-icon" style="background:#f0f9ff;color:#0284c7">📑</div>
@@ -1504,7 +1516,7 @@ function closeMegaMenu() {
       </div>
       <div class="hm-item" data-page="warehouse" onclick="showPage('warehouse')">
         <div class="hm-icon" style="background:#ecfdf5;color:#059669">🏢</div>
-        <div><div class="hm-name">창고관리</div><div class="hm-desc">다중 창고 재고/이동</div></div>
+        <div><div class="hm-name">창고별 재고</div><div class="hm-desc">창고별 재고 현황/이동</div></div>
       </div>
     </div>
 
@@ -1761,14 +1773,14 @@ function closeMegaMenu() {
 </div>
 
 <!-- ============================================================ -->
-<!-- PAGE: 재고현황 (Inventory) - preserves ALL old dashboard logic -->
+<!-- PAGE: 재고현황 (Inventory) - v2 리뉴얼 -->
 <!-- ============================================================ -->
 <div class="page" id="page-inventory">
-  <div id="uploadZone" style="display:none"></div>
   <input type="file" id="fileInput" style="display:none">
 
   <!-- ★ sticky 헤더 영역 -->
   <div id="invStickyHeader" style="position:sticky;top:0;z-index:50;background:var(--bg);padding-bottom:8px">
+    <!-- ERP 상태바 -->
     <div id="erpStatusBar" style="margin-bottom:8px;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;background:#fffbeb;border:1px solid #fde68a;transition:all 0.3s">
       <div style="display:flex;align-items:center;gap:10px">
         <span id="erpStatusIcon" style="font-size:18px">⏳</span>
@@ -1777,89 +1789,122 @@ function closeMegaMenu() {
           <div id="erpStatusDetail" style="font-size:11px;color:var(--text-muted);margin-top:1px">데이터를 불러오는 중입니다...</div>
         </div>
       </div>
-      <button class="btn btn-sm" onclick="loadXerpInventory(true)" style="font-size:11px" id="erpRefreshBtn">🔄 새로고침</button>
+      <button class="btn btn-sm" onclick="loadXerpInventory(true)" style="font-size:11px" id="erpRefreshBtn">새로고침</button>
     </div>
 
-    <div class="kpi-grid" style="margin-bottom:8px">
-      <div class="kpi-card urgent" onclick="switchTab('urgent')">
-        <div class="kpi-label">긴급재고</div>
+    <!-- KPI 카드 (5개) -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">
+      <div class="kpi-card urgent" onclick="switchInvMainTab('stock');switchTab('urgent')" style="cursor:pointer">
+        <div class="kpi-label">긴급발주</div>
         <div class="kpi-value" id="cUrgent">-</div>
-        <div class="kpi-sub">2주 이내 소진 예상</div>
+        <div class="kpi-sub">14일 이내 소진</div>
       </div>
-      <div class="kpi-card danger" onclick="switchTab('danger')">
+      <div class="kpi-card danger" onclick="switchInvMainTab('stock');switchTab('danger')" style="cursor:pointer">
         <div class="kpi-label">위험재고</div>
         <div class="kpi-value" id="cDanger">-</div>
-        <div class="kpi-sub">3주 이내 소진 예상</div>
+        <div class="kpi-sub">21일 이내 소진</div>
       </div>
-      <div class="kpi-card safe" onclick="switchTab('safe')">
+      <div class="kpi-card safe" onclick="switchInvMainTab('stock');switchTab('safe')" style="cursor:pointer">
         <div class="kpi-label">안전재고</div>
         <div class="kpi-value" id="cSafe">-</div>
-        <div class="kpi-sub">가용재고 &gt; 월사용량</div>
+        <div class="kpi-sub">21일 이상 여유</div>
       </div>
-      <div class="kpi-card nosale" onclick="switchTab('nosale')">
+      <div class="kpi-card" style="cursor:pointer;--card-accent:#6366f1" onclick="switchInvMainTab('order')">
+        <div class="kpi-label" style="color:#6366f1">미입고 추적</div>
+        <div class="kpi-value" id="cPending" style="color:#6366f1">-</div>
+        <div class="kpi-sub">발주 진행 중</div>
+      </div>
+      <div class="kpi-card nosale" onclick="switchInvMainTab('stock');switchTab('nosale')" style="cursor:pointer">
         <div class="kpi-label">매출없음</div>
         <div class="kpi-value" id="cNosale">-</div>
-        <div class="kpi-sub">3개월 매출 0</div>
+        <div class="kpi-sub">3개월 출고 0</div>
       </div>
     </div>
 
-    <!-- 분류 기준 안내 -->
-    <div style="background:#f8fafc;border:1px solid var(--border-light);border-radius:6px;padding:10px 14px;margin-bottom:8px;font-size:11px;color:var(--text-secondary);line-height:1.7">
-      <details>
-        <summary style="cursor:pointer;font-weight:600;color:var(--text-primary)">분류 기준 안내</summary>
-        <div style="margin-top:6px">
-          <b>잔여일</b> = 가용재고 / 일평균출고 (XERP 3개월 출고 기준)<br>
-          <span style="color:var(--urgent)">긴급</span>: 잔여일 &le; 14일 (2주 이내 소진) &amp; 25.08~26.02 입고이력 있음<br>
-          <span style="color:var(--danger)">위험</span>: 잔여일 &le; 21일 (3주 이내 소진) &amp; 입고이력 있음<br>
-          <span style="color:var(--success)">안전</span>: 잔여일 &gt; 21일 &amp; 입고이력 있음<br>
-          <span style="color:#b45309">발주이력없음</span>: 25년 8월~26년 2월 XERP 입고(SI) 이력 없는 품목<br>
-          <span style="color:var(--neutral)">매출없음</span>: 최근 3개월 출고량 0<br>
-          <b>부족수량</b> = 목표재고 - 가용재고 &nbsp;|&nbsp; <b>목표재고</b> = 안전재고 + 리드타임재고 + 월사용량
-        </div>
-      </details>
+    <!-- 메인 3탭 -->
+    <div class="tab-bar" id="invMainTabs" style="margin-bottom:6px;border-bottom:2px solid var(--border)">
+      <div class="tab active" data-mtab="stock" onclick="switchInvMainTab('stock')" style="font-weight:600;font-size:13px;padding:8px 20px">재고현황</div>
+      <div class="tab" data-mtab="order" onclick="switchInvMainTab('order')" style="font-weight:600;font-size:13px;padding:8px 20px">발주제안</div>
+      <div class="tab" data-mtab="analysis" onclick="switchInvMainTab('analysis')" style="font-weight:600;font-size:13px;padding:8px 20px">재고분석</div>
     </div>
 
-    <!-- 생산지 필터 -->
-    <div class="tab-bar" style="margin-bottom:4px">
-      <div class="tab active" data-origin="all" onclick="switchOrigin('all')">전체 <span class="badge" id="oAll">0</span></div>
-      <div class="tab" data-origin="한국" onclick="switchOrigin('한국')">한국 <span class="badge" id="o한국">0</span></div>
-      <div class="tab" data-origin="중국" onclick="switchOrigin('중국')">중국 <span class="badge" id="o중국">0</span></div>
-      <div class="tab" data-origin="더기프트" onclick="switchOrigin('더기프트')">더기프트 <span class="badge" id="o더기프트">0</span></div>
-    </div>
-    <div class="tab-bar">
-      <div class="tab urgent active" data-tab="urgent" onclick="switchTab('urgent')" title="잔여일 ≤ 14일 & 입고이력 있음">긴급 <span class="badge" id="tUrgent">0</span></div>
-      <div class="tab" data-tab="nohistory" onclick="switchTab('nohistory')" style="color:#b45309" title="25년8월~26년2월 XERP 입고이력 없는 품목">발주이력없음 <span class="badge" id="tNoHistory" style="background:#fef3c7;color:#b45309">0</span></div>
-      <div class="tab danger" data-tab="danger" onclick="switchTab('danger')" title="잔여일 ≤ 21일 & 입고이력 있음">위험 <span class="badge" id="tDanger">0</span></div>
-      <div class="tab safe" data-tab="safe" onclick="switchTab('safe')" title="잔여일 > 21일 & 입고이력 있음">안전 <span class="badge" id="tSafe">0</span></div>
-      <div class="tab nosale" data-tab="nosale" onclick="switchTab('nosale')" title="최근 3개월 XERP 출고량 0">매출없음 <span class="badge" id="tNosale">0</span></div>
-      <div class="tab" data-tab="printwarehouse" onclick="switchTab('printwarehouse')" style="color:#6366f1">인쇄자재창고 <span class="badge" id="tPrintWH" style="background:#6366f1;color:#fff">0</span></div>
-      <div class="tab" data-tab="etc" onclick="switchTab('etc')" style="color:#78716c">기타 <span class="badge" id="tEtc" style="background:#78716c;color:#fff">0</span></div>
-    </div>
-
-    <div class="table-toolbar" style="margin-top:4px">
-      <label>브랜드</label>
-      <select id="brandFilter"><option value="">전체</option></select>
-      <label>검색</label>
-      <input type="text" id="searchInput" placeholder="제품코드 검색">
+    <!-- 필터 툴바 (재고현황/발주제안 공통) -->
+    <div id="invFilterBar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+      <!-- 상태 필터 (재고현황 탭에서만) -->
+      <div id="invStatusFilters" class="tab-bar" style="margin:0;flex-shrink:0">
+        <div class="tab urgent active" data-tab="urgent" onclick="switchTab('urgent')">긴급 <span class="badge" id="tUrgent">0</span></div>
+        <div class="tab" data-tab="nohistory" onclick="switchTab('nohistory')" style="color:#b45309">이력없음 <span class="badge" id="tNoHistory" style="background:#fef3c7;color:#b45309">0</span></div>
+        <div class="tab danger" data-tab="danger" onclick="switchTab('danger')">위험 <span class="badge" id="tDanger">0</span></div>
+        <div class="tab safe" data-tab="safe" onclick="switchTab('safe')">안전 <span class="badge" id="tSafe">0</span></div>
+        <div class="tab nosale" data-tab="nosale" onclick="switchTab('nosale')">매출없음 <span class="badge" id="tNosale">0</span></div>
+        <div class="tab" data-tab="printwarehouse" onclick="switchTab('printwarehouse')" style="color:#6366f1">인쇄자재 <span class="badge" id="tPrintWH" style="background:#6366f1;color:#fff">0</span></div>
+        <div class="tab" data-tab="etc" onclick="switchTab('etc')" style="color:#78716c">기타 <span class="badge" id="tEtc" style="background:#78716c;color:#fff">0</span></div>
+      </div>
       <div style="flex:1"></div>
-      <button class="btn" onclick="autoFillOrder()">자동입력</button>
-      <button class="btn" onclick="checkAll(true)">전체선택</button>
-      <button class="btn" onclick="checkAll(false)">선택취소</button>
-      <button class="btn btn-success" onclick="showOrderPanel()">미리보기 (<span id="orderCount">0</span>)</button>
-      <button class="btn btn-primary" onclick="goToCreatePO()" style="font-weight:600">선택완료 → 발주생성</button>
+      <!-- 생산지 -->
+      <select id="originFilter" onchange="switchOrigin(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px">
+        <option value="all">전체 생산지</option>
+        <option value="한국">한국</option>
+        <option value="중국">중국</option>
+        <option value="더기프트">더기프트</option>
+      </select>
+      <select id="brandFilter" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px"><option value="">전체 브랜드</option></select>
+      <input type="text" id="searchInput" placeholder="제품코드/품목명 검색" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;width:160px" oninput="render()">
+    </div>
+
+    <!-- 발주제안 전용 툴바 -->
+    <div id="invOrderToolbar" style="display:none;margin-top:6px;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-size:12px;font-weight:600;color:#1e40af">발주 작업</span>
+      <button class="btn btn-sm" onclick="autoFillOrder()">자동입력</button>
+      <button class="btn btn-sm" onclick="checkAll(true)">전체선택</button>
+      <button class="btn btn-sm" onclick="checkAll(false)">선택취소</button>
+      <div style="flex:1"></div>
+      <span style="font-size:12px;color:#1e40af" id="orderSummary">선택 0건</span>
+      <button class="btn btn-sm btn-success" onclick="showOrderPanel()">미리보기 (<span id="orderCount">0</span>)</button>
+      <button class="btn btn-sm btn-primary" onclick="goToCreatePO()" style="font-weight:600">발주생성</button>
     </div>
   </div>
   <!-- ★ sticky 헤더 끝 -->
 
-  <div class="table-container">
+  <!-- 테이블 영역 (재고현황 + 발주제안) -->
+  <div id="invTableArea" class="table-container">
     <div class="table-wrap">
       <table><thead><tr id="hdr"></tr></thead><tbody id="tb"></tbody></table>
+    </div>
+  </div>
+
+  <!-- 분석 영역 -->
+  <div id="invAnalysisArea" style="display:none;padding:16px 0">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:12px">상태별 분포</div>
+        <canvas id="invChartStatus" height="220"></canvas>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:12px">생산지별 현황</div>
+        <canvas id="invChartOrigin" height="220"></canvas>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:12px">가용일수 분포</div>
+        <canvas id="invChartDays" height="220"></canvas>
+      </div>
+      <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:12px">브랜드별 긴급/위험 품목</div>
+        <canvas id="invChartBrand" height="220"></canvas>
+      </div>
+    </div>
+    <!-- 주요 지표 요약 테이블 -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:16px">
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px">요약 통계</div>
+      <div id="invAnalysisSummary" style="font-size:12px"></div>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- PAGE: 출고현황 (XERP 실시간) -->
+<!-- PAGE: 입출고 현황 (XERP 실시간) -->
 <!-- ============================================================ -->
 <div class="page" id="page-shipments">
   <!-- 출고 구분 설명 -->
@@ -4780,10 +4825,10 @@ function closeMegaMenu() {
   <div id="costContent" style="min-height:400px"></div>
 </div>
 
-<!-- ========== WAREHOUSE (창고관리) PAGE ========== -->
+<!-- ========== WAREHOUSE (창고별 재고) PAGE ========== -->
 <div class="page" id="page-warehouse" style="background:#fff;color:#111">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <h2 style="font-size:18px;font-weight:700;margin:0;color:#111">🏢 창고관리</h2>
+    <h2 style="font-size:18px;font-weight:700;margin:0;color:#111">🏢 창고별 재고</h2>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <input type="text" id="whSearch" placeholder="품목코드/이름 검색" onkeyup="if(event.key==='Enter')loadWarehouseInventory()" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:200px">
       <button class="btn btn-sm" onclick="loadWarehouseInventory()" style="background:#0284c7;color:#fff">검색</button>
@@ -5142,8 +5187,39 @@ async function initAuth() {
       }
     } catch {}
   }
+  // 로컬 개발: 자동 로그인 시도
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    try {
+      const lr = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username:'admin',password:'1234'}) });
+      const ld = await lr.json();
+      if (ld.ok && ld.data && ld.data.token) {
+        authToken = ld.data.token;
+        localStorage.setItem('authToken', authToken);
+        currentAuthUser = ld.data.user;
+        userPermissions = ld.data.permissions || [];
+        showApp();
+        return;
+      }
+    } catch {}
+  }
   showLoginScreen();
 }
+
+// ===== PAGE TITLES (showPage에서 사용, initAuth보다 먼저 선언 필요) =====
+var pageTitles={
+  'dashboard':'홈','analytics':'대시보드','inventory':'재고현황','create-po':'발주생성',
+  'po-list':'발주현황','os-register':'OS등록','delivery-schedule':'입고일정','receipts':'입고관리',
+  'invoices':'거래명세서','mat-purchase':'원재료 매입','china-shipment':'중국 선적',
+  'vendors':'거래처 관리','notes':'미팅일지','bom':'BOM 관리','mrp':'MRP',
+  'auto-order':'필수 자동발주','product-mgmt':'품목관리','shipments':'입출고 현황',
+  'post-process':'후공정 단가 관리','defects':'불량관리','production-req':'생산요청',
+  'production-stock':'생산재고','closing':'마감현황','report':'보고서','settings':'설정',
+  'user-mgmt':'사용자관리','sales':'통합 매출현황','sales-barun':'바른손 매출현황',
+  'sales-dd':'DD 매출현황','sales-gift':'더기프트 매출현황','cost-mgmt':'원가관리',
+  'board':'공지/게시판','audit-log':'감사로그','exec-dashboard':'경영대시보드',
+  'customer-orders':'고객주문','shipping':'배송추적','po-mgmt':'발주서 관리','warehouse':'창고별 재고',
+  'tasks':'업무관리','meeting-log':'미팅일지','trends':'경영추이'
+};
 
 // ===== GLOBAL STATE =====
 let RAW=[], classified={urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
@@ -5191,39 +5267,62 @@ fetch('/api/order-history?mode=today').then(r=>r.json()).then(d=>{if(d.ok)ordere
 fetch('/monthly_sales.json').then(r=>r.json()).then(d=>{monthlySales=d;}).catch(()=>{});
 
 // ===== COLUMN DEFINITIONS =====
-const COLS=[
-  {k:'상태',w:34,special:'statusBadge'},
-  {k:'제품코드',w:88},
-  {k:'품목명',w:100,special:'productName'},
-  {k:'특이사항',w:34,special:'productNote'},
-  {k:'가용재고',w:68,special:'availStock',group:'stock'},
-  {k:'월출고',w:58,special:'xerpMonthly',group:'sales'},
-  {k:'잔여일',w:52,special:'remainDays'},
-  {k:'회전수',w:58,special:'turnover'},
-  {k:'부족수량',w:68,special:'shortage',group:'order'},
-  {k:'발주수량',w:100,special:'orderInput'},
-  {k:'소진일',w:90,special:'depletionDate'},
-  {k:'✓',w:24,special:'orderCheck'},
+// ===== 재고현황 탭별 컬럼 정의 =====
+const COLS_STOCK=[
+  {k:'상태',w:40,special:'statusBadge',label:'상태'},
+  {k:'제품코드',w:88,label:'제품코드'},
+  {k:'품목명',w:110,special:'productName',label:'품목명'},
+  {k:'생산지',w:50,special:'originBadge',label:'생산지'},
+  {k:'가용재고',w:70,special:'availStock',num:true,label:'가용재고'},
+  {k:'월출고',w:60,special:'xerpMonthly',num:true,label:'월출고'},
+  {k:'일평균',w:55,special:'dailyUsage',num:true,label:'일평균'},
+  {k:'가용일수',w:65,special:'remainDays',num:true,label:'가용일수'},
+  {k:'안전재고',w:60,special:'safetyStock',num:true,label:'안전재고'},
+  {k:'미입고',w:65,special:'pendingQty',num:true,label:'미입고'},
+  {k:'발주필요',w:55,special:'needOrder',label:'발주필요'},
+  {k:'특이사항',w:40,special:'productNote',label:'메모'},
 ];
 
-// Build table header
-const hdr=document.getElementById('hdr');
-COLS.forEach(c=>{
-  const th=document.createElement('th');
-  const label=c.special==='statusBadge'?'분류':c.special==='monthly'?'월사용량':c.special==='xerpMonthly'?'월출고':c.special==='turnover'?'회전수':c.special==='remainDays'?'잔여일':c.special==='shortage'?'부족수량':c.special==='orderInput'?'발주수량':c.special==='depletionDate'?'소진일':c.special==='orderCheck'?'✓':c.special==='productNote'?'특이사항':c.k;
-  th.textContent=label;
-  if(c.w)th.style.minWidth=c.w+'px';
-  // 숫자 컬럼은 헤더도 우측정렬
-  const numSpecials=['availStock','xerpMonthly','turnover','remainDays','shortage','orderInput','depletionDate'];
-  if(numSpecials.includes(c.special)||c.num) th.style.textAlign='right';
-  if(c.group) th.classList.add('col-group-start');
-  const sk=c.special==='monthly'?'_monthly':c.special==='xerpMonthly'?'_xerpMonthly':c.special==='turnover'?'_turnover':c.special==='remainDays'?'_remainDays':c.special==='shortage'?'_shortage':c.k;
-  if(c.special!=='orderInput'&&c.special!=='statusBadge'){
-    th.dataset.k=sk;
-    th.onclick=()=>{if(sortK===sk)sortD=sortD==='asc'?'desc':'asc';else{sortK=sk;sortD='asc';}render();};
-  }
-  hdr.appendChild(th);
-});
+const COLS_ORDER=[
+  {k:'상태',w:40,special:'statusBadge',label:'상태'},
+  {k:'제품코드',w:88,label:'제품코드'},
+  {k:'품목명',w:100,special:'productName',label:'품목명'},
+  {k:'가용재고',w:65,special:'availStock',num:true,label:'가용재고'},
+  {k:'일평균',w:50,special:'dailyUsage',num:true,label:'일평균'},
+  {k:'가용일수',w:55,special:'remainDays',num:true,label:'가용일수'},
+  {k:'안전재고',w:55,special:'safetyStock',num:true,label:'안전재고'},
+  {k:'부족수량',w:60,special:'shortage',num:true,label:'부족수량'},
+  {k:'미입고',w:60,special:'pendingQty',num:true,label:'미입고'},
+  {k:'발주OS',w:70,special:'pendingOS',label:'발주OS'},
+  {k:'발주수량',w:100,special:'orderInput',label:'발주수량'},
+  {k:'예상소진일',w:80,special:'depletionDate',label:'예상소진일'},
+  {k:'발주필요일',w:75,special:'orderByDate',label:'발주필요일'},
+  {k:'✓',w:24,special:'orderCheck',label:'✓'},
+];
+
+let invMainTab = 'stock'; // 'stock' | 'order' | 'analysis'
+let pendingOrders = {}; // {product_code: {pending_qty, os_numbers, po_numbers, ...}}
+
+function getCols(){ return invMainTab==='order' ? COLS_ORDER : COLS_STOCK; }
+
+function buildHeader(){
+  const hdr=document.getElementById('hdr');
+  hdr.innerHTML='';
+  const cols=getCols();
+  cols.forEach(c=>{
+    const th=document.createElement('th');
+    th.textContent=c.label||c.k;
+    if(c.w)th.style.minWidth=c.w+'px';
+    if(c.num) th.style.textAlign='right';
+    const sk=c.special==='xerpMonthly'?'_xerpMonthly':c.special==='dailyUsage'?'_dailyUsage':c.special==='remainDays'?'_remainDays':c.special==='shortage'?'_shortage':c.special==='safetyStock'?'_safetyStock':c.special==='pendingQty'?'_pendingQty':c.special==='availStock'?'가용재고':c.k;
+    if(!['orderInput','statusBadge','orderCheck','pendingOS','needOrder','originBadge','productNote'].includes(c.special)){
+      th.dataset.k=sk; th.style.cursor='pointer';
+      th.onclick=()=>{if(sortK===sk)sortD=sortD==='asc'?'desc':'asc';else{sortK=sk;sortD='asc';}render();};
+    }
+    hdr.appendChild(th);
+  });
+}
+buildHeader();
 
 // ===== UTILITY FUNCTIONS =====
 function fN(v){if(v===0||v===''||v==null)return'<span class="zero">0</span>';if(typeof v==='number')return v.toLocaleString();return String(v)}
@@ -5279,7 +5378,7 @@ function classifyItem(p){
   })());
 
   // 리드타임재고 = 월평균 × (리드타임일수 ÷ 30)
-  const leadDays = GUIDE.leadTimeMat || 5; // TODO: 후공정 구분 시 leadTimePost
+  const leadDays = GUIDE.leadTimeMat || 5;
   const leadStock = Math.round(monthly * (leadDays / 30));
 
   // 안전재고 = 월평균 × 안전개월수
@@ -5291,11 +5390,13 @@ function classifyItem(p){
   // 목표재고 = 안전재고 + 리드타임재고 + (월평균 × 발주기간)
   const targetStock = safetyStock + leadStock + Math.round(monthly * (GUIDE.orderMonths || 1));
 
-  // 잔여일 = 가용재고 ÷ 일평균출고
+  // 일평균 출고
   const dailyUsage = xu ? xu.daily : Math.round(monthly / 30);
+  // 잔여일 = 가용재고 ÷ 일평균출고
   const remainDays = dailyUsage > 0 ? Math.round(av / dailyUsage) : null;
 
   p._monthly = monthly;
+  p._dailyUsage = dailyUsage;
   p._reorderPoint = reorderPoint;
   p._targetStock = targetStock;
   p._leadStock = leadStock;
@@ -5303,21 +5404,41 @@ function classifyItem(p){
   p._remainDays = remainDays;
   p._remain = monthly > 0 ? Math.round((av / monthly) * 10) / 10 : null;
   p._turnover = monthly > 0 ? Math.round((av / monthly) * 10) / 10 : null;
-  // API에서 이미 _xerpMonthly가 포함되어 있으면 유지, 없으면 xerpUsage에서
   if (!p._xerpMonthly) p._xerpMonthly = xu ? xu.monthly : 0;
+
+  // ── 미입고 잔량 (발주 트래킹) ──
+  const po = pendingOrders[code];
+  p._pendingQty = po ? po.pending_qty : 0;
+  p._pendingOS = po ? po.os_numbers : [];
+  p._pendingPO = po ? po.po_numbers : [];
+  p._lastOrderDate = po ? po.last_order_date : '';
+
+  // ── 예상소진일 = 오늘 + 가용일수 ──
+  if(dailyUsage > 0 && remainDays !== null) {
+    const depDate = new Date(); depDate.setDate(depDate.getDate() + remainDays);
+    p._depletionDate = depDate.toISOString().slice(0,10);
+  } else { p._depletionDate = null; }
+
+  // ── 발주필요일 = 예상소진일 - 리드타임 ──
+  if(p._depletionDate && dailyUsage > 0) {
+    const orderBy = new Date(p._depletionDate);
+    orderBy.setDate(orderBy.getDate() - leadDays);
+    p._orderByDate = orderBy.toISOString().slice(0,10);
+  } else { p._orderByDate = null; }
+
+  // ── 발주필요여부 = (가용재고+미입고) < 발주점 && 매출있음 ──
+  const effectiveStock = av + p._pendingQty;
+  p._needOrder = (monthly > 0 && effectiveStock < reorderPoint);
 
   // 분류: 긴급=2주 이내 소진, 위험=3주 이내 소진, 안전=3주 이상
   const dailyUse = dailyUsage > 0 ? dailyUsage : Math.round(monthly / 30);
   const remainDaysCalc = dailyUse > 0 ? av / dailyUse : 9999;
   if (dailyUse > 0 && remainDaysCalc <= 14) {
     p._status = 'urgent';
-    p._shortage = targetStock - av;
+    p._shortage = Math.max(0, targetStock - av);
   } else if (dailyUse > 0 && remainDaysCalc <= 21) {
     p._status = 'danger';
-    p._shortage = targetStock - av;
-  } else if (monthly > 0 && av < safetyStock * 2) {
-    p._status = 'safe';
-    p._shortage = 0;
+    p._shortage = Math.max(0, targetStock - av);
   } else if (monthly > 0) {
     p._status = 'safe';
     p._shortage = 0;
@@ -5329,31 +5450,38 @@ function classifyItem(p){
 
 let allPOItems = null;
 async function processData(products){
-  // 입고이력 품목코드 로드 — XERP 입고(SI) 기준 (25년8월~26년2월)
+  // 병렬 로드: 입고이력 + 출고데이터 + 미입고잔량
+  const promises = [];
+
+  // 입고이력 품목코드 로드
   if (!allPOItems) {
-    try {
-      const r = await fetch('/api/xerp-receiving-codes?from=20250801&to=20260228');
-      const d = await r.json();
+    promises.push(fetch('/api/xerp-receiving-codes?from=20250801&to=20260228').then(r=>r.json()).then(d=>{
       const codes = (d.data && d.data.codes) || d.codes || [];
       allPOItems = new Set(codes);
       console.log('XERP 입고이력 품목:', allPOItems.size, '개');
-    } catch(e) { allPOItems = new Set(); console.warn('XERP 입고이력 로드 실패:', e.message); }
+    }).catch(e=>{ allPOItems = new Set(); console.warn('XERP 입고이력 로드 실패:', e.message); }));
   }
-  // XERP 출고 데이터가 아직 안 왔으면 여기서 로드
+
+  // XERP 출고 데이터
   if (Object.keys(xerpUsage).length < 10) {
-    try {
-      const r = await fetch('/api/xerp-monthly-usage');
-      const d = await r.json();
+    promises.push(fetch('/api/xerp-monthly-usage').then(r=>r.json()).then(d=>{
       xerpUsage = d.data || d;
       console.log('XERP 출고 데이터 로드:', Object.keys(xerpUsage).length, '품목');
-    } catch(e) { console.warn('XERP 출고 로드 실패:', e.message); }
+    }).catch(e=>{ console.warn('XERP 출고 로드 실패:', e.message); }));
   }
+
+  // 미입고 잔량 (발주 트래킹)
+  promises.push(fetch('/api/inventory/pending-orders').then(r=>r.json()).then(d=>{
+    pendingOrders = d.data || d;
+    console.log('미입고 추적 품목:', Object.keys(pendingOrders).length, '개');
+  }).catch(e=>{ pendingOrders = {}; console.warn('미입고 로드 실패:', e.message); }));
+
+  await Promise.allSettled(promises);
 
   RAW=products.filter(p=>{
     const b=p['브랜드']||'';
     return !b.includes('D_')&&!b.includes('(D');
   });
-  // origin: API 응답의 '생산지' 필드 사용, 없으면 originMap fallback
   RAW.forEach(p=>{p._origin=p['생산지']||originMap[p['제품코드']]||'한국';});
   RAW.forEach(classifyItem);
   classified={urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
@@ -5364,7 +5492,7 @@ async function processData(products){
     else { classified[p._status].push(p); }
   });
 
-  // 25년8월~26년2월 발주이력 없는 품목을 nohistory로 분리 (긴급/위험/안전 모두)
+  // 발주이력 없는 품목을 nohistory로 분리
   ['urgent','danger','safe'].forEach(status => {
     const withHistory = [];
     classified[status].forEach(p => {
@@ -5378,39 +5506,37 @@ async function processData(products){
 
   updateOriginCounts();
   updateStatusCounts();
+  updatePendingCount();
 
   // Dashboard KPIs
-  if(RAW.length < 500) {
-    document.getElementById('dUrgent').textContent=classified.urgent.length + classified.nohistory.length;
-    document.getElementById('dDanger').textContent=classified.danger.length;
-  }
+  try {
+    const dU = document.getElementById('dUrgent');
+    const dD = document.getElementById('dDanger');
+    if(dU) dU.textContent=classified.urgent.length + classified.nohistory.length;
+    if(dD) dD.textContent=classified.danger.length;
+  } catch(e){}
 
   const brands={};RAW.forEach(p=>{const b=p['브랜드']||'';brands[b]=(brands[b]||0)+1;});
   const sel=document.getElementById('brandFilter');
-  sel.innerHTML='<option value="">전체</option>';
+  sel.innerHTML='<option value="">전체 브랜드</option>';
   Object.entries(brands).sort((a,b)=>b[1]-a[1]).forEach(([b,n])=>{
     const o=document.createElement('option');o.value=b;o.textContent=`${b||'(없음)'}(${n})`;sel.appendChild(o);
   });
 
   sortK='가용재고';sortD='asc';
-  // 긴급+위험 품목 발주수량 자동계산 (이미 입력된 품목은 유지, 체크는 안 함)
-  // 자동입력 버튼을 눌렀을 때만 동작하도록 변경 — processData에서는 건너뜀
+  buildHeader();
   render();
 }
 
-// ===== ORIGIN FILTER =====
-function updateOriginCounts(){
-  const originFiltered = currentOrigin==='all' ? RAW : RAW.filter(p=>p._origin===currentOrigin);
-  const oAll=document.getElementById('oAll');
-  if(oAll) oAll.textContent=RAW.length;
-  ['한국','중국','더기프트'].forEach(o=>{
-    const el=document.getElementById('o'+o);
-    if(el) el.textContent=RAW.filter(p=>p._origin===o).length;
-  });
+function updatePendingCount(){
+  const el=document.getElementById('cPending');
+  if(el) el.textContent=Object.keys(pendingOrders).length;
 }
 
+// ===== ORIGIN FILTER =====
+function updateOriginCounts(){}
+
 function updateStatusCounts(){
-  // origin 필터 적용된 상태에서 status 카운트
   const base = currentOrigin==='all' ? RAW : RAW.filter(p=>p._origin===currentOrigin);
   const counts={urgent:0,nohistory:0,danger:0,safe:0,nosale:0,printwarehouse:0,etc:0};
   base.forEach(p=>{
@@ -5425,54 +5551,211 @@ function updateStatusCounts(){
   document.getElementById('cDanger').textContent=counts.danger;
   document.getElementById('cSafe').textContent=counts.safe;
   document.getElementById('cNosale').textContent=counts.nosale;
-  document.getElementById('tUrgent').textContent=counts.urgent;
-  document.getElementById('tNoHistory').textContent=counts.nohistory;
-  document.getElementById('tDanger').textContent=counts.danger;
-  document.getElementById('tSafe').textContent=counts.safe;
-  document.getElementById('tNosale').textContent=counts.nosale;
+  const tU=document.getElementById('tUrgent'); if(tU) tU.textContent=counts.urgent;
+  const tNH=document.getElementById('tNoHistory'); if(tNH) tNH.textContent=counts.nohistory;
+  const tD=document.getElementById('tDanger'); if(tD) tD.textContent=counts.danger;
+  const tS=document.getElementById('tSafe'); if(tS) tS.textContent=counts.safe;
+  const tN=document.getElementById('tNosale'); if(tN) tN.textContent=counts.nosale;
   const pwEl=document.getElementById('tPrintWH'); if(pwEl) pwEl.textContent=counts.printwarehouse;
   const etcEl=document.getElementById('tEtc'); if(etcEl) etcEl.textContent=counts.etc;
 }
 
 function switchOrigin(origin){
   currentOrigin=origin;
-  document.querySelectorAll('.tab[data-origin]').forEach(t=>t.classList.toggle('active',t.dataset.origin===origin));
   updateStatusCounts();
   render();
 }
 
-// ===== TAB SWITCHING =====
-function switchTab(tab){
-  currentTab=tab;
-  document.querySelectorAll('.tab[data-tab]').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
-  if(tab==='urgent'){sortK='가용재고';sortD='asc';}
-  else if(tab==='danger'){sortK='_remain';sortD='asc';}
-  else if(tab==='safe'){sortK='_remain';sortD='asc';}
-  else if(tab==='printwarehouse'||tab==='etc'){sortK='제품코드';sortD='asc';}
-  else{sortK='가용재고';sortD='desc';}
-  render();
+// ===== MAIN TAB SWITCHING (재고현황/발주제안/분석) =====
+function switchInvMainTab(tab){
+  invMainTab=tab;
+  document.querySelectorAll('#invMainTabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.mtab===tab));
+  const statusFilters=document.getElementById('invStatusFilters');
+  const orderToolbar=document.getElementById('invOrderToolbar');
+  const tableArea=document.getElementById('invTableArea');
+  const analysisArea=document.getElementById('invAnalysisArea');
+  const filterBar=document.getElementById('invFilterBar');
+
+  if(tab==='stock'){
+    if(statusFilters) statusFilters.style.display='';
+    if(orderToolbar) orderToolbar.style.display='none';
+    if(tableArea) tableArea.style.display='';
+    if(analysisArea) analysisArea.style.display='none';
+    if(filterBar) filterBar.style.display='flex';
+    buildHeader(); render();
+  } else if(tab==='order'){
+    if(statusFilters) statusFilters.style.display='none';
+    if(orderToolbar) orderToolbar.style.display='flex';
+    if(tableArea) tableArea.style.display='';
+    if(analysisArea) analysisArea.style.display='none';
+    if(filterBar) filterBar.style.display='flex';
+    buildHeader(); renderOrderTab();
+  } else if(tab==='analysis'){
+    if(statusFilters) statusFilters.style.display='none';
+    if(orderToolbar) orderToolbar.style.display='none';
+    if(tableArea) tableArea.style.display='none';
+    if(analysisArea) analysisArea.style.display='';
+    if(filterBar) filterBar.style.display='none';
+    renderAnalysisTab();
+  }
 }
 
-// ===== RENDER TABLE =====
+// ===== STATUS TAB SWITCHING =====
+function switchTab(tab){
+  currentTab=tab;
+  document.querySelectorAll('#invStatusFilters .tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+  if(tab==='urgent'){sortK='가용재고';sortD='asc';}
+  else if(tab==='danger'){sortK='_remainDays';sortD='asc';}
+  else if(tab==='safe'){sortK='_remainDays';sortD='asc';}
+  else if(tab==='printwarehouse'||tab==='etc'){sortK='제품코드';sortD='asc';}
+  else{sortK='가용재고';sortD='desc';}
+  if(invMainTab!=='stock') switchInvMainTab('stock');
+  else render();
+}
+
+// ===== RENDER: 셀 렌더러 (공용) =====
+function renderCell(c, p){
+  const code=p['제품코드']||'';
+  const oq=orderQty[code]||'';
+  const statusMap={urgent:['긴급','sb-urgent'],danger:['위험','sb-danger'],safe:['안전','sb-safe'],nosale:['-','sb-nosale']};
+
+  if(c.special==='statusBadge'){
+    const [sLabel,sCls]=statusMap[p._status]||['',''];
+    return`<td style="text-align:center"><span class="status-badge ${sCls}">${sLabel}</span></td>`;
+  }
+  if(c.special==='productName'){
+    const name=p['품목명']||'';
+    return`<td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name||'-')}</td>`;
+  }
+  if(c.special==='originBadge'){
+    const o=p._origin||'한국';
+    const colors={한국:'#1d4ed8',중국:'#dc2626',더기프트:'#7c3aed'};
+    const bgs={한국:'#dbeafe',중국:'#fee2e2',더기프트:'#ede9fe'};
+    return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${colors[o]||'#666'};background:${bgs[o]||'#f3f4f6'}">${o}</span></td>`;
+  }
+  if(c.special==='availStock'){
+    const av=typeof p['가용재고']==='number'?p['가용재고']:0;
+    const color=av<=0?'#ef4444':p._status==='urgent'?'#ea580c':'#333';
+    return`<td class="n" style="font-weight:700;color:${color}">${av.toLocaleString()}</td>`;
+  }
+  if(c.special==='xerpMonthly'){
+    const xm=p._xerpMonthly||0;
+    return`<td class="n" style="${xm?'':'color:#ccc'}">${xm?xm.toLocaleString():'-'}</td>`;
+  }
+  if(c.special==='dailyUsage'){
+    const d=p._dailyUsage||0;
+    return`<td class="n" style="${d?'':'color:#ccc'}">${d?d.toLocaleString():'-'}</td>`;
+  }
+  if(c.special==='remainDays'){
+    const rd=p._remainDays;
+    if(rd===null||rd===undefined)return`<td class="n" style="color:#ddd">-</td>`;
+    const color=rd<=0?'#ef4444':rd<=7?'#ea580c':rd<=14?'#d97706':rd<=30?'#ca8a04':'#16a34a';
+    // 가용일수 바 표시
+    const pct=Math.min(rd/60*100,100);
+    const barColor=rd<=14?'#ef4444':rd<=21?'#f59e0b':'#22c55e';
+    return`<td class="n" style="min-width:65px"><div style="display:flex;align-items:center;gap:4px"><span style="color:${color};font-weight:${rd<=14?700:400};font-size:12px;min-width:28px;text-align:right">${rd}일</span><div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div></div></div></td>`;
+  }
+  if(c.special==='safetyStock'){
+    const ss=p._safetyStock||0;
+    return`<td class="n" style="${ss?'':'color:#ccc'}">${ss?ss.toLocaleString():'-'}</td>`;
+  }
+  if(c.special==='pendingQty'){
+    const pq=p._pendingQty||0;
+    if(!pq)return`<td class="n" style="color:#ddd">-</td>`;
+    const osStr=p._pendingOS?.length?` title="OS: ${p._pendingOS.join(', ')}"`:'';;
+    return`<td class="n" style="color:#6366f1;font-weight:600;cursor:help"${osStr}>${pq.toLocaleString()}</td>`;
+  }
+  if(c.special==='pendingOS'){
+    const os=p._pendingOS||[];
+    if(!os.length)return`<td style="color:#ddd;font-size:11px;text-align:center">-</td>`;
+    return`<td style="font-size:10px;text-align:center;color:#6366f1;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${os.join(', ')}">${os.join(', ')}</td>`;
+  }
+  if(c.special==='needOrder'){
+    if(p._needOrder){
+      const pq=p._pendingQty||0;
+      if(pq>0) return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:#7c3aed;background:#ede9fe">발주중</span></td>`;
+      return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:#dc2626;background:#fee2e2">발주필요</span></td>`;
+    }
+    if(orderedToday[code])return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:#16a34a;background:#dcfce7">완료</span></td>`;
+    return`<td style="text-align:center;color:#ddd">-</td>`;
+  }
+  if(c.special==='shortage'){
+    const sh=p._shortage||0;
+    return sh>0?`<td class="n" style="color:#ef4444;font-weight:700">${sh.toLocaleString()}</td>`:`<td class="n" style="color:#ddd">-</td>`;
+  }
+  if(c.special==='orderInput'){
+    const isChinese=p._origin==='중국';
+    if(isChinese){
+      const eaDisplay=oq||'';
+      return`<td class="n"><div style="display:flex;align-items:center;gap:4px;width:100px"><input type="number" class="qty-input${oq?' filled':''}" data-code="${esc(code)}" data-unit="ea" value="${eaDisplay}" min="0" step="1" placeholder="${p._shortage||''}" onchange="setQtyEa(this)" onfocus="this.select()" style="width:60px;flex-shrink:0"><span style="font-size:10px;font-weight:600;color:#b45309">ea</span></div></td>`;
+    }
+    const info=productInfo[code]||{};
+    const jeol=parseJeol(info['절']);
+    const jopan=parseJeol(info['조판']);
+    const hasReam=jeol>0&&jopan>0;
+    const rVal=oq&&hasReam?(oq/500/jeol/jopan):'';
+    const rDisplay=rVal?(rVal%1===0?rVal:rVal.toFixed(1)):'';
+    const shortR=shortageToR(p._shortage,code);
+    const sheetsDisplay=oq?oq.toLocaleString()+'매':'';
+    return`<td class="n"><div style="display:flex;align-items:center;gap:4px;width:100px"><input type="number" class="qty-input${oq?' filled':''}" data-code="${esc(code)}" value="${rDisplay}" min="0" step="1" placeholder="${shortR||''}" onchange="setQty(this)" onfocus="this.select()" style="width:45px;flex-shrink:0"><span style="font-size:10px;font-weight:600;color:var(--primary)">R</span><span style="font-size:9px;color:#888;flex:1;text-align:right;overflow:hidden;white-space:nowrap">${sheetsDisplay}</span></div></td>`;
+  }
+  if(c.special==='productNote'){
+    const pn=productNotes[code]||{};
+    const nt=pn.note_type||'';
+    const ntColors={'소진후단종':'#e74c3c','보류':'#95a5a6','신규':'#3498db','디지털인쇄용':'#8e44ad','기타':'#78716c'};
+    const ordBadge=orderedToday[code]?`<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:9px;color:#fff;background:#27ae60;margin-right:2px" title="${orderedToday[code].toLocaleString()}개">발주</span>`:'';
+    const badge=nt?`<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:9px;color:#fff;background:${ntColors[nt]||'#999'};cursor:pointer" onclick="editProductNote('${esc(code)}')">${nt}</span>`:`<span style="color:#ccc;cursor:pointer;font-size:11px" onclick="editProductNote('${esc(code)}')">+</span>`;
+    return`<td style="text-align:center">${ordBadge}${badge}</td>`;
+  }
+  if(c.special==='depletionDate'){
+    const dd=p._depletionDate;
+    if(!dd)return`<td class="n" style="color:#ddd;font-size:11px;text-align:center">-</td>`;
+    const rd=p._remainDays||999;
+    const color=rd<=14?'#ef4444':rd<=30?'#d97706':'#16a34a';
+    return`<td class="n" style="color:${color};font-size:11px;text-align:center;white-space:nowrap">${dd.slice(5)}</td>`;
+  }
+  if(c.special==='orderByDate'){
+    const ob=p._orderByDate;
+    if(!ob)return`<td class="n" style="color:#ddd;font-size:11px;text-align:center">-</td>`;
+    const today=new Date().toISOString().slice(0,10);
+    const isPast=ob<=today;
+    const color=isPast?'#ef4444':'#d97706';
+    return`<td class="n" style="color:${color};font-weight:${isPast?700:400};font-size:11px;text-align:center;white-space:nowrap">${ob.slice(5)}${isPast?' !':''}</td>`;
+  }
+  if(c.special==='orderCheck'){
+    const chk=orderChecked[code]===true?'checked':'';
+    return`<td style="text-align:center"><input type="checkbox" class="order-chk" data-code="${esc(code)}" ${chk} onchange="toggleOrderCheck(this)"></td>`;
+  }
+  const v=p[c.k];
+  if(c.num){
+    const n=typeof v==='number'?v:0;
+    return`<td class="n">${fN(v)}</td>`;
+  }
+  return`<td>${esc(v)}</td>`;
+}
+
+// ===== RENDER: 재고현황 테이블 =====
 function render(){
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const brand=document.getElementById('brandFilter').value;
+  if(invMainTab==='order'){renderOrderTab();return;}
+  if(invMainTab==='analysis'){renderAnalysisTab();return;}
+
+  const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
+  const brand=document.getElementById('brandFilter')?.value||'';
   let data=classified[currentTab]||[];
 
   let f=data.filter(p=>{
     if(currentOrigin!=='all'&&p._origin!==currentOrigin)return false;
     if(brand&&(p['브랜드']||'')!==brand)return false;
-    if(q&&!(p['제품코드']||'').toLowerCase().includes(q))return false;
+    if(q){
+      const c=(p['제품코드']||'').toLowerCase();
+      const n=(p['품목명']||'').toLowerCase();
+      if(!c.includes(q)&&!n.includes(q))return false;
+    }
     return true;
   });
 
   if(sortK){
     f.sort((a,b)=>{
-      // "디지털인쇄용" 특이사항 → 항상 맨 아래
-      const aDigi = (productNotes[a['제품코드']]?.note_type||'') === '디지털인쇄용' ? 1 : 0;
-      const bDigi = (productNotes[b['제품코드']]?.note_type||'') === '디지털인쇄용' ? 1 : 0;
-      if(aDigi !== bDigi) return aDigi - bDigi;
-
       let va=a[sortK]??'',vb=b[sortK]??'';
       if(va===null)va=9999;if(vb===null)vb=9999;
       if(typeof va==='number'&&typeof vb==='number')return sortD==='asc'?va-vb:vb-va;
@@ -5483,119 +5766,130 @@ function render(){
 
   document.querySelectorAll('#hdr th').forEach(th=>{th.classList.remove('sa','sd');if(th.dataset.k===sortK)th.classList.add(sortD==='asc'?'sa':'sd');});
 
+  const cols=getCols();
   const tb=document.getElementById('tb');
   const show=f.slice(0,300);
   tb.innerHTML=show.map(p=>{
     const code=p['제품코드']||'';
-    const oq=orderQty[code]||'';
-    const statusMap={urgent:['긴급','sb-urgent'],danger:['위험','sb-danger'],safe:['안전','sb-safe'],nosale:['-','sb-nosale']};
-    const [sLabel,sCls]=statusMap[p._status]||['',''];
-
-    // 행 배경색: 발주선택(체크 or 수량입력)=파란강조 > 긴급=연빨강 > 위험=연주황
-    const hasOrder = oq > 0 || orderChecked[code] === true;
-    const rowBg = hasOrder ? 'background:#eff6ff;border-left:3px solid #3b82f6' : p._status==='urgent' ? 'background:#fff5f5' : p._status==='danger' ? 'background:#fffbeb' : '';
-
-    return`<tr style="${rowBg}">`+COLS.map(c=>{
-      const gCls=c.group?' col-group-start':'';
-      if(c.special==='statusBadge')return`<td style="text-align:center"><span class="status-badge ${sCls}">${sLabel}</span></td>`;
-      if(c.special==='productName'){
-        const name=p['품목명']||'';
-        return`<td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name||'-')}</td>`;
-      }
-      if(c.special==='availStock'){
-        const av=typeof p['가용재고']==='number'?p['가용재고']:0;
-        const org=p._origin||'한국';
-        const dangerT=org==='중국'?2:org==='더기프트'?1:0.5;
-        const color=av<=0?'#ef4444':(p._turnover!==null&&p._turnover<=dangerT)?'#ea580c':'#333';
-        return`<td class="n${gCls}" style="font-weight:700;color:${color}">${av.toLocaleString()}</td>`;
-      }
-      if(c.special==='xerpMonthly'){
-        const xm=p._xerpMonthly||0;
-        return`<td class="n${gCls}" style="${xm?'':'color:#ccc'}">${xm?xm.toLocaleString():'-'}</td>`;
-      }
-      if(c.special==='turnover'){
-        const t=p._turnover;
-        if(t===null||t===undefined)return`<td class="n" style="color:#ddd">-</td>`;
-        const org=p._origin||'한국';
-        let color,bold;
-        if(org==='중국'){
-          color=t<=1?'#ef4444':t<=2?'#ea580c':t<=3?'#16a34a':'#9ca3af';
-          bold=t<=2;
-        }else if(org==='더기프트'){
-          color=t<=0.5?'#ef4444':t<=1?'#ea580c':t<=2?'#16a34a':'#9ca3af';
-          bold=t<=1;
-        }else{
-          color=t<=0.3?'#ef4444':t<=0.5?'#ea580c':t<=1.5?'#16a34a':'#9ca3af';
-          bold=t<=0.5;
-        }
-        return`<td class="n" style="color:${color};font-weight:${bold?700:400}">${t}개월</td>`;
-      }
-      if(c.special==='remainDays'){
-        const rd=p._remainDays;
-        if(rd===null||rd===undefined)return`<td class="n" style="color:#ddd">-</td>`;
-        const color=rd<=0?'#ef4444':rd<=7?'#ea580c':rd<=14?'#d97706':rd<=30?'#ca8a04':'#16a34a';
-        return`<td class="n" style="color:${color};font-weight:${rd<=7?700:400}">${rd}일</td>`;
-      }
-      if(c.special==='shortage'){
-        const sh=p._shortage||0;
-        return sh>0?`<td class="n${gCls}" style="color:#ef4444;font-weight:700">${sh.toLocaleString()}</td>`:`<td class="n${gCls}" style="color:#ddd">-</td>`;
-      }
-      if(c.special==='orderInput'){
-        const isChinese = p._origin === '중국';
-        if (isChinese) {
-          // 중국 상품: ea 단위 낱개 발주
-          const eaDisplay = oq || '';
-          return`<td class="n"><div style="display:flex;align-items:center;gap:4px;width:120px"><input type="number" class="qty-input${oq?' filled':''}" data-code="${esc(code)}" data-unit="ea" value="${eaDisplay}" min="0" step="1" placeholder="${p._shortage||''}" onchange="setQtyEa(this)" onfocus="this.select()" style="width:70px;flex-shrink:0"><span style="font-size:10px;font-weight:600;color:#b45309">ea</span></div></td>`;
-        }
-        // 한국 제품: 연(R) 단위로 입력, orderQty에는 매(장)로 저장됨
-        const info=productInfo[code]||{};
-        const jeol=parseJeol(info['절']);
-        const jopan=parseJeol(info['조판']);
-        const hasReam=jeol>0&&jopan>0;
-        const rVal=oq&&hasReam?(oq/500/jeol/jopan):'';
-        const rDisplay=rVal?(rVal%1===0?rVal:rVal.toFixed(1)):'';
-        const shortR=shortageToR(p._shortage,code);
-        const sheetsDisplay=oq?oq.toLocaleString()+'매':'';
-        return`<td class="n"><div style="display:flex;align-items:center;gap:4px;width:120px"><input type="number" class="qty-input${oq?' filled':''}" data-code="${esc(code)}" value="${rDisplay}" min="0" step="1" placeholder="${shortR||''}" onchange="setQty(this)" onfocus="this.select()" style="width:50px;flex-shrink:0"><span style="font-size:10px;font-weight:600;color:var(--primary)">R</span><span style="font-size:10px;color:#888;flex:1;text-align:right;overflow:hidden;white-space:nowrap">${sheetsDisplay}</span></div></td>`;
-      }
-      if(c.special==='productNote'){
-        const pn=productNotes[code]||{};
-        const nt=pn.note_type||'';
-        const ntColors={'소진후단종':'#e74c3c','보류':'#95a5a6','신규':'#3498db','디지털인쇄용':'#8e44ad','기타':'#78716c'};
-        const ordBadge=orderedToday[code]?`<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:9px;color:#fff;background:#27ae60;margin-right:2px" title="오늘 ${orderedToday[code].toLocaleString()}개 발주완료">발주완료</span>`:'';
-        const badge=nt?`<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;color:#fff;background:${ntColors[nt]||'#999'};cursor:pointer" onclick="editProductNote('${esc(code)}')">${nt}</span>`:`<span style="color:#ccc;cursor:pointer;font-size:11px" onclick="editProductNote('${esc(code)}')">+</span>`;
-        return`<td style="text-align:center">${ordBadge}${badge}</td>`;
-      }
-      if(c.special==='depletionDate'){
-        if(!oq||oq<=0)return`<td class="n" style="color:#ddd">-</td>`;
-        const av=typeof p['가용재고']==='number'?p['가용재고']:0;
-        const daily=p._xerpDaily||Math.round((p._xerpMonthly||0)/30);
-        if(daily<=0)return`<td class="n" style="color:#ddd">-</td>`;
-        const totalStock=av+oq;
-        const daysLeft=Math.round(totalStock/daily);
-        const depDate=new Date();depDate.setDate(depDate.getDate()+daysLeft);
-        const mm=String(depDate.getMonth()+1).padStart(2,'0');
-        const dd=String(depDate.getDate()).padStart(2,'0');
-        const color=daysLeft<=30?'#ef4444':daysLeft<=60?'#d97706':'#16a34a';
-        return`<td class="n" style="color:${color};font-size:11px;text-align:center;white-space:nowrap">${mm}/${dd} <span style="font-size:9px;color:#888">${daysLeft}일</span></td>`;
-      }
-      if(c.special==='orderCheck'){
-        const chk=orderChecked[code]===true?'checked':'';
-        return`<td style="text-align:center"><input type="checkbox" class="order-chk" data-code="${esc(code)}" ${chk} onchange="toggleOrderCheck(this)"></td>`;
-      }
-      const v=p[c.k];
-      if(c.num){
-        const n=typeof v==='number'?v:0;
-        const cls=n<0?'n neg':n===0?'n zero':'n';
-        return`<td class="${cls}${gCls}">${fN(v)}</td>`;
-      }
-      return`<td class="${gCls.trim()}">${esc(v)}</td>`;
-    }).join('')+'</tr>';
+    const rowBg=p._status==='urgent'?'background:#fff5f5':p._status==='danger'?'background:#fffbeb':'';
+    return`<tr style="${rowBg}">`+cols.map(c=>renderCell(c,p)).join('')+'</tr>';
   }).join('');
 
   const orderedCount=Object.entries(orderQty).filter(([k,v])=>v>0).length;
-  document.getElementById('orderCount').textContent=orderedCount;
-  document.getElementById('statusBar').textContent=`${currentTab} ${f.length}개 | 전체 ${RAW.length}개 | 발주입력 ${orderedCount}개 | ${loadTime||'-'}`;
+  const ocEl=document.getElementById('orderCount'); if(ocEl) ocEl.textContent=orderedCount;
+  const sb=document.getElementById('statusBar');
+  if(sb) sb.textContent=`${currentTab} ${f.length}개 | 전체 ${RAW.length}개 | 발주입력 ${orderedCount}개 | ${loadTime||'-'}`;
+}
+
+// ===== RENDER: 발주제안 탭 =====
+function renderOrderTab(){
+  const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
+  const brand=document.getElementById('brandFilter')?.value||'';
+
+  // 발주필요 품목: 긴급+위험+이력없음 중 발주필요 표시 + 기존 발주입력 품목
+  let data=[];
+  ['urgent','nohistory','danger','safe'].forEach(s=>{
+    (classified[s]||[]).forEach(p=>{
+      if(p._needOrder||p._pendingQty>0||orderQty[p['제품코드']]>0) data.push(p);
+    });
+  });
+
+  let f=data.filter(p=>{
+    if(currentOrigin!=='all'&&p._origin!==currentOrigin)return false;
+    if(brand&&(p['브랜드']||'')!==brand)return false;
+    if(q){
+      const c=(p['제품코드']||'').toLowerCase();
+      const n=(p['품목명']||'').toLowerCase();
+      if(!c.includes(q)&&!n.includes(q))return false;
+    }
+    return true;
+  });
+
+  // 정렬: 가용일수 오름차순 (긴급 먼저)
+  f.sort((a,b)=>{
+    const ra=a._remainDays??9999, rb=b._remainDays??9999;
+    return ra-rb;
+  });
+
+  const cols=getCols();
+  const tb=document.getElementById('tb');
+  tb.innerHTML=f.slice(0,300).map(p=>{
+    const code=p['제품코드']||'';
+    const oq=orderQty[code]||0;
+    const hasOrder=oq>0||orderChecked[code]===true;
+    const rowBg=hasOrder?'background:#eff6ff;border-left:3px solid #3b82f6':p._status==='urgent'?'background:#fff5f5':p._status==='danger'?'background:#fffbeb':'';
+    return`<tr style="${rowBg}">`+cols.map(c=>renderCell(c,p)).join('')+'</tr>';
+  }).join('');
+
+  // 발주 요약 업데이트
+  const orderedCount=Object.entries(orderQty).filter(([k,v])=>v>0).length;
+  const ocEl=document.getElementById('orderCount'); if(ocEl) ocEl.textContent=orderedCount;
+  const sumEl=document.getElementById('orderSummary');
+  if(sumEl) sumEl.textContent=`대상 ${f.length}건 | 선택 ${orderedCount}건`;
+}
+
+// ===== RENDER: 재고분석 탭 =====
+let _invCharts={};
+function renderAnalysisTab(){
+  // 상태별 분포 (도넛)
+  const statusData={긴급:classified.urgent?.length||0, 위험:classified.danger?.length||0, 안전:classified.safe?.length||0, 매출없음:classified.nosale?.length||0, 이력없음:classified.nohistory?.length||0};
+  const statusColors=['#ef4444','#f59e0b','#22c55e','#9ca3af','#d97706'];
+  renderDonut('invChartStatus',Object.keys(statusData),Object.values(statusData),statusColors);
+
+  // 생산지별 (도넛)
+  const origins={};RAW.forEach(p=>{const o=p._origin||'한국';origins[o]=(origins[o]||0)+1;});
+  const originColors=['#3b82f6','#ef4444','#8b5cf6','#6b7280'];
+  renderDonut('invChartOrigin',Object.keys(origins),Object.values(origins),originColors);
+
+  // 가용일수 분포 (바)
+  const dayBuckets={'0-7일':0,'8-14일':0,'15-21일':0,'22-30일':0,'31-60일':0,'60일+':0};
+  RAW.forEach(p=>{
+    const rd=p._remainDays;
+    if(rd===null)return;
+    if(rd<=7)dayBuckets['0-7일']++;
+    else if(rd<=14)dayBuckets['8-14일']++;
+    else if(rd<=21)dayBuckets['15-21일']++;
+    else if(rd<=30)dayBuckets['22-30일']++;
+    else if(rd<=60)dayBuckets['31-60일']++;
+    else dayBuckets['60일+']++;
+  });
+  renderBar('invChartDays',Object.keys(dayBuckets),Object.values(dayBuckets),['#ef4444','#f59e0b','#eab308','#84cc16','#22c55e','#06b6d4']);
+
+  // 브랜드별 긴급/위험 (수평 바)
+  const brandRisk={};
+  [...(classified.urgent||[]),...(classified.danger||[])].forEach(p=>{
+    const b=p['브랜드']||'(없음)';
+    brandRisk[b]=(brandRisk[b]||0)+1;
+  });
+  const sorted=Object.entries(brandRisk).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  renderBar('invChartBrand',sorted.map(s=>s[0]),sorted.map(s=>s[1]),['#ef4444']);
+
+  // 요약 통계
+  const totalItems=RAW.length;
+  const needOrder=RAW.filter(p=>p._needOrder).length;
+  const pendingCount=Object.keys(pendingOrders).length;
+  const avgDays=RAW.filter(p=>p._remainDays!==null);
+  const avgD=avgDays.length?Math.round(avgDays.reduce((s,p)=>s+p._remainDays,0)/avgDays.length):0;
+  document.getElementById('invAnalysisSummary').innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div><span style="font-weight:700;font-size:20px;color:var(--primary)">${totalItems}</span><br>전체 품목</div>
+      <div><span style="font-weight:700;font-size:20px;color:#ef4444">${needOrder}</span><br>발주 필요</div>
+      <div><span style="font-weight:700;font-size:20px;color:#6366f1">${pendingCount}</span><br>미입고 추적</div>
+      <div><span style="font-weight:700;font-size:20px;color:#16a34a">${avgD}일</span><br>평균 가용일수</div>
+    </div>`;
+}
+
+function renderDonut(canvasId,labels,data,colors){
+  if(typeof Chart==='undefined')return;
+  const ctx=document.getElementById(canvasId);if(!ctx)return;
+  if(_invCharts[canvasId])_invCharts[canvasId].destroy();
+  _invCharts[canvasId]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}});
+}
+function renderBar(canvasId,labels,data,colors){
+  if(typeof Chart==='undefined')return;
+  const ctx=document.getElementById(canvasId);if(!ctx)return;
+  if(_invCharts[canvasId])_invCharts[canvasId].destroy();
+  _invCharts[canvasId]=new Chart(ctx,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors.length===1?colors[0]:colors,borderWidth:0,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:canvasId==='invChartBrand'?'y':'x',plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f1f5f9'}}}}});
 }
 
 function setQty(el){
@@ -5972,45 +6266,6 @@ function loadInventoryPage(){
 }
 
 // ===== PAGE NAVIGATION =====
-const pageTitles={
-  'dashboard':'홈',
-  'analytics':'대시보드',
-  'inventory':'재고현황',
-  'create-po':'발주생성',
-  'po-list':'발주현황',
-  'os-register':'OS등록',
-  'delivery-schedule':'입고일정',
-  'receipts':'입고관리',
-  'invoices':'거래명세서',
-  'mat-purchase':'원재료 매입',
-  'china-shipment':'중국 선적',
-  'vendors':'거래처 관리',
-  'notes':'미팅일지',
-  'bom':'BOM 관리',
-  'mrp':'MRP',
-  'auto-order':'필수 자동발주',
-  'product-mgmt':'품목관리',
-  'shipments':'출고현황',
-  'post-process':'후공정 단가 관리',
-  'defects':'불량관리',
-  'production-req':'생산요청',
-  'production-stock':'생산재고',
-  'closing':'마감현황',
-  'report':'보고서',
-  'settings':'설정',
-  'user-mgmt':'사용자관리',
-  'sales':'통합 매출현황',
-  'sales-barun':'바른손 매출현황',
-  'sales-dd':'DD 매출현황',
-  'sales-gift':'더기프트 매출현황',
-  'cost-mgmt':'원가관리',
-  'board':'공지/게시판',
-  'audit-log':'감사로그',
-  'exec-dashboard':'경영대시보드',
-  'customer-orders':'고객주문',
-  'shipping':'배송추적'
-};
-
 function toggleSidebar() { /* legacy - no-op */ }
 function toggleNavGroup(groupKey) { /* legacy - no-op */ }
 
@@ -6030,18 +6285,19 @@ function showPage(page, opts){
   }
   // Update topbar highlight
   var pageCatMap = {
-    'dashboard':'dashboard','analytics':'mgmt',
-    'inventory':'stock','shipments':'stock','closing':'stock','warehouse':'stock',
-    'auto-order':'order','create-po':'order','po-list':'order','po-mgmt':'order','china-shipment':'order',
-    'delivery-schedule':'inbound','receipts':'inbound','os-register':'inbound',
+    'dashboard':'dashboard',
+    'auto-order':'purchase','create-po':'purchase','po-list':'purchase','po-mgmt':'purchase','china-shipment':'purchase',
+    'delivery-schedule':'purchase','receipts':'purchase','os-register':'purchase',
+    'sales':'sales','sales-barun':'sales','sales-dd':'sales','sales-gift':'sales','customer-orders':'sales','shipping':'sales',
+    'inventory':'stock','warehouse':'stock','shipments':'stock',
     'production-req':'production','production-stock':'production','mrp':'production',
-    'tasks':'work','notes':'work',
-    'invoices':'mgmt','mat-purchase':'mgmt','vendors':'mgmt','product-mgmt':'mgmt','bom':'mgmt',
-    'post-process':'mgmt','defects':'mgmt','report':'mgmt','settings':'mgmt','user-mgmt':'mgmt',
-    'sales':'sales','sales-barun':'sales','sales-dd':'sales','sales-gift':'sales','cost-mgmt':'sales',
-    'board':'work','audit-log':'mgmt','exec-dashboard':'mgmt','customer-orders':'sales','shipping':'sales'
+    'invoices':'accounting','mat-purchase':'accounting','cost-mgmt':'accounting','closing':'accounting',
+    'vendors':'master','product-mgmt':'master','bom':'master','post-process':'master',
+    'analytics':'analysis','exec-dashboard':'analysis','report':'analysis','defects':'analysis',
+    'tasks':'work','notes':'work','board':'work',
+    'settings':'system','user-mgmt':'system','audit-log':'system'
   };
-  var activeCat = pageCatMap[page] || '';
+  var activeCat = (pageCatMap && pageCatMap[page]) || '';
   document.querySelectorAll('.topbar-tab').forEach(function(t){
     if (t.dataset.page === 'dashboard') t.classList.toggle('active', page === 'dashboard');
     else if (t.dataset.cat) t.classList.toggle('active', t.dataset.cat === activeCat && page !== 'dashboard');
@@ -6052,7 +6308,7 @@ function showPage(page, opts){
   if(el) el.classList.add('active');
   // Update header title with origin badge
   const originFlags = {'한국':'🇰🇷','중국':'🇨🇳','더기프트':'🎁'};
-  const titleBase = pageTitles[page]||page;
+  const titleBase = (pageTitles && pageTitles[page])||page;
   const titleEl = document.getElementById('pageTitle');
   if (currentOriginContext && originFlags[currentOriginContext]) {
     titleEl.innerHTML = esc(titleBase) + ' <span style="background:#dbeafe;color:var(--primary);padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;margin-left:8px">' + originFlags[currentOriginContext] + ' ' + esc(currentOriginContext) + '</span>';
@@ -11734,7 +11990,7 @@ function switchPMTab(tab){
   if(isAcc) loadAccList(); else renderProductMgmt();
 }
 
-// ===== 출고현황 (XERP 실시간) =====
+// ===== 입출고 현황 (XERP 실시간) =====
 let shipRows = [];
 let shipGubun = 'all';
 let shipOrigin = 'all';
@@ -11902,7 +12158,7 @@ function exportShipmentsExcel() {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `출고현황_${fromVal}_${toVal}.csv`;
+  link.download = `입출고현황_${fromVal}_${toVal}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -18674,7 +18930,7 @@ function exportCostExcel() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  창고관리 (Warehouse Management)
+//  창고별 재고 (Warehouse Inventory)
 // ════════════════════════════════════════════════════════════════════
 var _whList = [];
 var _whActiveTab = 'all';
