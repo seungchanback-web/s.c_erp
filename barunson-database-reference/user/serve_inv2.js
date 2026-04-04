@@ -1,3 +1,4 @@
+const _startTime = Date.now();
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -886,6 +887,20 @@ db.exec(`
   );
 `);
 
+// ── BOM 조판 계산 확장 컬럼 ──
+try { db.exec("ALTER TABLE bom_items ADD COLUMN material_type TEXT DEFAULT 'IMPOSITION'"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN paper_standard TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN paper_type TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN gsm INTEGER DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN finished_w REAL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN finished_h REAL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN bleed REAL DEFAULT 3"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN grip REAL DEFAULT 10"); } catch {}
+try { db.exec("ALTER TABLE bom_items ADD COLUMN loss_rate REAL DEFAULT 5"); } catch {}
+try { db.exec("ALTER TABLE bom_header ADD COLUMN default_order_qty INTEGER DEFAULT 1000"); } catch {}
+try { db.exec("ALTER TABLE bom_header ADD COLUMN finished_w REAL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE bom_header ADD COLUMN finished_h REAL DEFAULT 0"); } catch {}
+
 // ── os_number 컬럼 추가 (발주 프로세스 자동화) ──
 try { db.exec("ALTER TABLE po_header ADD COLUMN os_number TEXT DEFAULT ''"); } catch(_) {}
 
@@ -1341,6 +1356,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS users (
 try { db.exec("ALTER TABLE users ADD COLUMN google_id TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE users ADD COLUMN profile_picture TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE users ADD COLUMN favorites TEXT DEFAULT '[]'"); } catch {}
 try { db.exec("ALTER TABLE vendors ADD COLUMN email_cc TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE product_post_vendor ADD COLUMN step_order INTEGER DEFAULT 1"); } catch {}
 try { db.exec("ALTER TABLE po_header ADD COLUMN process_step INTEGER DEFAULT 0"); } catch {}
@@ -1875,7 +1891,7 @@ const ALL_PAGES = [
   // 기준정보
   { id: 'vendors', name: '거래처 관리', group: '기준정보' },
   { id: 'product-mgmt', name: '품목관리', group: '기준정보' },
-  { id: 'bom', name: 'BOM 관리', group: '기준정보' },
+  { id: 'bom', name: '제품공정', group: '기준정보' },
   { id: 'post-process', name: '후공정 단가', group: '기준정보' },
   // 경영분석
   { id: 'analytics', name: '대시보드', group: '경영분석' },
@@ -2080,7 +2096,7 @@ http.createServer(async (req, res) => {
     fail(res, 500, e.message || 'Internal Server Error');
   }
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`스마트재고현황: http://localhost:${PORT}`);
+  console.log(`스마트재고현황: http://localhost:${PORT}  (startup: ${((Date.now() - _startTime)/1000).toFixed(1)}s)`);
   console.log(`헬스체크: http://localhost:${PORT}/api/health`);
   scheduleAutoOrder();
   scheduleXerpSync();
@@ -2107,6 +2123,27 @@ async function handleRequest(req, res) {
   if (method === 'OPTIONS') {
     res.writeHead(204, CORS);
     res.end();
+    return;
+  }
+
+  // GET /api/health — 시스템 헬스체크 (최상위 배치 — Docker 배포 안정성)
+  if (pathname === '/api/health' && method === 'GET') {
+    const health = { status: 'ok', timestamp: new Date().toISOString(), checks: {} };
+    try { db.prepare('SELECT 1').get(); health.checks.sqlite = 'ok'; }
+    catch (e) { health.checks.sqlite = 'error: ' + e.message; health.status = 'degraded'; }
+    try {
+      if (xerpPool && xerpPool.connected) { health.checks.xerp = 'ok'; }
+      else if (xerpReconnectAttempts > 0) { health.checks.xerp = `reconnecting (attempt #${xerpReconnectAttempts})`; }
+      else health.checks.xerp = 'not configured';
+    } catch (e) { health.checks.xerp = 'error'; health.status = 'degraded'; }
+    health.checks.smtp = smtpTransporter ? 'configured' : 'not configured';
+    health.checks.google_sheet = gAccessToken ? 'ok' : (gRefreshToken ? 'token expired' : 'not configured');
+    try {
+      const backups = fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.db'));
+      health.checks.backup = `${backups.length} backups (latest: ${backups.sort().pop() || 'none'})`;
+    } catch { health.checks.backup = 'error'; }
+    try { health.checks.db_size = `${(fs.statSync(DB_PATH).size / 1024 / 1024).toFixed(1)} MB`; } catch {}
+    ok(res, health);
     return;
   }
 
@@ -2262,11 +2299,12 @@ async function handleRequest(req, res) {
     const token = extractToken(req);
     const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
-    const user = db.prepare("SELECT user_id, username, display_name, role, email, permissions, last_login FROM users WHERE user_id = ?").get(decoded.userId);
+    const user = db.prepare("SELECT user_id, username, display_name, role, email, permissions, favorites, last_login FROM users WHERE user_id = ?").get(decoded.userId);
     if (!user) { fail(res, 401, '사용자를 찾을 수 없습니다'); return; }
     const userPerms = user.permissions ? JSON.parse(user.permissions) : [];
     const effectivePerms = user.role === 'admin' ? ['*'] : (userPerms.length > 0 ? userPerms : (ROLE_PERMISSIONS[user.role] || []));
-    ok(res, { user: { ...user, permissions: undefined }, permissions: effectivePerms });
+    let favs = []; try { favs = JSON.parse(user.favorites || '[]'); } catch {}
+    ok(res, { user: { ...user, permissions: undefined, favorites: undefined }, permissions: effectivePerms, favorites: favs });
     return;
   }
 
@@ -2290,6 +2328,30 @@ async function handleRequest(req, res) {
     db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now','localtime') WHERE user_id = ?").run(hash, decoded.userId);
     auditLog(decoded.userId, decoded.username, 'password_change', 'auth', decoded.userId, '비밀번호 변경', clientIP);
     ok(res, { message: '비밀번호가 변경되었습니다' });
+    return;
+  }
+
+  // GET /api/auth/favorites — 즐겨찾기 조회
+  if (pathname === '/api/auth/favorites' && method === 'GET') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const row = db.prepare("SELECT favorites FROM users WHERE user_id = ?").get(decoded.userId);
+    let favs = [];
+    try { favs = JSON.parse(row?.favorites || '[]'); } catch {}
+    ok(res, favs);
+    return;
+  }
+
+  // PUT /api/auth/favorites — 즐겨찾기 저장
+  if (pathname === '/api/auth/favorites' && method === 'PUT') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const body = await readJSON(req);
+    const favs = Array.isArray(body.favorites) ? body.favorites : [];
+    db.prepare("UPDATE users SET favorites = ? WHERE user_id = ?").run(JSON.stringify(favs), decoded.userId);
+    ok(res, { message: '즐겨찾기 저장 완료', favorites: favs });
     return;
   }
 
@@ -2345,33 +2407,7 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // GET /api/health — 시스템 헬스체크
-  if (pathname === '/api/health' && method === 'GET') {
-    const health = { status: 'ok', timestamp: new Date().toISOString(), checks: {} };
-    // DB 체크
-    try { db.prepare('SELECT 1').get(); health.checks.sqlite = 'ok'; }
-    catch (e) { health.checks.sqlite = 'error: ' + e.message; health.status = 'degraded'; }
-    // XERP 체크
-    try {
-      if (xerpPool && xerpPool.connected) { await xerpPool.request().query('SELECT 1'); health.checks.xerp = 'ok'; }
-      else if (xerpReconnectAttempts > 0) { health.checks.xerp = `reconnecting (attempt #${xerpReconnectAttempts})`; health.status = 'degraded'; }
-      else health.checks.xerp = 'not configured';
-    } catch (e) { health.checks.xerp = 'error: ' + e.message; health.status = 'degraded'; scheduleXerpReconnect(); }
-    // SMTP 체크
-    health.checks.smtp = smtpTransporter ? 'configured' : 'not configured';
-    // Google Sheet 동기화 상태
-    health.checks.google_sheet = gAccessToken ? 'ok' : (gRefreshToken ? 'token expired (clasp login 필요)' : 'not configured');
-    // 백업 체크
-    try {
-      const backups = fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.db'));
-      health.checks.backup = `${backups.length} backups (latest: ${backups.sort().pop() || 'none'})`;
-    } catch { health.checks.backup = 'error'; }
-    // 디스크
-    const dbStat = fs.statSync(DB_PATH);
-    health.checks.db_size = `${(dbStat.size / 1024 / 1024).toFixed(1)} MB`;
-    ok(res, health);
-    return;
-  }
+  // (헬스체크는 최상위로 이동됨 — 위 참조)
 
   // GET /api/audit-log — 감사 로그 (admin만, 필터링/페이지네이션/통계 지원)
   if (pathname === '/api/audit-log' && method === 'GET') {
@@ -6422,13 +6458,15 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/bom' && method === 'POST') {
     const b = await readJSON(req);
-    const ins = db.prepare('INSERT INTO bom_header (product_code, product_name, brand, notes) VALUES (?,?,?,?)');
-    const insItem = db.prepare('INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, unit, notes, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+    const ins = db.prepare('INSERT INTO bom_header (product_code, product_name, brand, notes, default_order_qty, finished_w, finished_h) VALUES (?,?,?,?,?,?,?)');
+    const insItem = db.prepare(`INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, unit, notes, sort_order,
+      material_type, paper_standard, paper_type, gsm, finished_w, finished_h, bleed, grip, loss_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)`);
     const txn = db.transaction(() => {
-      const r = ins.run(b.product_code, b.product_name||'', b.brand||'', b.notes||'');
+      const r = ins.run(b.product_code, b.product_name||'', b.brand||'', b.notes||'', b.default_order_qty||1000, b.finished_w||0, b.finished_h||0);
       const bomId = r.lastInsertRowid;
       (b.items||[]).forEach((it,i) => {
-        insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i);
+        insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i,
+          it.material_type||'IMPOSITION', it.paper_standard||'', it.paper_type||'', it.gsm||0, it.finished_w||0, it.finished_h||0, it.bleed??3, it.grip??10, it.loss_rate??5);
       });
       return bomId;
     });
@@ -6442,12 +6480,14 @@ async function handleRequest(req, res) {
     const bomId = parseInt(bomPut[1]);
     const b = await readJSON(req);
     const txn = db.transaction(() => {
-      if (b.product_name !== undefined) db.prepare('UPDATE bom_header SET product_name=?, brand=?, notes=?, updated_at=datetime(\'now\',\'localtime\') WHERE bom_id=?').run(b.product_name||'', b.brand||'', b.notes||'', bomId);
+      if (b.product_name !== undefined) db.prepare("UPDATE bom_header SET product_name=?, brand=?, notes=?, default_order_qty=?, finished_w=?, finished_h=?, updated_at=datetime('now','localtime') WHERE bom_id=?").run(b.product_name||'', b.brand||'', b.notes||'', b.default_order_qty||1000, b.finished_w||0, b.finished_h||0, bomId);
       if (b.items) {
         db.prepare('DELETE FROM bom_items WHERE bom_id=?').run(bomId);
-        const insItem = db.prepare('INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, unit, notes, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+        const insItem = db.prepare(`INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, unit, notes, sort_order,
+          material_type, paper_standard, paper_type, gsm, finished_w, finished_h, bleed, grip, loss_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)`);
         b.items.forEach((it,i) => {
-          insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i);
+          insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i,
+            it.material_type||'IMPOSITION', it.paper_standard||'', it.paper_type||'', it.gsm||0, it.finished_w||0, it.finished_h||0, it.bleed??3, it.grip??10, it.loss_rate??5);
         });
       }
     });

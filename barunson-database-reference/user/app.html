@@ -48,104 +48,147 @@ body {
   line-height: 1.6;
 }
 
-/* ===== TOPBAR (이카운트 스타일) ===== */
-.topbar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-  background: #1e293b;
-  height: 48px;
-  display: flex; align-items: center;
-  padding: 0 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+/* ===== SIDEBAR (Notion 스타일) ===== */
+.sidebar-nav {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 200;
+  width: 240px; background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-light);
+  display: flex; flex-direction: column;
+  overflow: hidden; transition: width .2s;
+  font-size: 13px;
 }
-.topbar-logo {
-  font-size: 15px; font-weight: 700; color: #fff;
-  cursor: pointer; padding-right: 24px; white-space: nowrap;
-  letter-spacing: -0.3px;
-}
-.topbar-logo .sub { font-size: 10px; color: #94a3b8; font-weight: 400; margin-left: 8px; }
-.topbar-nav {
-  display: flex; align-items: center; gap: 0; flex: 1; height: 100%;
-}
-.topbar-tab {
-  position: relative;
-  padding: 0 16px; height: 100%;
-  display: flex; align-items: center;
-  font-size: 13px; font-weight: 500; color: #94a3b8;
-  cursor: pointer; transition: all .15s; white-space: nowrap;
-  border-bottom: 2px solid transparent;
-}
-.topbar-tab:hover { color: #e2e8f0; background: rgba(255,255,255,0.06); }
-.topbar-tab.active { color: #fff; border-bottom-color: #3b82f6; background: rgba(255,255,255,0.08); }
-.topbar-tab .icon { margin-right: 5px; font-size: 14px; }
-.topbar-right {
-  display: flex; align-items: center; gap: 10px; margin-left: auto;
-  font-size: 11px; color: #94a3b8; white-space: nowrap;
-}
-.topbar-right .user-badge { background: rgba(59,130,246,0.2); color: #93c5fd; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; }
-.topbar-right .logout-btn { color: #f87171; cursor: pointer; font-weight: 500; margin-left: 6px; }
-.topbar-right .logout-btn:hover { text-decoration: underline; }
+.sidebar-nav.collapsed { width: 48px; }
+.sidebar-nav.collapsed .sb-hide { display: none !important; }
+.sidebar-nav.collapsed .sb-logo-text { display: none; }
+.sidebar-nav.collapsed .sb-toggle { transform: rotate(180deg); }
 
-/* ===== DROPDOWN MENU ===== */
-.mega-menu-overlay {
-  display: none; position: fixed; inset: 0; top: 48px; z-index: 150;
+.sb-header {
+  padding: 12px 12px 8px; display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--border-light);
 }
-.mega-menu-overlay.show { display: block; }
-.mega-menu {
-  display: none; position: absolute; top: 48px; z-index: 160;
-  background: #fff; border: 1px solid #e5e7eb;
-  border-radius: 0 0 8px 8px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-  padding: 6px 0; min-width: 220px; max-height: 70vh; overflow-y: auto;
+.sb-logo {
+  width: 24px; height: 24px; background: linear-gradient(135deg,#2F81F7,#1A6DE0);
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700; flex-shrink: 0;
 }
-.mega-menu.show { display: block; }
-.mega-menu .mm-item {
-  padding: 8px 16px; cursor: pointer;
-  display: flex; align-items: center; gap: 10px; transition: background .1s;
+.sb-logo-text { font-size: 14px; font-weight: 700; color: var(--text-primary); flex: 1; min-width: 0; }
+.sb-toggle {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 16px;
+  flex-shrink: 0; transition: all .15s;
 }
-.mega-menu .mm-item:hover { background: #f0f5ff; }
-.mega-menu .mm-item-icon {
-  width: 26px; height: 26px; border-radius: 5px;
-  display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
-}
-.mega-menu .mm-name { font-size: 13px; font-weight: 500; color: #1f2937; }
-.mega-menu .mm-desc { font-size: 10px; color: #9ca3af; margin-top: 1px; }
-.mega-menu .mm-origins { display: flex; gap: 3px; flex-shrink: 0; }
-.mega-menu .mm-origin { font-size: 9px; padding: 2px 6px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-.mega-menu .mm-o-kr { background: #dbeafe; color: #1d4ed8; }
-.mega-menu .mm-o-cn { background: #fee2e2; color: #dc2626; }
-.mega-menu .mm-o-gift { background: #ede9fe; color: #7c3aed; }
-.mega-menu .mm-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
-.mega-menu .mm-divider { height: 1px; background: #f1f5f9; margin: 4px 12px; }
+.sb-toggle:hover { background: var(--hover-bg); color: var(--text-primary); }
 
-/* OLD SIDEBAR HIDDEN */
-.sidebar { display: none !important; }
-.sidebar-overlay { display: none !important; }
+.sb-user {
+  padding: 8px 14px; display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.sb-user-role {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600;
+}
+
+.sb-search {
+  margin: 4px 10px 8px; padding: 5px 10px; border-radius: 4px;
+  background: var(--hover-bg); border: none; font-size: 12px; color: var(--text-secondary);
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  transition: background .1s;
+}
+.sb-search:hover { background: var(--active-bg); }
+.sb-search kbd { font-size: 10px; background: var(--bg); padding: 1px 4px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-muted); }
+
+.sb-section-label {
+  padding: 16px 14px 4px; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.sb-body { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+
+.sb-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 14px; margin: 1px 6px; border-radius: 4px;
+  cursor: pointer; transition: background .1s; color: var(--text-secondary);
+  font-size: 13px; white-space: nowrap; position: relative;
+}
+.sb-item:hover { background: var(--hover-bg); color: var(--text-primary); }
+.sb-item.active { background: var(--active-bg); color: var(--text-primary); font-weight: 600; }
+.sb-item .sb-icon { width: 20px; text-align: center; font-size: 14px; flex-shrink: 0; opacity: 0.7; }
+.sb-item .sb-star {
+  position: absolute; right: 8px; opacity: 0; font-size: 12px; color: var(--text-muted);
+  transition: opacity .1s;
+}
+.sb-item:hover .sb-star { opacity: 1; }
+.sb-item .sb-star.starred { opacity: 1; color: #d97706; }
+.sb-item .sb-badge { margin-left: auto; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+
+.sb-cat {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 14px; margin: 1px 6px; border-radius: 4px;
+  cursor: pointer; transition: background .1s; color: var(--text-secondary);
+  font-size: 13px; font-weight: 500; user-select: none;
+}
+.sb-cat:hover { background: var(--hover-bg); }
+.sb-cat .sb-arrow { font-size: 10px; transition: transform .15s; color: var(--text-muted); width: 16px; text-align: center; }
+.sb-cat .sb-arrow.open { transform: rotate(90deg); }
+.sb-cat-items { overflow: hidden; transition: max-height .2s; }
+.sb-cat-items.collapsed { max-height: 0 !important; }
+.sb-cat-items .sb-item { padding-left: 32px; }
+
+.sb-footer {
+  padding: 8px 10px; border-top: 1px solid var(--border-light);
+  display: flex; align-items: center; gap: 6px;
+}
+.sb-footer-btn {
+  flex: 1; padding: 5px 8px; border-radius: 4px; font-size: 12px;
+  color: var(--text-secondary); cursor: pointer; text-align: center;
+  transition: background .1s; border: none; background: none;
+}
+.sb-footer-btn:hover { background: var(--hover-bg); color: var(--text-primary); }
+
+/* OLD TOPBAR/MEGA MENU HIDDEN */
+.topbar { display: none !important; }
+.mega-menu-overlay { display: none !important; }
+.mega-menu { display: none !important; }
 .mobile-menu-btn { display: none !important; }
 
 /* ===== MAIN CONTENT ===== */
 .main {
-  margin-left: 0;
-  margin-top: 48px;
+  margin-left: 240px;
+  margin-top: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 48px);
+  min-height: 100vh;
+  transition: margin-left .2s;
 }
+.sidebar-nav.collapsed ~ .main { margin-left: 48px; }
 
 .page-header {
   background: var(--surface);
-  padding: 20px 40px 16px;
+  padding: 12px 32px;
   border-bottom: 1px solid var(--border-light);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  position: sticky; top: 0; z-index: 100;
 }
+.page-header .breadcrumb {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 2px;
+}
+.page-header .breadcrumb a { color: var(--text-secondary); text-decoration: none; }
+.page-header .breadcrumb a:hover { color: var(--text-primary); }
 .page-header h2 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
+  display: flex; align-items: center; gap: 8px;
 }
+.page-header h2 .fav-toggle {
+  font-size: 16px; cursor: pointer; color: var(--text-muted); transition: color .1s;
+}
+.page-header h2 .fav-toggle.starred { color: #d97706; }
+.page-header h2 .fav-toggle:hover { color: #d97706; }
 .page-header .header-right {
   font-size: 11px;
   color: var(--text-muted);
@@ -153,7 +196,7 @@ body {
 
 .page-content {
   flex: 1;
-  padding: 24px 40px;
+  padding: 24px 32px;
   overflow-y: auto;
   background: var(--bg);
 }
@@ -998,6 +1041,22 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
 /* ===== MRP PAGE ===== */
 .mrp-tab { display: none; }
 .mrp-tab.active { display: block; }
+.bom-tab { display: none; }
+.bom-tab.active { display: block; }
+.bom-mat-card { background:var(--bg-primary); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:10px; position:relative; }
+.bom-mat-card:hover { border-color:#93c5fd; }
+.bom-mat-badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; letter-spacing:0.5px; }
+.bom-mat-badge.imposition { background:#dbeafe; color:#1e40af; }
+.bom-mat-badge.fixed { background:#fef3c7; color:#92400e; }
+.bom-mat-badge.ratio { background:#f3e8ff; color:#6b21a8; }
+.bom-mat-remove { position:absolute; top:8px; right:10px; cursor:pointer; color:var(--text-muted); font-size:14px; }
+.bom-mat-remove:hover { color:var(--urgent); }
+.bom-proc-card { display:flex; gap:10px; align-items:center; background:var(--bg-primary); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:8px; }
+.bom-proc-card:hover { border-color:#93c5fd; }
+.bom-proc-remove { cursor:pointer; color:var(--text-muted); font-size:14px; margin-left:auto; }
+.bom-proc-remove:hover { color:var(--urgent); }
+.bom-sim-row { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); font-size:13px; }
+.bom-sim-row:last-child { border-bottom:none; }
 .bom-proc-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
 .bom-proc-row input, .bom-proc-row select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; outline: none; }
 .bom-proc-row .bp-remove { cursor: pointer; color: var(--urgent); font-size: 16px; padding: 6px; }
@@ -1263,41 +1322,53 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
   </div>
 </div>
 
-<!-- ===== TOPBAR (이카운트 스타일) ===== -->
-<div class="topbar" id="topbar">
-  <span class="topbar-logo" onclick="showPage('dashboard');closeMegaMenu()">바른컴퍼니<span class="sub" id="guideDesc">발주기준: 3개월 매출/3</span></span>
-  <nav class="topbar-nav">
-    <div class="topbar-tab" onclick="showPage('dashboard');closeMegaMenu()" data-page="dashboard"><span class="icon">🏠</span>홈</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('purchase')" data-cat="purchase"><span class="icon">🛒</span>구매</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('sales')" data-cat="sales"><span class="icon">💰</span>판매</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('stock')" data-cat="stock"><span class="icon">📦</span>재고</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('production')" data-cat="production"><span class="icon">🏭</span>생산</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('accounting')" data-cat="accounting"><span class="icon">🧾</span>회계</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('master')" data-cat="master"><span class="icon">📋</span>기준정보</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('analysis')" data-cat="analysis"><span class="icon">📈</span>경영분석</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('work')" data-cat="work"><span class="icon">✅</span>업무</div>
-    <div class="topbar-tab" onclick="toggleMegaCat('system')" data-cat="system"><span class="icon">🔧</span>시스템</div>
-  </nav>
-  <div class="topbar-right">
-    <span id="erpSyncBadge2" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500"></span>
-    <div id="userInfoBar" style="display:none">
-      <span id="currentUserBadge" class="user-badge"></span>
-      <span id="currentUserName" style="color:#cbd5e1;margin-left:3px"></span>
-      <span class="logout-btn" onclick="doLogout()">로그아웃</span>
-    </div>
-    <span id="dateInfo" style="color:#64748b"></span>
+<!-- ===== SIDEBAR (Notion 스타일) ===== -->
+<nav class="sidebar-nav" id="sidebarNav">
+  <div class="sb-header" onclick="showPage('dashboard')" style="cursor:pointer" title="홈으로">
+    <div class="sb-logo">B</div>
+    <span class="sb-logo-text sb-hide">바른컴퍼니</span>
+    <div class="sb-toggle sb-hide" onclick="event.stopPropagation();toggleSidebarCollapse()" title="사이드바 접기">&#9776;</div>
   </div>
-</div>
+  <div class="sb-user sb-hide" id="userInfoBar" style="display:none">
+    <span id="currentUserName" style="flex:1"></span>
+    <span id="currentUserBadge" class="sb-user-role"></span>
+  </div>
+  <div class="sb-search sb-hide" onclick="openCmdK()" title="Ctrl+K">
+    <span>🔍</span> <span style="flex:1">검색...</span> <kbd>Ctrl+K</kbd>
+  </div>
+  <div class="sb-body sb-hide" id="sidebarBody">
+    <!-- 즐겨찾기 -->
+    <div class="sb-section-label">즐겨찾기</div>
+    <div id="sbFavorites"><div class="sb-item" style="color:var(--text-muted);font-size:12px;padding-left:20px">⭐ 메뉴에서 추가하세요</div></div>
+    <!-- 최근 방문 -->
+    <div class="sb-section-label">최근 방문</div>
+    <div id="sbRecent"><div class="sb-item" style="color:var(--text-muted);font-size:12px;padding-left:20px">방문 기록 없음</div></div>
+    <!-- 메뉴 카테고리 (동적 생성) -->
+    <div id="sbMenus"></div>
+  </div>
+  <div class="sb-footer sb-hide">
+    <button class="sb-footer-btn" onclick="showPage('settings')">⚙️ 설정</button>
+    <button class="sb-footer-btn" onclick="doLogout()" style="color:var(--urgent)">로그아웃</button>
+  </div>
+</nav>
 
-<!-- ===== MEGA MENU ===== -->
-<div class="mega-menu-overlay" id="megaOverlay" onclick="closeMegaMenu()"></div>
-<div class="mega-menu" id="megaMenu" onclick="event.stopPropagation()"></div>
+<!-- 이전 호환: topbar/megamenu 숨김 요소 유지 -->
+<div class="topbar" id="topbar" style="display:none"></div>
+<div class="mega-menu-overlay" id="megaOverlay" style="display:none"></div>
+<div class="mega-menu" id="megaMenu" style="display:none"></div>
+<span id="erpSyncBadge2" style="display:none"></span>
+<span id="dateInfo" style="display:none"></span>
 
 <script>
-var _megaOpen = null;
+var _megaOpen = null; // legacy compat
+var _sidebarCats = {}; // {catKey: collapsed boolean}
+var _currentPage = 'dashboard';
+var _favorites = []; // 로그인 후 loadFavorites()로 로드
+var _recentPages = JSON.parse(localStorage.getItem('recent_pages')||'[]');
+
 var _megaData = {
   purchase: {
-    title: '구매',
+    title: '구매관리',
     items: [
       {icon:'🔄',bg:'#eef2ff',fg:'#6366f1',name:'자동발주',desc:'전략발주 + 단가 최적화',page:'auto-order',origins:['한국','더기프트']},
       {icon:'📝',bg:'#eff6ff',fg:'#2563eb',name:'발주생성',desc:'수동 발주 + 엑셀',page:'create-po',origins:['한국','중국','더기프트']},
@@ -1310,7 +1381,7 @@ var _megaData = {
     ]
   },
   sales: {
-    title: '판매',
+    title: '판매관리',
     items: [
       {icon:'💰',bg:'#fef3c7',fg:'#d97706',name:'통합매출',desc:'전체 매출 통합 현황',page:'sales'},
       {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출',page:'sales-barun'},
@@ -1321,7 +1392,7 @@ var _megaData = {
     ]
   },
   stock: {
-    title: '재고',
+    title: '재고관리',
     items: [
       {icon:'📦',bg:'#fef2f2',fg:'#ef4444',name:'재고현황',desc:'XERP 실시간 재고',page:'inventory',badgeId:'qmInventory'},
       {icon:'🏢',bg:'#ecfdf5',fg:'#059669',name:'창고별 재고',desc:'창고별 현황/이동/조정',page:'warehouse'},
@@ -1329,7 +1400,7 @@ var _megaData = {
     ]
   },
   production: {
-    title: '생산',
+    title: '생산관리',
     items: [
       {icon:'🎬',bg:'#fef3c7',fg:'#d97706',name:'생산요청',desc:'생산 워크플로우',page:'production-req'},
       {icon:'🎁',bg:'#fce7f3',fg:'#db2777',name:'생산재고',desc:'더기프트 세트 재고',page:'production-stock'},
@@ -1337,7 +1408,7 @@ var _megaData = {
     ]
   },
   accounting: {
-    title: '회계',
+    title: '회계관리',
     items: [
       {icon:'🧾',bg:'#f5f5f4',fg:'#78716c',name:'거래명세서',desc:'월별 명세서 발행',page:'invoices'},
       {icon:'📊',bg:'#fff1f2',fg:'#e11d48',name:'원재료 매입',desc:'매입 현황 분석',page:'mat-purchase'},
@@ -1346,11 +1417,11 @@ var _megaData = {
     ]
   },
   master: {
-    title: '기준정보',
+    title: '기준정보관리',
     items: [
       {icon:'👥',bg:'#fef3c7',fg:'#b45309',name:'거래처 관리',desc:'업체 정보 + 포털',page:'vendors',badgeId:'qmVendors'},
       {icon:'📦',bg:'#f5f3ff',fg:'#7c3aed',name:'품목관리',desc:'품목 마스터',page:'product-mgmt',badgeId:'qmProducts'},
-      {icon:'🧩',bg:'#ede9fe',fg:'#6d28d9',name:'BOM 관리',desc:'자재명세서 관리',page:'bom'},
+      {icon:'🧩',bg:'#ede9fe',fg:'#6d28d9',name:'제품공정',desc:'제품별 후공정 관리',page:'bom'},
       {icon:'💰',bg:'#fff7ed',fg:'#c2410c',name:'후공정 단가',desc:'단가 관리',page:'post-process'}
     ]
   },
@@ -1364,7 +1435,7 @@ var _megaData = {
     ]
   },
   work: {
-    title: '업무',
+    title: '업무관리',
     items: [
       {icon:'✅',bg:'#ecfdf5',fg:'#10b981',name:'업무관리',desc:'등록 + 추적 + 협업',page:'tasks',badgeId:'qmTaskTodo'},
       {icon:'📓',bg:'#fef9c3',fg:'#a16207',name:'미팅일지',desc:'회의 기록 + 공유',page:'notes'},
@@ -1372,7 +1443,7 @@ var _megaData = {
     ]
   },
   system: {
-    title: '시스템',
+    title: '시스템관리',
     items: [
       {icon:'⚙',bg:'#f1f5f9',fg:'#64748b',name:'설정',desc:'시스템 설정',page:'settings'},
       {icon:'👤',bg:'#fef3c7',fg:'#92400e',name:'사용자 관리',desc:'권한 + 계정 관리',page:'user-mgmt'},
@@ -1381,57 +1452,246 @@ var _megaData = {
   }
 };
 
-function toggleMegaCat(cat) {
-  if (_megaOpen === cat) { closeMegaMenu(); return; }
-  _megaOpen = cat;
-  document.querySelectorAll('.topbar-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
-  var d = _megaData[cat]; if(!d) return;
-  var h = '';
-  d.items.forEach(function(it, idx) {
-    if (idx > 0) h += '<div class="mm-divider"></div>';
-    var oc = it.clickOrigin ? "showPage('"+it.page+"',{origin:'"+it.clickOrigin+"'});closeMegaMenu()" : "showPage('"+it.page+"');closeMegaMenu()";
-    h += '<div class="mm-item" data-page="'+it.page+'" onclick="'+oc+'">';
-    h += '<div class="mm-item-icon" style="background:'+it.bg+';color:'+it.fg+'">'+it.icon+'</div>';
-    h += '<div style="flex:1;min-width:0"><div class="mm-name">'+it.name+'</div><div class="mm-desc">'+it.desc+'</div></div>';
-    if (it.origins) {
-      h += '<div class="mm-origins">';
-      it.origins.forEach(function(o) {
-        var cls = o==='한국'?'mm-o-kr':o==='중국'?'mm-o-cn':'mm-o-gift';
-        var lbl = o==='한국'?'KR':o==='중국'?'CN':'Gift';
-        h += '<span class="mm-origin '+cls+'" onclick="event.stopPropagation();showPage(\''+it.page+'\',{origin:\''+o+'\'});closeMegaMenu()">'+lbl+'</span>';
-      });
+// ===== SIDEBAR RENDERING =====
+function renderSidebar() {
+  var container = document.getElementById('sbMenus');
+  if (!container) return;
+  var h = '<div class="sb-section-label" style="margin-top:8px">메뉴</div>';
+  var catOrder = ['purchase','sales','stock','production','accounting','master','analysis','work','system'];
+  var catIcons = {purchase:'🛒',sales:'💰',stock:'📦',production:'🏭',accounting:'🧾',master:'📋',analysis:'📈',work:'✅',system:'🔧'};
+
+  catOrder.forEach(function(catKey) {
+    var cat = _megaData[catKey]; if (!cat) return;
+    // 권한 체크: 카테고리 내 접근 가능 항목이 하나도 없으면 숨김
+    var hasAccess = cat.items.some(function(it) {
+      if (typeof canAccess !== 'function') return true;
+      if (it.page === 'user-mgmt') return currentAuthUser && currentAuthUser.role === 'admin';
+      return canAccess(it.page);
+    });
+    if (!hasAccess) return;
+
+    var isOpen = !_sidebarCats[catKey];
+    h += '<div class="sb-cat" onclick="toggleSbCat(\''+catKey+'\')">';
+    h += '<span class="sb-arrow '+(isOpen?'open':'')+'">&#9654;</span>';
+    h += '<span>'+catIcons[catKey]+' '+cat.title+'</span>';
+    h += '</div>';
+    h += '<div class="sb-cat-items'+(isOpen?'':' collapsed')+'" id="sbCat_'+catKey+'" style="max-height:'+(isOpen?'500px':'0')+'">';
+    cat.items.forEach(function(it) {
+      // 권한 체크
+      if (typeof canAccess === 'function') {
+        if (it.page === 'user-mgmt' && !(currentAuthUser && currentAuthUser.role === 'admin')) return;
+        if (!canAccess(it.page)) return;
+      }
+      var isFav = _favorites.indexOf(it.page) >= 0;
+      h += '<div class="sb-item" data-page="'+it.page+'" onclick="showPage(\''+it.page+'\')">';
+      h += '<span class="sb-icon">'+it.icon+'</span>';
+      h += '<span>'+it.name+'</span>';
+      if (it.badgeId) h += '<span class="sb-badge" id="'+it.badgeId+'" style="background:'+it.bg+';color:'+it.fg+'"></span>';
+      h += '<span class="sb-star'+(isFav?' starred':'')+'" onclick="event.stopPropagation();toggleFavFromMenu(\''+it.page+'\')" title="즐겨찾기">'+(isFav?'★':'☆')+'</span>';
       h += '</div>';
-    }
-    if (it.badgeId) h += '<span class="mm-badge" id="'+it.badgeId+'" style="background:'+it.bg+';color:'+it.fg+'">-</span>';
+    });
     h += '</div>';
   });
-  var menu = document.getElementById('megaMenu');
-  menu.innerHTML = h;
-  // 권한 기반 메뉴 필터링
-  if (typeof canAccess === 'function') {
-    menu.querySelectorAll('[data-page]').forEach(function(el) {
-      var p = el.getAttribute('data-page');
-      if (p === 'user-mgmt') { el.style.display = (currentAuthUser && currentAuthUser.role === 'admin') ? '' : 'none'; }
-      else { el.style.display = canAccess(p) ? '' : 'none'; }
-    });
-  }
-  // Position dropdown under the clicked tab
-  var tab = document.querySelector('.topbar-tab[data-cat="'+cat+'"]');
-  if (tab) {
-    var rect = tab.getBoundingClientRect();
-    menu.style.left = rect.left + 'px';
-    menu.style.right = 'auto';
-  }
-  menu.classList.add('show');
-  document.getElementById('megaOverlay').classList.add('show');
+  container.innerHTML = h;
+  updateSidebarActive();
 }
 
-function closeMegaMenu() {
-  _megaOpen = null;
-  document.getElementById('megaMenu').classList.remove('show');
-  document.getElementById('megaOverlay').classList.remove('show');
-  document.querySelectorAll('.topbar-tab[data-cat]').forEach(t => t.classList.remove('active'));
+function toggleSbCat(catKey) {
+  _sidebarCats[catKey] = !_sidebarCats[catKey];
+  var el = document.getElementById('sbCat_'+catKey);
+  if (el) {
+    el.classList.toggle('collapsed');
+    el.style.maxHeight = el.classList.contains('collapsed') ? '0' : '500px';
+  }
+  var arrow = el?.previousElementSibling?.querySelector('.sb-arrow');
+  if (arrow) arrow.classList.toggle('open');
 }
+
+function updateSidebarActive() {
+  document.querySelectorAll('.sb-item[data-page]').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.page === _currentPage);
+  });
+}
+
+function toggleSidebarCollapse() {
+  document.getElementById('sidebarNav').classList.toggle('collapsed');
+}
+
+// ===== FAVORITES =====
+function getFavKey() { return 'favorites_'+((typeof currentAuthUser!=='undefined'&&currentAuthUser)?currentAuthUser.user_id:'0'); }
+function saveFavorites() {
+  localStorage.setItem(getFavKey(), JSON.stringify(_favorites));
+  renderFavorites();
+  renderDashFavorites();
+  // 서버 동기화 (비동기, 실패해도 무시)
+  var token = localStorage.getItem('auth_token');
+  if (token) {
+    fetch('/api/auth/favorites', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ favorites: _favorites })
+    }).catch(function(){});
+  }
+}
+
+function toggleFavFromMenu(pageId) {
+  var idx = _favorites.indexOf(pageId);
+  if (idx >= 0) _favorites.splice(idx, 1);
+  else _favorites.push(pageId);
+  saveFavorites();
+  renderSidebar();
+}
+
+function toggleFavorite() {
+  if (!_currentPage || _currentPage === 'dashboard') return;
+  toggleFavFromMenu(_currentPage);
+  updateFavToggle();
+}
+
+function updateFavToggle() {
+  var el = document.getElementById('favToggle');
+  if (!el) return;
+  if (_currentPage === 'dashboard') { el.style.display = 'none'; return; }
+  el.style.display = '';
+  var isFav = _favorites.indexOf(_currentPage) >= 0;
+  el.textContent = isFav ? '★' : '☆';
+  el.classList.toggle('starred', isFav);
+}
+
+function renderFavorites() {
+  var el = document.getElementById('sbFavorites');
+  if (!el) return;
+  if (!_favorites.length) { el.innerHTML = '<div class="sb-item" style="color:var(--text-muted);font-size:12px;padding-left:20px">메뉴의 ☆ 클릭으로 추가</div>'; return; }
+  var h = '';
+  _favorites.forEach(function(pageId) {
+    var title = (pageTitles && pageTitles[pageId]) || pageId;
+    // find icon from _megaData
+    var icon = '📄';
+    Object.keys(_megaData).forEach(function(cat) {
+      _megaData[cat].items.forEach(function(it) { if (it.page === pageId) icon = it.icon; });
+    });
+    h += '<div class="sb-item" data-page="'+pageId+'" onclick="showPage(\''+pageId+'\')">';
+    h += '<span class="sb-icon">'+icon+'</span><span>'+title+'</span>';
+    h += '</div>';
+  });
+  el.innerHTML = h;
+}
+
+// ===== DASHBOARD FAVORITES (홈 상단 즐겨찾기) =====
+function renderDashFavorites() {
+  // 홈 페이지 내 즐겨찾기
+  var el = document.getElementById('dashFavorites');
+  if (el) {
+    if (!_favorites.length) {
+      el.innerHTML = '<div class="dash-fav"><span class="dash-fav-label">⭐ 즐겨찾기</span><span class="dash-fav-empty">사이드바 메뉴의 ☆ 를 클릭하여 즐겨찾기를 추가하세요</span></div>';
+    } else {
+      var h = '<div class="dash-fav"><span class="dash-fav-label">⭐ 즐겨찾기</span>';
+      _favorites.forEach(function(pageId) {
+        var title = (pageTitles && pageTitles[pageId]) || pageId;
+        var icon = '📄';
+        Object.keys(_megaData).forEach(function(cat) {
+          _megaData[cat].items.forEach(function(it) { if (it.page === pageId) icon = it.icon; });
+        });
+        h += '<div class="dash-fav-chip" onclick="showPage(\''+pageId+'\')"><span class="df-icon">'+icon+'</span>'+esc(title)+'</div>';
+      });
+      h += '</div>';
+      el.innerHTML = h;
+    }
+  }
+  // 페이지 헤더 옆 즐겨찾기 칩 (홈일 때만 표시)
+  renderHeaderFavorites();
+}
+
+function renderHeaderFavorites() {
+  var hf = document.getElementById('headerFavorites');
+  if (!hf) return;
+  if (!_favorites.length) { hf.innerHTML = ''; return; }
+  var links = '<span style="color:var(--text-muted);font-size:11px;margin-right:2px">⭐</span>';
+  _favorites.forEach(function(pageId, i) {
+    if (i > 0) links += '<span style="color:var(--border);margin:0 2px;font-size:10px">·</span>';
+    var isCurrent = pageId === _currentPage;
+    var title = (pageTitles && pageTitles[pageId]) || pageId;
+    links += '<a href="#" onclick="showPage(\''+pageId+'\');return false" style="font-size:11px;text-decoration:none;color:'+(isCurrent?'var(--primary)':'var(--text-secondary)')+';font-weight:'+(isCurrent?'600':'400')+';white-space:nowrap" title="'+esc(title)+'">'+esc(title)+'</a>';
+  });
+  hf.innerHTML = links;
+}
+
+// ===== RECENT PAGES =====
+function addRecentPage(pageId) {
+  if (pageId === 'dashboard' || pageId === 'settings') return;
+  _recentPages = _recentPages.filter(function(p) { return p !== pageId; });
+  _recentPages.unshift(pageId);
+  if (_recentPages.length > 10) _recentPages = _recentPages.slice(0, 10);
+  localStorage.setItem('recent_pages', JSON.stringify(_recentPages));
+  renderRecent();
+}
+
+function renderRecent() {
+  var el = document.getElementById('sbRecent');
+  if (!el) return;
+  var show = _recentPages.slice(0, 5);
+  if (!show.length) { el.innerHTML = '<div class="sb-item" style="color:var(--text-muted);font-size:12px;padding-left:20px">방문 기록 없음</div>'; return; }
+  var h = '';
+  show.forEach(function(pageId) {
+    var title = (pageTitles && pageTitles[pageId]) || pageId;
+    h += '<div class="sb-item" data-page="'+pageId+'" onclick="showPage(\''+pageId+'\')">';
+    h += '<span class="sb-icon">🕐</span><span>'+title+'</span>';
+    h += '</div>';
+  });
+  el.innerHTML = h;
+}
+
+// ===== CMD+K SEARCH =====
+function openCmdK() {
+  var existing = document.getElementById('cmdkOverlay');
+  if (existing) { existing.remove(); return; }
+  var overlay = document.createElement('div');
+  overlay.id = 'cmdkOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding-top:20vh';
+  overlay.onclick = function(e) { if(e.target===overlay) overlay.remove(); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:10px;box-shadow:0 16px 48px rgba(0,0,0,0.2);width:480px;max-height:400px;overflow:hidden';
+  box.innerHTML = '<input id="cmdkInput" type="text" placeholder="페이지 검색..." style="width:100%;padding:14px 18px;border:none;font-size:15px;outline:none;font-family:inherit;border-bottom:1px solid var(--border-light)">';
+  box.innerHTML += '<div id="cmdkResults" style="max-height:320px;overflow-y:auto;padding:4px 0"></div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  var input = document.getElementById('cmdkInput');
+  input.focus();
+  input.oninput = function() { renderCmdKResults(input.value); };
+  renderCmdKResults('');
+}
+
+function renderCmdKResults(q) {
+  var el = document.getElementById('cmdkResults');
+  if (!el) return;
+  q = q.toLowerCase();
+  var results = [];
+  Object.keys(_megaData).forEach(function(catKey) {
+    var cat = _megaData[catKey];
+    cat.items.forEach(function(it) {
+      if (typeof canAccess === 'function' && !canAccess(it.page)) return;
+      if (q && it.name.toLowerCase().indexOf(q) < 0 && it.page.toLowerCase().indexOf(q) < 0 && (it.desc||'').toLowerCase().indexOf(q) < 0) return;
+      results.push({icon:it.icon, name:it.name, desc:it.desc, page:it.page, cat:cat.title});
+    });
+  });
+  if (!results.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">결과 없음</div>'; return; }
+  el.innerHTML = results.map(function(r) {
+    return '<div style="padding:8px 18px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s" onmouseover="this.style.background=\'var(--hover-bg)\'" onmouseout="this.style.background=\'\'" onclick="showPage(\''+r.page+'\');document.getElementById(\'cmdkOverlay\').remove()">'
+      + '<span style="font-size:16px">'+r.icon+'</span>'
+      + '<div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--text-primary)">'+r.name+'</div><div style="font-size:11px;color:var(--text-muted)">'+r.cat+' · '+r.desc+'</div></div>'
+      + '</div>';
+  }).join('');
+}
+
+// Ctrl+K / Cmd+K shortcut
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openCmdK(); }
+  if (e.key === 'Escape') { var ov = document.getElementById('cmdkOverlay'); if(ov) ov.remove(); }
+});
+
+// Legacy compat
+function toggleMegaCat(cat) { /* no-op, sidebar handles this */ }
+function closeMegaMenu() { /* no-op */ }
 </script>
 
 <!-- ===== MAIN ===== -->
@@ -1439,7 +1699,15 @@ function closeMegaMenu() {
 
 <!-- Page Header -->
 <div class="page-header">
-  <h2 id="pageTitle">홈</h2>
+  <div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="breadcrumb" id="breadcrumb" style="margin:0"><a href="#" onclick="showPage('dashboard');return false">홈</a></div>
+      <div id="headerFavorites" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-left:4px"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 id="pageTitle" style="margin:0">홈 <span class="fav-toggle" id="favToggle" onclick="toggleFavorite()" title="즐겨찾기">☆</span></h2>
+    </div>
+  </div>
   <div class="header-right" style="display:flex;align-items:center;gap:10px">
     <span id="erpSyncBadge" style="display:none;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap"></span>
     <button class="btn btn-sm" onclick="syncDDProducts()" id="ddSyncBtn" style="background:#e11d48;color:#fff;border-color:#e11d48">DD 동기화</button>
@@ -1478,6 +1746,19 @@ function closeMegaMenu() {
     .hm-o-gift { background: #ede9fe; color: #7c3aed; }
     @media(max-width:900px) { .hm-wrap { grid-template-columns: 1fr; } }
 
+    /* 즐겨찾기 바로가기 */
+    .dash-fav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .dash-fav-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+    .dash-fav-chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: var(--text-primary); cursor: pointer;
+      transition: all .15s;
+    }
+    .dash-fav-chip:hover { background: var(--hover-bg); border-color: var(--primary); color: var(--primary); }
+    .dash-fav-chip .df-icon { font-size: 14px; }
+    .dash-fav-empty { font-size: 12px; color: var(--text-muted); padding: 6px 0; }
+
     /* 마감현황 스프레드시트 스타일 */
     .cls-table { width:100%; border-collapse:collapse; font-size:12px; font-family:'Pretendard',sans-serif; }
     .cls-table th, .cls-table td { border:1px solid #d1d5db; padding:5px 8px; text-align:right; white-space:nowrap; color:#111; }
@@ -1497,32 +1778,13 @@ function closeMegaMenu() {
     .cls-info { font-size:11px; color:#111; margin-bottom:12px; padding:6px 12px; background:#fff; border:1px solid #d1d5db; border-radius:6px; }
   </style>
 
-  <div class="hm-wrap">
-    <!-- 재고 -->
-    <div class="hm-card">
-      <div class="hm-card-title">재고</div>
-      <div class="hm-item" data-page="inventory" onclick="showPage('inventory')">
-        <div class="hm-icon" style="background:#fef2f2;color:#ef4444">📦</div>
-        <div><div class="hm-name">재고현황</div><div class="hm-desc">XERP 실시간 재고</div></div>
-        <div class="hm-right"><span class="hm-badge" style="background:#fef2f2;color:#ef4444" id="qmInventory">-</span></div>
-      </div>
-      <div class="hm-item" data-page="shipments" onclick="showPage('shipments')">
-        <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🚚</div>
-        <div><div class="hm-name">입출고 현황</div><div class="hm-desc">입고/출고 내역 조회</div></div>
-      </div>
-      <div class="hm-item" data-page="closing" onclick="showPage('closing')">
-        <div class="hm-icon" style="background:#f0f9ff;color:#0284c7">📑</div>
-        <div><div class="hm-name">마감현황</div><div class="hm-desc">월별 매입 마감 보고</div></div>
-      </div>
-      <div class="hm-item" data-page="warehouse" onclick="showPage('warehouse')">
-        <div class="hm-icon" style="background:#ecfdf5;color:#059669">🏢</div>
-        <div><div class="hm-name">창고별 재고</div><div class="hm-desc">창고별 재고 현황/이동</div></div>
-      </div>
-    </div>
+  <!-- 즐겨찾기 바로가기 (홈 상단) -->
+  <div id="dashFavorites" style="margin-bottom:16px"></div>
 
-    <!-- 발주 -->
+  <div class="hm-wrap">
+    <!-- 구매관리 -->
     <div class="hm-card">
-      <div class="hm-card-title">발주</div>
+      <div class="hm-card-title">구매관리</div>
       <div class="hm-item" data-page="auto-order" onclick="showPage('auto-order')">
         <div class="hm-icon" style="background:#eef2ff;color:#6366f1">🔄</div>
         <div><div class="hm-name">자동발주</div><div class="hm-desc">전략발주 + 단가 최적화</div></div>
@@ -1554,14 +1816,9 @@ function closeMegaMenu() {
         <div class="hm-icon" style="background:#fef2f2;color:#dc2626">🚢</div>
         <div><div class="hm-name">중국선적</div><div class="hm-desc">交期表 + BL추적</div></div>
       </div>
-    </div>
-
-    <!-- 입고 -->
-    <div class="hm-card">
-      <div class="hm-card-title">입고</div>
       <div class="hm-item" data-page="delivery-schedule" onclick="showPage('delivery-schedule')">
         <div class="hm-icon" style="background:#ecfdf5;color:#0d9488">📅</div>
-        <div><div class="hm-name">입고일정</div><div class="hm-desc">완료 기준 입고 예정</div></div>
+        <div><div class="hm-name">입고일정</div><div class="hm-desc">입고 예정 일정</div></div>
         <div class="hm-right"><div class="hm-origins">
           <span class="hm-origin hm-o-kr" onclick="event.stopPropagation();showPage('delivery-schedule',{origin:'한국'})">KR</span>
           <span class="hm-origin hm-o-cn" onclick="event.stopPropagation();showPage('delivery-schedule',{origin:'중국'})">CN</span>
@@ -1571,11 +1828,6 @@ function closeMegaMenu() {
       <div class="hm-item" data-page="receipts" onclick="showPage('receipts')">
         <div class="hm-icon" style="background:#f0fdf4;color:#059669">📥</div>
         <div><div class="hm-name">입고관리</div><div class="hm-desc">수령 처리 + 불량 기록</div></div>
-        <div class="hm-right"><div class="hm-origins">
-          <span class="hm-origin hm-o-kr" onclick="event.stopPropagation();showPage('receipts',{origin:'한국'})">KR</span>
-          <span class="hm-origin hm-o-cn" onclick="event.stopPropagation();showPage('receipts',{origin:'중국'})">CN</span>
-          <span class="hm-origin hm-o-gift" onclick="event.stopPropagation();showPage('receipts',{origin:'더기프트'})">Gift</span>
-        </div></div>
       </div>
       <div class="hm-item" data-page="os-register" onclick="showPage('os-register')">
         <div class="hm-icon" style="background:#f5f3ff;color:#8b5cf6">🏷</div>
@@ -1583,9 +1835,56 @@ function closeMegaMenu() {
       </div>
     </div>
 
-    <!-- 생산 -->
+    <!-- 판매관리 -->
     <div class="hm-card">
-      <div class="hm-card-title">생산</div>
+      <div class="hm-card-title">판매관리</div>
+      <div class="hm-item" data-page="sales" onclick="showPage('sales')">
+        <div class="hm-icon" style="background:#fef3c7;color:#d97706">💰</div>
+        <div><div class="hm-name">통합매출</div><div class="hm-desc">전체 매출 통합 현황</div></div>
+      </div>
+      <div class="hm-item" data-page="sales-barun" onclick="showPage('sales-barun')">
+        <div class="hm-icon" style="background:#dbeafe;color:#2563eb">🏢</div>
+        <div><div class="hm-name">바른손매출</div><div class="hm-desc">바른손(XERP) 매출</div></div>
+      </div>
+      <div class="hm-item" data-page="sales-dd" onclick="showPage('sales-dd')">
+        <div class="hm-icon" style="background:#fce7f3;color:#db2777">💳</div>
+        <div><div class="hm-name">DD매출</div><div class="hm-desc">디얼디어 매출</div></div>
+      </div>
+      <div class="hm-item" data-page="sales-gift" onclick="showPage('sales-gift')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#059669">🎁</div>
+        <div><div class="hm-name">더기프트매출</div><div class="hm-desc">답례품 매출</div></div>
+      </div>
+      <div class="hm-item" data-page="customer-orders" onclick="showPage('customer-orders')">
+        <div class="hm-icon" style="background:#f5f3ff;color:#7c3aed">🛒</div>
+        <div><div class="hm-name">고객주문</div><div class="hm-desc">주문 조회/현황</div></div>
+      </div>
+      <div class="hm-item" data-page="shipping" onclick="showPage('shipping')">
+        <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🚛</div>
+        <div><div class="hm-name">배송추적</div><div class="hm-desc">배송 현황/추적</div></div>
+      </div>
+    </div>
+
+    <!-- 재고관리 -->
+    <div class="hm-card">
+      <div class="hm-card-title">재고관리</div>
+      <div class="hm-item" data-page="inventory" onclick="showPage('inventory')">
+        <div class="hm-icon" style="background:#fef2f2;color:#ef4444">📦</div>
+        <div><div class="hm-name">재고현황</div><div class="hm-desc">XERP 실시간 재고</div></div>
+        <div class="hm-right"><span class="hm-badge" style="background:#fef2f2;color:#ef4444" id="qmInventory">-</span></div>
+      </div>
+      <div class="hm-item" data-page="warehouse" onclick="showPage('warehouse')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#059669">🏢</div>
+        <div><div class="hm-name">창고별 재고</div><div class="hm-desc">창고별 현황/이동/조정</div></div>
+      </div>
+      <div class="hm-item" data-page="shipments" onclick="showPage('shipments')">
+        <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🔄</div>
+        <div><div class="hm-name">입출고 현황</div><div class="hm-desc">입고/출고 내역 조회</div></div>
+      </div>
+    </div>
+
+    <!-- 생산관리 -->
+    <div class="hm-card">
+      <div class="hm-card-title">생산관리</div>
       <div class="hm-item" data-page="production-req" onclick="showPage('production-req')">
         <div class="hm-icon" style="background:#fef3c7;color:#d97706">🎬</div>
         <div><div class="hm-name">생산요청</div><div class="hm-desc">생산 워크플로우</div></div>
@@ -1600,31 +1899,30 @@ function closeMegaMenu() {
       </div>
     </div>
 
-    <!-- 업무 -->
+    <!-- 회계관리 -->
     <div class="hm-card">
-      <div class="hm-card-title">업무</div>
-      <div class="hm-item" data-page="tasks" onclick="showPage('tasks')">
-        <div class="hm-icon" style="background:#ecfdf5;color:#10b981">✅</div>
-        <div><div class="hm-name">업무관리</div><div class="hm-desc">등록 + 추적 + 협업</div></div>
-        <div class="hm-right"><span class="hm-badge" style="background:#ecfdf5;color:#10b981" id="qmTaskTodo">-</span></div>
-      </div>
-      <div class="hm-item" data-page="notes" onclick="showPage('notes')">
-        <div class="hm-icon" style="background:#fef9c3;color:#a16207">📓</div>
-        <div><div class="hm-name">미팅일지</div><div class="hm-desc">회의 기록 + 공유</div></div>
-      </div>
-    </div>
-
-    <!-- 관리 -->
-    <div class="hm-card">
-      <div class="hm-card-title">관리</div>
+      <div class="hm-card-title">회계관리</div>
       <div class="hm-item" data-page="invoices" onclick="showPage('invoices')">
         <div class="hm-icon" style="background:#f5f5f4;color:#78716c">🧾</div>
-        <div><div class="hm-name">거래명세서</div><div class="hm-desc">월별 명세서</div></div>
+        <div><div class="hm-name">거래명세서</div><div class="hm-desc">월별 명세서 발행</div></div>
       </div>
       <div class="hm-item" data-page="mat-purchase" onclick="showPage('mat-purchase')">
         <div class="hm-icon" style="background:#fff1f2;color:#e11d48">📊</div>
         <div><div class="hm-name">원재료 매입</div><div class="hm-desc">매입 현황 분석</div></div>
       </div>
+      <div class="hm-item" data-page="cost-mgmt" onclick="showPage('cost-mgmt')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#059669">📑</div>
+        <div><div class="hm-name">원가관리</div><div class="hm-desc">원가/마진 분석</div></div>
+      </div>
+      <div class="hm-item" data-page="closing" onclick="showPage('closing')">
+        <div class="hm-icon" style="background:#f0f9ff;color:#0284c7">📋</div>
+        <div><div class="hm-name">마감현황</div><div class="hm-desc">월별 매입 마감 검증</div></div>
+      </div>
+    </div>
+
+    <!-- 기준정보관리 -->
+    <div class="hm-card">
+      <div class="hm-card-title">기준정보관리</div>
       <div class="hm-item" data-page="vendors" onclick="showPage('vendors')">
         <div class="hm-icon" style="background:#fef3c7;color:#b45309">👥</div>
         <div><div class="hm-name">거래처 관리</div><div class="hm-desc">업체 정보 + 포털</div></div>
@@ -1637,21 +1935,57 @@ function closeMegaMenu() {
       </div>
       <div class="hm-item" data-page="bom" onclick="showPage('bom')">
         <div class="hm-icon" style="background:#ede9fe;color:#6d28d9">🧩</div>
-        <div><div class="hm-name">BOM 관리</div><div class="hm-desc">자재명세서 관리</div></div>
+        <div><div class="hm-name">제품공정</div><div class="hm-desc">제품별 후공정 관리</div></div>
       </div>
       <div class="hm-item" data-page="post-process" onclick="showPage('post-process')">
         <div class="hm-icon" style="background:#fff7ed;color:#c2410c">💰</div>
         <div><div class="hm-name">후공정 단가</div><div class="hm-desc">단가 관리</div></div>
+      </div>
+    </div>
+
+    <!-- 경영분석 -->
+    <div class="hm-card">
+      <div class="hm-card-title">경영분석</div>
+      <div class="hm-item" data-page="analytics" onclick="showPage('analytics')">
+        <div class="hm-icon" style="background:#eff6ff;color:#2563eb">📊</div>
+        <div><div class="hm-name">대시보드</div><div class="hm-desc">현황 집계 + 통계</div></div>
+      </div>
+      <div class="hm-item" data-page="exec-dashboard" onclick="showPage('exec-dashboard')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#059669">📈</div>
+        <div><div class="hm-name">경영대시보드</div><div class="hm-desc">매출/마진/KPI 종합</div></div>
+      </div>
+      <div class="hm-item" data-page="report" onclick="showPage('report')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#047857">📄</div>
+        <div><div class="hm-name">보고서</div><div class="hm-desc">단가 협상 + 분석 보고</div></div>
       </div>
       <div class="hm-item" data-page="defects" onclick="showPage('defects')">
         <div class="hm-icon" style="background:#fef2f2;color:#ef4444">🔍</div>
         <div><div class="hm-name">불량관리</div><div class="hm-desc">접수 + 대응</div></div>
         <div class="hm-right"><span class="hm-badge" style="background:#fef2f2;color:#ef4444" id="qmDefects">-</span></div>
       </div>
-      <div class="hm-item" data-page="analytics" onclick="showPage('analytics')">
-        <div class="hm-icon" style="background:#eff6ff;color:#2563eb">📊</div>
-        <div><div class="hm-name">대시보드</div><div class="hm-desc">현황 집계 + 통계</div></div>
+    </div>
+
+    <!-- 업무관리 -->
+    <div class="hm-card">
+      <div class="hm-card-title">업무관리</div>
+      <div class="hm-item" data-page="tasks" onclick="showPage('tasks')">
+        <div class="hm-icon" style="background:#ecfdf5;color:#10b981">✅</div>
+        <div><div class="hm-name">업무관리</div><div class="hm-desc">등록 + 추적 + 협업</div></div>
+        <div class="hm-right"><span class="hm-badge" style="background:#ecfdf5;color:#10b981" id="qmTaskTodo">-</span></div>
       </div>
+      <div class="hm-item" data-page="notes" onclick="showPage('notes')">
+        <div class="hm-icon" style="background:#fef9c3;color:#a16207">📓</div>
+        <div><div class="hm-name">미팅일지</div><div class="hm-desc">회의 기록 + 공유</div></div>
+      </div>
+      <div class="hm-item" data-page="board" onclick="showPage('board')">
+        <div class="hm-icon" style="background:#fef2f2;color:#dc2626">📢</div>
+        <div><div class="hm-name">공지/게시판</div><div class="hm-desc">공지사항 + 팝업 관리</div></div>
+      </div>
+    </div>
+
+    <!-- 시스템관리 -->
+    <div class="hm-card">
+      <div class="hm-card-title">시스템관리</div>
       <div class="hm-item" data-page="settings" onclick="showPage('settings')">
         <div class="hm-icon" style="background:#f1f5f9;color:#64748b">⚙</div>
         <div><div class="hm-name">설정</div><div class="hm-desc">시스템 설정</div></div>
@@ -1659,6 +1993,10 @@ function closeMegaMenu() {
       <div class="hm-item" data-page="user-mgmt" onclick="showPage('user-mgmt')">
         <div class="hm-icon" style="background:#fef3c7;color:#92400e">👤</div>
         <div><div class="hm-name">사용자 관리</div><div class="hm-desc">권한 + 계정 관리</div></div>
+      </div>
+      <div class="hm-item" data-page="audit-log" onclick="showPage('audit-log')">
+        <div class="hm-icon" style="background:#f0f9ff;color:#0284c7">📋</div>
+        <div><div class="hm-name">감사로그</div><div class="hm-desc">시스템 감사 이력</div></div>
       </div>
     </div>
   </div>
@@ -2911,35 +3249,168 @@ function closeMegaMenu() {
 </div>
 
 <!-- ============================================================ -->
-<!-- PAGE: BOM 관리 (독립 페이지) -->
+<!-- PAGE: 제품공정 관리 (제품별 후공정 — 기존 BOM) -->
 <!-- ============================================================ -->
 <div class="page" id="page-bom">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <div style="display:flex;gap:8px;align-items:center">
-      <input type="text" id="bomSearch" placeholder="제품코드 검색..." onkeyup="filterBomList()" style="padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px;outline:none">
+  <!-- BOM Sub-Tab Bar -->
+  <div class="tab-bar" id="bomTabs" style="margin-bottom:16px">
+    <div class="tab active" onclick="switchBomTab('list')">제품공정 목록</div>
+    <div class="tab" onclick="switchBomTab('detail')">공정 상세</div>
+    <div class="tab" onclick="switchBomTab('calc')">조판 계산기</div>
+  </div>
+
+  <!-- TAB 1: BOM 목록 -->
+  <div class="bom-tab active" id="bom-list">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="bomSearch" placeholder="제품코드/품명 검색..." onkeyup="filterBomList()" style="padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:240px;outline:none">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="downloadBomTemplate()">엑셀양식</button>
+        <button class="btn btn-success" onclick="document.getElementById('bomFileInput').click()">업로드</button>
+        <input type="file" id="bomFileInput" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadBomFile(this)">
+        <button class="btn" onclick="importBom()">가져오기</button>
+        <button class="btn btn-primary" onclick="openBomDetail(null)">+ 등록</button>
+      </div>
     </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn" onclick="downloadBomTemplate()">엑셀양식 다운로드</button>
-      <button class="btn btn-success" onclick="document.getElementById('bomFileInput').click()">엑셀 업로드</button>
-      <input type="file" id="bomFileInput" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadBomFile(this)">
-      <button class="btn" onclick="importBom()">product_info 가져오기</button>
-      <button class="btn btn-primary" onclick="openBomModal()">+ BOM 등록</button>
+    <div class="table-container">
+      <div class="table-wrap" style="max-height:calc(100vh - 280px)">
+        <table id="bomTable">
+          <thead><tr>
+            <th>제품코드</th><th>품명</th><th>브랜드</th><th>자재수</th><th>공정수</th><th>버전</th><th style="width:60px">관리</th>
+          </tr></thead>
+          <tbody id="bomTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="bomEmpty" class="notes-empty" style="display:none">
+      <div class="empty-icon">🏭</div>
+      제품 후공정이 등록되지 않았습니다.<br>
+      <span style="font-size:12px">'가져오기' 버튼으로 기존 데이터를 불러오세요.</span>
     </div>
   </div>
-  <div class="table-container">
-    <div class="table-wrap" style="max-height:calc(100vh - 250px)">
-      <table id="bomTable">
-        <thead><tr>
-          <th>제품코드</th><th>품명</th><th>브랜드</th><th>원재료</th><th>후공정수</th><th>버전</th><th>관리</th>
-        </tr></thead>
-        <tbody id="bomTableBody"></tbody>
-      </table>
+
+  <!-- TAB 2: 공정 상세 -->
+  <div class="bom-tab" id="bom-detail" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-sm" onclick="switchBomTab('list')" style="margin-right:4px">← 목록</button>
+        <span id="bomDetailTitle" style="font-size:15px;font-weight:600;color:var(--text-primary)">새 제품공정 등록</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="switchBomTab('list')">취소</button>
+        <button class="btn btn-primary" onclick="saveBomDetail()">저장</button>
+      </div>
+    </div>
+    <input type="hidden" id="bomDetailId">
+
+    <!-- Product Header -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-secondary)">제품 정보</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        <div class="form-group"><label>제품코드</label><input type="text" id="bomDtCode" placeholder="예: BI202"></div>
+        <div class="form-group"><label>품명</label><input type="text" id="bomDtName"></div>
+        <div class="form-group"><label>브랜드</label><input type="text" id="bomDtBrand"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px">
+        <div class="form-group"><label>완제품 가로(mm)</label><input type="number" id="bomDtFinW" placeholder="예: 210"></div>
+        <div class="form-group"><label>완제품 세로(mm)</label><input type="number" id="bomDtFinH" placeholder="예: 297"></div>
+        <div class="form-group"><label>기본주문수량</label><input type="number" id="bomDtBaseQty" value="100"></div>
+        <div class="form-group"><label>비고</label><input type="text" id="bomDtNotes"></div>
+      </div>
+    </div>
+
+    <!-- Materials Section -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">자재 (원재료)</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="addBomMaterial('IMPOSITION')" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd">+ 조판</button>
+          <button class="btn btn-sm" onclick="addBomMaterial('FIXED')" style="background:#fef3c7;color:#92400e;border-color:#fcd34d">+ 고정</button>
+          <button class="btn btn-sm" onclick="addBomMaterial('RATIO')" style="background:#f3e8ff;color:#6b21a8;border-color:#c4b5fd">+ 비율</button>
+        </div>
+      </div>
+      <div id="bomMaterialList"></div>
+      <div id="bomMaterialEmpty" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">자재를 추가하세요</div>
+    </div>
+
+    <!-- Process Routing Section -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">공정 (라우팅)</div>
+        <button class="btn btn-sm" onclick="addBomProcess()">+ 공정 추가</button>
+      </div>
+      <div id="bomProcessList"></div>
+      <div id="bomProcessEmpty" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">공정을 추가하세요</div>
+    </div>
+
+    <!-- Requirement Simulator -->
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">소요량 시뮬레이터</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--text-muted)">주문수량</label>
+          <input type="number" id="bomSimQty" value="100" min="1" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" oninput="renderBomSimulator()">
+          <button class="btn btn-sm" onclick="renderBomSimulator()">계산</button>
+        </div>
+      </div>
+      <div id="bomSimResult" style="font-size:13px;color:var(--text-muted);text-align:center;padding:12px">자재를 추가한 후 계산하세요</div>
     </div>
   </div>
-  <div id="bomEmpty" class="notes-empty" style="display:none">
-    <div class="empty-icon">🏭</div>
-    BOM이 등록되지 않았습니다.<br>
-    <span style="font-size:12px">'product_info 가져오기' 버튼으로 기존 데이터를 불러오세요.</span>
+
+  <!-- TAB 3: 조판 계산기 -->
+  <div class="bom-tab" id="bom-calc" style="display:none">
+    <div style="display:grid;grid-template-columns:360px 1fr;gap:24px;align-items:start">
+      <!-- Calculator inputs -->
+      <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:20px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text-primary)">조판 계산기</div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>용지 규격</label>
+          <select id="calcPaperStd" onchange="bomCalcStandalone()" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+            <option value="0">46전지 (788 x 1091)</option>
+            <option value="1">국전지 (636 x 939)</option>
+            <option value="2">하드롱전지 (900 x 1200)</option>
+            <option value="3">4x8전지 (1219 x 2438)</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div class="form-group"><label>완제품 가로(mm)</label><input type="number" id="calcCutW" value="210" oninput="bomCalcStandalone()"></div>
+          <div class="form-group"><label>완제품 세로(mm)</label><input type="number" id="calcCutH" value="297" oninput="bomCalcStandalone()"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+          <div class="form-group"><label>여백 Bleed(mm)</label><input type="number" id="calcBleed" value="3" oninput="bomCalcStandalone()"></div>
+          <div class="form-group"><label>그리퍼 Grip(mm)</label><input type="number" id="calcGrip" value="10" oninput="bomCalcStandalone()"></div>
+        </div>
+        <!-- Results -->
+        <div id="calcResults" style="border-top:1px solid var(--border);padding-top:16px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="background:var(--bg-primary);border-radius:6px;padding:12px;text-align:center">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">정배치</div>
+              <div id="calcNormal" style="font-size:20px;font-weight:700;color:var(--text-primary)">0</div>
+            </div>
+            <div style="background:var(--bg-primary);border-radius:6px;padding:12px;text-align:center">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">역배치</div>
+              <div id="calcRotated" style="font-size:20px;font-weight:700;color:var(--text-primary)">0</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:#dbeafe;border-radius:6px;padding:12px;text-align:center">
+              <div style="font-size:11px;color:#1e40af;margin-bottom:4px">최적 배수</div>
+              <div id="calcBest" style="font-size:24px;font-weight:700;color:#1e40af">0</div>
+            </div>
+            <div style="background:#f0fdf4;border-radius:6px;padding:12px;text-align:center">
+              <div style="font-size:11px;color:#166534;margin-bottom:4px">용지 활용률</div>
+              <div id="calcUtil" style="font-size:24px;font-weight:700;color:#166534">0%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- SVG Visual -->
+      <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:20px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-secondary)">배치도</div>
+        <div id="calcSvgContainer" style="display:flex;justify-content:center;align-items:center;min-height:300px"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -5126,7 +5597,8 @@ function canAccess(pageId) {
 
 function showApp() {
   document.getElementById('loginOverlay').style.display = 'none';
-  var tb = document.querySelector('.topbar'); if(tb) tb.style.display = '';
+  var tb = document.querySelector('.topbar'); if(tb) tb.style.display = 'none';
+  var sb = document.getElementById('sidebarNav'); if(sb) sb.style.display = '';
   var mn = document.querySelector('.main'); if(mn) mn.style.display = '';
   // 사용자 정보 표시
   if (currentAuthUser) {
@@ -5142,6 +5614,12 @@ function showApp() {
     } else {
       nameEl.textContent = currentAuthUser.display_name || currentAuthUser.username;
     }
+    // 즐겨찾기 로드 (로그인 후 올바른 user_id로)
+    loadFavorites();
+    // 사이드바 렌더링
+    renderSidebar();
+    renderFavorites();
+    renderRecent();
     // 권한 기반 네비게이션 메뉴 필터링
     filterNavByPermissions();
   }
@@ -5149,6 +5627,28 @@ function showApp() {
   showPage('dashboard');
   // 팝업 공지 체크 (로그인 직후)
   setTimeout(function(){ if(typeof checkPopupNotices==='function') checkPopupNotices(); }, 500);
+}
+
+function loadFavorites() {
+  // 먼저 localStorage에서 즉시 로드
+  var key = getFavKey();
+  try { _favorites = JSON.parse(localStorage.getItem(key)||'[]'); }
+  catch(e) { _favorites = []; }
+  // 서버에서 비동기로 동기화 (서버 우선)
+  var token = localStorage.getItem('auth_token');
+  if (token) {
+    fetch('/api/auth/favorites', { headers: { 'Authorization': 'Bearer ' + token } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (Array.isArray(data)) {
+          _favorites = data;
+          localStorage.setItem(key, JSON.stringify(_favorites));
+          renderFavorites();
+          renderSidebar();
+          updateFavToggle();
+        }
+      }).catch(function(){});
+  }
 }
 
 function filterNavByPermissions() {
@@ -5163,6 +5663,12 @@ function filterNavByPermissions() {
       return;
     }
     el.style.display = canAccess(pageId) ? '' : 'none';
+  });
+  // 빈 hm-card 그룹 숨김 (홈 대시보드)
+  document.querySelectorAll('.hm-card').forEach(function(card) {
+    var items = card.querySelectorAll('.hm-item[data-page]');
+    var visible = Array.from(items).some(function(it) { return it.style.display !== 'none'; });
+    card.style.display = visible ? '' : 'none';
   });
 }
 
@@ -5210,7 +5716,7 @@ var pageTitles={
   'dashboard':'홈','analytics':'대시보드','inventory':'재고현황','create-po':'발주생성',
   'po-list':'발주현황','os-register':'OS등록','delivery-schedule':'입고일정','receipts':'입고관리',
   'invoices':'거래명세서','mat-purchase':'원재료 매입','china-shipment':'중국 선적',
-  'vendors':'거래처 관리','notes':'미팅일지','bom':'BOM 관리','mrp':'MRP',
+  'vendors':'거래처 관리','notes':'미팅일지','bom':'제품공정','mrp':'MRP',
   'auto-order':'필수 자동발주','product-mgmt':'품목관리','shipments':'입출고 현황',
   'post-process':'후공정 단가 관리','defects':'불량관리','production-req':'생산요청',
   'production-stock':'생산재고','closing':'마감현황','report':'보고서','settings':'설정',
@@ -6110,14 +6616,18 @@ function exportPostCSV(){
   closeModal('postOrderModal');
 }
 
-// ===== EXCEL UPLOAD (PRESERVED EXACTLY) =====
-const uploadZone=document.getElementById('uploadZone');
-const fileInput=document.getElementById('fileInput');
-uploadZone.addEventListener('click',()=>fileInput.click());
-uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('drag-over');});
-uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
-uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');if(e.dataTransfer.files[0])parseFile(e.dataTransfer.files[0]);});
-fileInput.addEventListener('change',e=>{if(e.target.files[0])parseFile(e.target.files[0]);});
+// ===== EXCEL UPLOAD =====
+function initUploadZone() {
+  const uploadZone=document.getElementById('uploadZone');
+  const fileInput=document.getElementById('fileInput');
+  if(!uploadZone||!fileInput) return;
+  uploadZone.addEventListener('click',()=>fileInput.click());
+  uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('drag-over');});
+  uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('drag-over');if(e.dataTransfer.files[0])parseFile(e.dataTransfer.files[0]);});
+  fileInput.addEventListener('change',e=>{if(e.target.files[0])parseFile(e.target.files[0]);});
+}
+document.addEventListener('DOMContentLoaded', initUploadZone);
 
 function parseFile(file){
   const reader=new FileReader();
@@ -6275,15 +6785,18 @@ function showPage(page, opts){
     alert('접근 권한이 없습니다. 관리자에게 문의하세요.');
     return;
   }
-  // Close mega menu
+  // Close mega menu & Cmd+K overlay
   closeMegaMenu();
+  var cmdkOv = document.getElementById('cmdkOverlay'); if(cmdkOv) cmdkOv.remove();
+  // 현재 페이지 추적
+  _currentPage = page;
   // Origin context 설정
   if (opts && opts.origin) {
     currentOriginContext = opts.origin;
   } else if (page === 'dashboard') {
     currentOriginContext = null;
   }
-  // Update topbar highlight
+  // Update topbar highlight (legacy - hidden but kept for compatibility)
   var pageCatMap = {
     'dashboard':'dashboard',
     'auto-order':'purchase','create-po':'purchase','po-list':'purchase','po-mgmt':'purchase','china-shipment':'purchase',
@@ -6298,10 +6811,6 @@ function showPage(page, opts){
     'settings':'system','user-mgmt':'system','audit-log':'system'
   };
   var activeCat = (pageCatMap && pageCatMap[page]) || '';
-  document.querySelectorAll('.topbar-tab').forEach(function(t){
-    if (t.dataset.page === 'dashboard') t.classList.toggle('active', page === 'dashboard');
-    else if (t.dataset.cat) t.classList.toggle('active', t.dataset.cat === activeCat && page !== 'dashboard');
-  });
   // Update page visibility
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const el=document.getElementById('page-'+page);
@@ -6315,10 +6824,30 @@ function showPage(page, opts){
   } else {
     titleEl.textContent = titleBase;
   }
+  // Update breadcrumb
+  var bcEl = document.getElementById('breadcrumb');
+  if (bcEl) {
+    var catLabel = '';
+    Object.keys(_megaData).forEach(function(catKey) {
+      _megaData[catKey].items.forEach(function(it) { if (it.page === page) catLabel = _megaData[catKey].title; });
+    });
+    if (page === 'dashboard') {
+      bcEl.innerHTML = '<a href="#" onclick="showPage(\'dashboard\');return false">홈</a>';
+    } else {
+      bcEl.innerHTML = '<a href="#" onclick="showPage(\'dashboard\');return false">홈</a>' +
+        (catLabel ? ' <span style="color:var(--text-muted);margin:0 4px">/</span> <span style="color:var(--text-secondary)">'+catLabel+'</span>' : '') +
+        ' <span style="color:var(--text-muted);margin:0 4px">/</span> <span style="color:var(--text-primary);font-weight:500">'+esc(titleBase)+'</span>';
+    }
+  }
+  // Update sidebar active state + favorite toggle + recent pages + header favs
+  updateSidebarActive();
+  updateFavToggle();
+  renderHeaderFavorites();
+  addRecentPage(page);
   // Page-specific loading
   if(page==='vendors') renderVendors();
   if(page==='settings'){loadGuideUI();renderWeightTable();}
-  if(page==='dashboard') { /* 홈은 메뉴만, 별도 로드 없음 */ }
+  if(page==='dashboard') { renderDashFavorites(); }
   if(page==='analytics') loadDashboard();
   if(page==='inventory') loadInventoryPage();
   if(page==='create-po') loadCreatePO();
@@ -8761,7 +9290,7 @@ function goToPOStatus(status){
 }
 
 // ===== 중국 선적 =====
-let csData=[], csFileName='', csUploadBound=false, csOriginalWB=null;
+var csData=[], csFileName='', csUploadBound=false, csOriginalWB=null;
 
 function loadChinaShipment(){
   if(!csUploadBound){
@@ -10014,7 +10543,7 @@ function renderReceiptHistory(){
 // ===== INVOICES =====
 let invoicePOData=null; // 선택한 PO의 상세 데이터
 
-let invTab = 'management';
+var invTab = 'management';
 function switchInvTab(tab) {
   invTab = tab;
   document.querySelectorAll('[data-inv-tab]').forEach(t => t.classList.toggle('active', t.dataset.invTab === tab));
@@ -11246,18 +11775,23 @@ function deleteInvoice(id){
 }
 
 // ===== INITIALIZATION =====
-document.getElementById('searchInput').addEventListener('input',render);
-document.getElementById('brandFilter').addEventListener('change',render);
-document.getElementById('dateInfo').textContent=new Date().toLocaleDateString('ko-KR');
-
-// Update guide desc from saved setting
-document.getElementById('guideDesc').textContent=`발주기준: ${GUIDE.period}개월 매출 / ${GUIDE.period} = 월사용량`;
+function initLegacyListeners() {
+  var si = document.getElementById('searchInput');
+  var bf = document.getElementById('brandFilter');
+  var di = document.getElementById('dateInfo');
+  var gd = document.getElementById('guideDesc');
+  if(si) si.addEventListener('input',render);
+  if(bf) bf.addEventListener('change',render);
+  if(di) di.textContent=new Date().toLocaleDateString('ko-KR');
+  if(gd) gd.textContent=`발주기준: ${GUIDE.period}개월 매출 / ${GUIDE.period} = 월사용량`;
+}
+document.addEventListener('DOMContentLoaded', initLegacyListeners);
 
 // Load data from server
 fetch('/data.json').then(r=>r.json()).then(d=>{
   loadTime=new Date().toLocaleString('ko-KR');
-  uploadZone.classList.add('loaded');
-  uploadZone.innerHTML=`<p class="filename">서버 데이터 - ${d.products.length}개 품목 (${loadTime})</p><p style="font-size:11px;color:var(--text-muted)">새 엑셀을 드래그하여 갱신 가능</p>`;
+  var uz = document.getElementById('uploadZone');
+  if(uz){ uz.classList.add('loaded'); uz.innerHTML=`<p class="filename">서버 데이터 - ${d.products.length}개 품목 (${loadTime})</p><p style="font-size:11px;color:var(--text-muted)">새 엑셀을 드래그하여 갱신 가능</p>`; }
   processData(d.products);
 }).catch(()=>{});
 
@@ -11528,129 +12062,554 @@ function switchMrpTab(tab){
 }
 
 // --- BOM ---
-async function loadBomList(){
+var BOM_PAPER_STANDARDS = [
+  {name:'46전지', w:788, h:1091},
+  {name:'국전지', w:636, h:939},
+  {name:'하드롱전지', w:900, h:1200},
+  {name:'4x8전지', w:1219, h:2438}
+];
+var BOM_PAPER_TYPES = ['아트지','스노우지','랑데뷰','아르떼','크러쉬','매트지','모조지'];
+var BOM_PROCESS_LIST = [
+  {name:'오프셋인쇄', group:'인쇄', icon:'🖨️'},
+  {name:'디지털인쇄', group:'인쇄', icon:'💻'},
+  {name:'박가공', group:'후가공', icon:'✨'},
+  {name:'형압', group:'후가공', icon:'🔲'},
+  {name:'에폭시', group:'후가공', icon:'💎'},
+  {name:'톰슨', group:'후가공', icon:'✂️'},
+  {name:'코팅/라미', group:'후가공', icon:'🛡️'},
+  {name:'접지', group:'제본', icon:'📐'},
+  {name:'제본', group:'제본', icon:'📚'},
+  {name:'포장', group:'포장', icon:'📦'}
+];
+var _bomTab = 'list';
+var _bomDetail = null;
+var _bomMaterials = [];
+var _bomProcesses = [];
+var _bomListCache = [];
+
+function bomCalcImposition(paperW, paperH, cutW, cutH, bleed, grip) {
+  var ew = cutW + bleed*2, eh = cutH + bleed*2;
+  var normal = Math.floor(paperW/ew) * Math.floor((paperH-grip)/eh);
+  var rotated = Math.floor(paperW/eh) * Math.floor((paperH-grip)/ew);
+  var best = Math.max(normal, rotated);
+  var isRotated = rotated > normal;
+  return {normal:normal, rotated:rotated, best:best, isRotated:isRotated,
+    cols: isRotated ? Math.floor(paperW/eh) : Math.floor(paperW/ew),
+    rows: isRotated ? Math.floor((paperH-grip)/ew) : Math.floor((paperH-grip)/eh),
+    ew: ew, eh: eh};
+}
+
+function bomCalcRequirement(orderQty, imposition, lossRate) {
+  if (!imposition || imposition <= 0) return orderQty;
+  return Math.ceil((orderQty / imposition) * (1 + (lossRate||0)/100));
+}
+
+function switchBomTab(tab) {
+  _bomTab = tab;
+  document.querySelectorAll('#bomTabs .tab').forEach(function(t){ t.classList.remove('active'); });
+  document.querySelectorAll('#page-bom .bom-tab').forEach(function(t){ t.classList.remove('active'); t.style.display='none'; });
+  var tabNames = ['list','detail','calc'];
+  var idx = tabNames.indexOf(tab);
+  if(idx >= 0) {
+    document.querySelectorAll('#bomTabs .tab')[idx].classList.add('active');
+  }
+  var el = document.getElementById('bom-'+tab);
+  if(el) { el.classList.add('active'); el.style.display='block'; }
+  if(tab === 'list') loadBomList();
+  if(tab === 'calc') bomCalcStandalone();
+}
+
+async function loadBomList() {
   try {
-    const res = await fetch('/api/bom');
-    const json = await res.json();
-    const list = json.data || json;
-    const tbody = document.getElementById('bomTableBody');
-    const empty = document.getElementById('bomEmpty');
-    if(!list.length){ tbody.innerHTML=''; empty.style.display='block'; document.querySelector('#page-bom .table-container').style.display='none'; return; }
-    empty.style.display='none';
-    document.querySelector('#page-bom .table-container').style.display='';
-    tbody.innerHTML = list.filter(b=>{
-      const q = (document.getElementById('bomSearch').value||'').toLowerCase();
-      return !q || b.product_code.toLowerCase().includes(q);
-    }).map(b=>`<tr>
-      <td style="font-weight:500">${esc(b.product_code)}</td>
-      <td>${esc(b.product_name)}</td>
-      <td>${esc(b.brand)}</td>
-      <td>-</td>
-      <td>${(b.item_count||0).toLocaleString()}</td>
-      <td>v${b.version||1}</td>
-      <td>
-        <button class="btn btn-sm" onclick="editBom('${esc(b.product_code)}')">편집</button>
-        <button class="btn btn-sm" onclick="deleteBom(${b.bom_id})" style="color:var(--urgent)">삭제</button>
-      </td>
-    </tr>`).join('');
-  } catch(e){ console.error(e); }
-}
-function filterBomList(){ loadBomList(); }
-
-async function importBom(){
-  if(!confirm('product_info.json에서 BOM을 일괄 가져오시겠습니까?')) return;
-  const res = await fetch('/api/bom/import', {method:'POST'});
-  const json = await res.json();
-  const d = json.data || json;
-  alert(`${d.imported}개 BOM이 가져와졌습니다.`);
-  loadBomList();
+    var res = await fetch('/api/bom');
+    var json = await res.json();
+    _bomListCache = json.data || json;
+    renderBomList();
+  } catch(e){ console.error('loadBomList:', e); }
 }
 
-function openBomModal(data){
-  document.getElementById('bomEditId').value = data ? data.bom_id : '';
-  document.getElementById('bomModalTitle').textContent = data ? 'BOM 편집' : 'BOM 등록';
-  document.getElementById('bomCode').value = data ? data.product_code : '';
-  document.getElementById('bomCode').readOnly = !!data;
-  document.getElementById('bomName').value = data ? (data.product_name||'') : '';
-  document.getElementById('bomBrand').value = data ? (data.brand||'') : '';
-  document.getElementById('bomNotes').value = data ? (data.notes||'') : '';
-  // materials
-  const matRows = document.getElementById('bomMaterialRows');
-  const matRow = matRows.querySelector('.bom-mat-row');
-  const mat = data ? (data.items||[]).find(i=>i.item_type==='material') : null;
-  matRow.querySelector('.bm-code').value = mat ? mat.material_code : '';
-  matRow.querySelector('.bm-name').value = mat ? mat.material_name : '';
-  matRow.querySelector('.bm-vendor').value = mat ? mat.vendor_name : '';
-  matRow.querySelector('.bm-cut').value = mat ? mat.cut_spec : '';
-  matRow.querySelector('.bm-plate').value = mat ? mat.plate_spec : '';
-  // processes
-  const procDiv = document.getElementById('bomProcessRows');
-  procDiv.innerHTML = '';
-  if(data && data.items){
-    data.items.filter(i=>i.item_type==='process').forEach(p=>addProcessRow(p));
-  }
-  document.getElementById('bomModalOverlay').classList.add('show');
-}
-function closeBomModal(){ document.getElementById('bomModalOverlay').classList.remove('show'); }
-
-function addProcessRow(data){
-  const div = document.getElementById('bomProcessRows');
-  const row = document.createElement('div');
-  row.className = 'bom-proc-row';
-  row.innerHTML = `
-    <select class="bp-type" style="width:120px">
-      <option value="재단" ${data&&data.process_type==='재단'?'selected':''}>재단</option>
-      <option value="인쇄" ${data&&data.process_type==='인쇄'?'selected':''}>인쇄</option>
-      <option value="박/형압" ${data&&data.process_type==='박/형압'?'selected':''}>박/형압</option>
-      <option value="톰슨" ${data&&data.process_type==='톰슨'?'selected':''}>톰슨</option>
-      <option value="봉투가공" ${data&&data.process_type==='봉투가공'?'selected':''}>봉투가공</option>
-      <option value="세아리" ${data&&data.process_type==='세아리'?'selected':''}>세아리</option>
-      <option value="레이져" ${data&&data.process_type==='레이져'?'selected':''}>레이져</option>
-      <option value="실크" ${data&&data.process_type==='실크'?'selected':''}>실크</option>
-      <option value="임가공" ${data&&data.process_type==='임가공'?'selected':''}>임가공</option>
-    </select>
-    <input type="text" class="bp-vendor" placeholder="업체명" value="${data?esc(data.vendor_name):''}" style="width:150px">
-    <span class="bp-remove" onclick="this.parentElement.remove()">✕</span>`;
-  div.appendChild(row);
-}
-
-async function editBom(code){
-  const res = await fetch(`/api/bom/${encodeURIComponent(code)}`);
-  const json = await res.json();
-  openBomModal(json.data || json);
-}
-
-async function saveBom(){
-  const id = document.getElementById('bomEditId').value;
-  const items = [];
-  // material
-  const mat = document.querySelector('.bom-mat-row');
-  const mCode = mat.querySelector('.bm-code').value.trim();
-  if(mCode){
-    items.push({item_type:'material', material_code:mCode, material_name:mat.querySelector('.bm-name').value, vendor_name:mat.querySelector('.bm-vendor').value, process_type:'원재료', cut_spec:mat.querySelector('.bm-cut').value, plate_spec:mat.querySelector('.bm-plate').value, qty_per:1});
-  }
-  // processes
-  document.querySelectorAll('.bom-proc-row').forEach(row=>{
-    items.push({item_type:'process', process_type:row.querySelector('.bp-type').value, vendor_name:row.querySelector('.bp-vendor').value, qty_per:1});
+function renderBomList() {
+  var list = _bomListCache;
+  var q = (document.getElementById('bomSearch').value||'').toLowerCase();
+  var filtered = list.filter(function(b){
+    return !q || b.product_code.toLowerCase().includes(q) || (b.product_name||'').toLowerCase().includes(q);
   });
-  const body = {
-    product_code: document.getElementById('bomCode').value.trim(),
-    product_name: document.getElementById('bomName').value.trim(),
-    brand: document.getElementById('bomBrand').value.trim(),
-    notes: document.getElementById('bomNotes').value,
-    items
-  };
-  if(!body.product_code){ alert('제품코드를 입력하세요'); return; }
-  const url = id ? `/api/bom/${id}` : '/api/bom';
-  const method = id ? 'PUT' : 'POST';
-  await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  closeBomModal();
+  var tbody = document.getElementById('bomTableBody');
+  var empty = document.getElementById('bomEmpty');
+  var tableContainer = document.querySelector('#bom-list .table-container');
+  if(!filtered.length) {
+    tbody.innerHTML='';
+    empty.style.display='block';
+    if(tableContainer) tableContainer.style.display='none';
+    return;
+  }
+  empty.style.display='none';
+  if(tableContainer) tableContainer.style.display='';
+  tbody.innerHTML = filtered.map(function(b){
+    var matCount = b.material_count || 0;
+    var procCount = b.process_count || (b.item_count||0);
+    return '<tr style="cursor:pointer" onclick="openBomDetail(\''+esc(b.product_code)+'\')">' +
+      '<td style="font-weight:500">'+esc(b.product_code)+'</td>' +
+      '<td>'+esc(b.product_name)+'</td>' +
+      '<td>'+esc(b.brand)+'</td>' +
+      '<td class="n">'+(matCount||'-')+'</td>' +
+      '<td class="n">'+(procCount||'-')+'</td>' +
+      '<td>v'+(b.version||1)+'</td>' +
+      '<td><button class="btn btn-sm" onclick="event.stopPropagation();deleteBom('+b.bom_id+')" style="color:var(--urgent)">삭제</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function filterBomList() { renderBomList(); }
+
+async function importBom() {
+  if(!confirm('product_info.json에서 BOM을 일괄 가져오시겠습니까?')) return;
+  var res = await fetch('/api/bom/import', {method:'POST'});
+  var json = await res.json();
+  var d = json.data || json;
+  alert((d.imported||0)+'개 BOM이 가져와졌습니다.');
   loadBomList();
 }
 
-async function deleteBom(bomId){
+async function openBomDetail(code) {
+  _bomMaterials = [];
+  _bomProcesses = [];
+  _bomDetail = null;
+
+  if(code) {
+    try {
+      var res = await fetch('/api/bom/'+encodeURIComponent(code));
+      var json = await res.json();
+      _bomDetail = json.data || json;
+    } catch(e) { console.error('openBomDetail:', e); }
+  }
+
+  var d = _bomDetail;
+  document.getElementById('bomDetailId').value = d ? (d.bom_id||'') : '';
+  document.getElementById('bomDetailTitle').textContent = d ? '공정 편집: '+d.product_code : '새 제품공정 등록';
+  document.getElementById('bomDtCode').value = d ? d.product_code : '';
+  document.getElementById('bomDtCode').readOnly = !!d;
+  document.getElementById('bomDtName').value = d ? (d.product_name||'') : '';
+  document.getElementById('bomDtBrand').value = d ? (d.brand||'') : '';
+  document.getElementById('bomDtFinW').value = d ? (d.finished_w||'') : '';
+  document.getElementById('bomDtFinH').value = d ? (d.finished_h||'') : '';
+  document.getElementById('bomDtBaseQty').value = d ? (d.base_qty||100) : 100;
+  document.getElementById('bomDtNotes').value = d ? (d.notes||'') : '';
+
+  if(d && d.items) {
+    d.items.forEach(function(item) {
+      if(item.item_type === 'material' || item.material_type) {
+        _bomMaterials.push({
+          material_type: item.material_type || 'FIXED',
+          material_code: item.material_code || '',
+          material_name: item.material_name || '',
+          vendor_name: item.vendor_name || '',
+          paper_standard: item.paper_standard || '',
+          paper_type: item.paper_type || '',
+          gsm: item.gsm || '',
+          finished_w: item.finished_w || '',
+          finished_h: item.finished_h || '',
+          bleed: item.bleed != null ? item.bleed : 3,
+          grip: item.grip != null ? item.grip : 10,
+          loss_rate: item.loss_rate || 0,
+          qty_per: item.qty_per || 1,
+          unit: item.unit || 'EA',
+          ratio: item.ratio || 1,
+          imposition: item.imposition || 0
+        });
+      } else if(item.item_type === 'process') {
+        _bomProcesses.push({
+          process_name: item.process_type || item.process_name || '',
+          vendor_name: item.vendor_name || ''
+        });
+      }
+    });
+  }
+
+  renderBomMaterials();
+  renderBomProcesses();
+  renderBomSimulator();
+  switchBomTab('detail');
+}
+
+function renderBomMaterials() {
+  var container = document.getElementById('bomMaterialList');
+  var emptyEl = document.getElementById('bomMaterialEmpty');
+  if(!_bomMaterials.length) {
+    container.innerHTML = '';
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  container.innerHTML = _bomMaterials.map(function(m, idx) {
+    var badgeClass = m.material_type === 'IMPOSITION' ? 'imposition' : m.material_type === 'FIXED' ? 'fixed' : 'ratio';
+    var badgeLabel = m.material_type === 'IMPOSITION' ? '조판' : m.material_type === 'FIXED' ? '고정' : '비율';
+    var html = '<div class="bom-mat-card">';
+    html += '<span class="bom-mat-remove" onclick="removeBomMaterial('+idx+')">✕</span>';
+    html += '<span class="bom-mat-badge '+badgeClass+'">'+badgeLabel+'</span>';
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px">';
+    html += '<div class="form-group"><label>원자재코드</label><input type="text" value="'+esc(m.material_code)+'" onchange="_bomMaterials['+idx+'].material_code=this.value"></div>';
+    html += '<div class="form-group"><label>원자재명</label><input type="text" value="'+esc(m.material_name)+'" onchange="_bomMaterials['+idx+'].material_name=this.value"></div>';
+    html += '<div class="form-group"><label>거래처</label><input type="text" value="'+esc(m.vendor_name)+'" onchange="_bomMaterials['+idx+'].vendor_name=this.value"></div>';
+    html += '</div>';
+
+    if(m.material_type === 'IMPOSITION') {
+      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px">';
+      html += '<div class="form-group"><label>용지규격</label><select onchange="_bomMaterials['+idx+'].paper_standard=this.value;updateBomImposition('+idx+')">';
+      html += '<option value="">선택</option>';
+      BOM_PAPER_STANDARDS.forEach(function(ps) {
+        html += '<option value="'+ps.name+'"'+(m.paper_standard===ps.name?' selected':'')+'>'+ps.name+' ('+ps.w+'x'+ps.h+')</option>';
+      });
+      html += '</select></div>';
+      html += '<div class="form-group"><label>용지종류</label><select onchange="_bomMaterials['+idx+'].paper_type=this.value">';
+      html += '<option value="">선택</option>';
+      BOM_PAPER_TYPES.forEach(function(pt) {
+        html += '<option value="'+pt+'"'+(m.paper_type===pt?' selected':'')+'>'+pt+'</option>';
+      });
+      html += '</select></div>';
+      html += '<div class="form-group"><label>평량(gsm)</label><input type="number" value="'+(m.gsm||'')+'" onchange="_bomMaterials['+idx+'].gsm=parseInt(this.value)||0"></div>';
+      html += '<div class="form-group"><label>손실률(%)</label><input type="number" value="'+(m.loss_rate||0)+'" min="0" max="100" onchange="_bomMaterials['+idx+'].loss_rate=parseFloat(this.value)||0"></div>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px">';
+      html += '<div class="form-group"><label>완제품 가로(mm)</label><input type="number" value="'+(m.finished_w||'')+'" onchange="_bomMaterials['+idx+'].finished_w=parseFloat(this.value)||0;updateBomImposition('+idx+')"></div>';
+      html += '<div class="form-group"><label>완제품 세로(mm)</label><input type="number" value="'+(m.finished_h||'')+'" onchange="_bomMaterials['+idx+'].finished_h=parseFloat(this.value)||0;updateBomImposition('+idx+')"></div>';
+      html += '<div class="form-group"><label>여백 Bleed(mm)</label><input type="number" value="'+(m.bleed!=null?m.bleed:3)+'" onchange="_bomMaterials['+idx+'].bleed=parseFloat(this.value)||0;updateBomImposition('+idx+')"></div>';
+      html += '<div class="form-group"><label>그리퍼 Grip(mm)</label><input type="number" value="'+(m.grip!=null?m.grip:10)+'" onchange="_bomMaterials['+idx+'].grip=parseFloat(this.value)||0;updateBomImposition('+idx+')"></div>';
+      html += '</div>';
+      // imposition result
+      var impResult = '--';
+      if(m.paper_standard && m.finished_w && m.finished_h) {
+        var ps = BOM_PAPER_STANDARDS.find(function(s){ return s.name === m.paper_standard; });
+        if(ps) {
+          var r = bomCalcImposition(ps.w, ps.h, m.finished_w, m.finished_h, m.bleed||3, m.grip||10);
+          m.imposition = r.best;
+          impResult = r.best + '배 (정:'+r.normal+' / 역:'+r.rotated+')';
+        }
+      }
+      html += '<div style="margin-top:8px;padding:8px 12px;background:#dbeafe;border-radius:6px;font-size:13px;color:#1e40af">';
+      html += '<strong>조판수:</strong> '+impResult;
+      html += ' <a href="#" onclick="event.preventDefault();showMaterialImpositionSVG('+idx+')" style="margin-left:12px;font-size:12px;color:#1e40af">배치도 보기</a>';
+      html += '</div>';
+      // SVG container for inline preview
+      html += '<div id="bomMatSvg'+idx+'" style="margin-top:8px"></div>';
+
+    } else if(m.material_type === 'FIXED') {
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">';
+      html += '<div class="form-group"><label>수량/제품</label><input type="number" value="'+(m.qty_per||1)+'" min="0" step="0.01" onchange="_bomMaterials['+idx+'].qty_per=parseFloat(this.value)||1"></div>';
+      html += '<div class="form-group"><label>단위</label><input type="text" value="'+esc(m.unit||'EA')+'" onchange="_bomMaterials['+idx+'].unit=this.value"></div>';
+      html += '<div></div>';
+      html += '</div>';
+
+    } else if(m.material_type === 'RATIO') {
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">';
+      html += '<div class="form-group"><label>비율(per unit)</label><input type="number" value="'+(m.ratio||1)+'" min="0" step="0.001" onchange="_bomMaterials['+idx+'].ratio=parseFloat(this.value)||1"></div>';
+      html += '<div class="form-group"><label>단위</label><input type="text" value="'+esc(m.unit||'EA')+'" onchange="_bomMaterials['+idx+'].unit=this.value"></div>';
+      html += '<div></div>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }).join('');
+}
+
+function addBomMaterial(type) {
+  _bomMaterials.push({
+    material_type: type,
+    material_code: '',
+    material_name: '',
+    vendor_name: '',
+    paper_standard: '',
+    paper_type: '',
+    gsm: 0,
+    finished_w: parseFloat(document.getElementById('bomDtFinW').value)||0,
+    finished_h: parseFloat(document.getElementById('bomDtFinH').value)||0,
+    bleed: 3,
+    grip: 10,
+    loss_rate: 0,
+    qty_per: 1,
+    unit: 'EA',
+    ratio: 1,
+    imposition: 0
+  });
+  renderBomMaterials();
+}
+
+function removeBomMaterial(idx) {
+  _bomMaterials.splice(idx, 1);
+  renderBomMaterials();
+  renderBomSimulator();
+}
+
+function updateBomImposition(idx) {
+  var m = _bomMaterials[idx];
+  if(!m || m.material_type !== 'IMPOSITION') return;
+  if(m.paper_standard && m.finished_w && m.finished_h) {
+    var ps = BOM_PAPER_STANDARDS.find(function(s){ return s.name === m.paper_standard; });
+    if(ps) {
+      var r = bomCalcImposition(ps.w, ps.h, m.finished_w, m.finished_h, m.bleed||3, m.grip||10);
+      m.imposition = r.best;
+    }
+  }
+  renderBomMaterials();
+  renderBomSimulator();
+}
+
+function showMaterialImpositionSVG(idx) {
+  var m = _bomMaterials[idx];
+  var containerId = 'bomMatSvg'+idx;
+  var container = document.getElementById(containerId);
+  if(!container) return;
+  if(container.innerHTML) { container.innerHTML = ''; return; }
+  if(!m.paper_standard || !m.finished_w || !m.finished_h) return;
+  var ps = BOM_PAPER_STANDARDS.find(function(s){ return s.name === m.paper_standard; });
+  if(!ps) return;
+  var result = bomCalcImposition(ps.w, ps.h, m.finished_w, m.finished_h, m.bleed||3, m.grip||10);
+  renderImpositionSVG(containerId, ps, m.finished_w, m.finished_h, m.bleed||3, m.grip||10, result);
+}
+
+function renderBomProcesses() {
+  var container = document.getElementById('bomProcessList');
+  var emptyEl = document.getElementById('bomProcessEmpty');
+  if(!_bomProcesses.length) {
+    container.innerHTML = '';
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  container.innerHTML = _bomProcesses.map(function(p, idx) {
+    var proc = BOM_PROCESS_LIST.find(function(pl){ return pl.name === p.process_name; });
+    var icon = proc ? proc.icon : '⚙️';
+    var html = '<div class="bom-proc-card">';
+    html += '<span style="font-size:18px">'+icon+'</span>';
+    html += '<select onchange="_bomProcesses['+idx+'].process_name=this.value;renderBomProcesses()" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px">';
+    var groups = {};
+    BOM_PROCESS_LIST.forEach(function(pl) {
+      if(!groups[pl.group]) groups[pl.group] = [];
+      groups[pl.group].push(pl);
+    });
+    Object.keys(groups).forEach(function(g) {
+      html += '<optgroup label="'+g+'">';
+      groups[g].forEach(function(pl) {
+        html += '<option value="'+pl.name+'"'+(p.process_name===pl.name?' selected':'')+'>'+pl.icon+' '+pl.name+'</option>';
+      });
+      html += '</optgroup>';
+    });
+    html += '</select>';
+    html += '<input type="text" placeholder="업체명" value="'+esc(p.vendor_name)+'" onchange="_bomProcesses['+idx+'].vendor_name=this.value" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px">';
+    html += '<span class="bom-proc-remove" onclick="removeBomProcess('+idx+')">✕</span>';
+    html += '</div>';
+    return html;
+  }).join('');
+}
+
+function addBomProcess() {
+  _bomProcesses.push({
+    process_name: BOM_PROCESS_LIST[0].name,
+    vendor_name: ''
+  });
+  renderBomProcesses();
+}
+
+function removeBomProcess(idx) {
+  _bomProcesses.splice(idx, 1);
+  renderBomProcesses();
+}
+
+function renderBomSimulator() {
+  var container = document.getElementById('bomSimResult');
+  if(!_bomMaterials.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:12px">자재를 추가한 후 계산하세요</div>';
+    return;
+  }
+  var orderQty = parseInt(document.getElementById('bomSimQty').value) || 100;
+  var html = '<div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;overflow:hidden">';
+  html += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;padding:8px 12px;font-size:11px;font-weight:600;color:var(--text-muted);background:var(--bg-secondary);border-bottom:1px solid var(--border)">';
+  html += '<div>자재명</div><div style="text-align:right">유형</div><div style="text-align:right">배수/비율</div><div style="text-align:right">소요량</div>';
+  html += '</div>';
+
+  _bomMaterials.forEach(function(m) {
+    var req = 0;
+    var info = '';
+    var badgeClass = m.material_type === 'IMPOSITION' ? 'imposition' : m.material_type === 'FIXED' ? 'fixed' : 'ratio';
+    var badgeLabel = m.material_type === 'IMPOSITION' ? '조판' : m.material_type === 'FIXED' ? '고정' : '비율';
+
+    if(m.material_type === 'IMPOSITION') {
+      req = bomCalcRequirement(orderQty, m.imposition||0, m.loss_rate||0);
+      info = (m.imposition||0)+'배';
+    } else if(m.material_type === 'FIXED') {
+      req = Math.ceil(orderQty * (m.qty_per||1));
+      info = (m.qty_per||1)+' / 제품';
+    } else if(m.material_type === 'RATIO') {
+      req = Math.ceil(orderQty * (m.ratio||1));
+      info = (m.ratio||1)+' / unit';
+    }
+
+    html += '<div class="bom-sim-row">';
+    html += '<div>'+esc(m.material_name || m.material_code || '(미지정)')+'</div>';
+    html += '<div style="text-align:right"><span class="bom-mat-badge '+badgeClass+'">'+badgeLabel+'</span></div>';
+    html += '<div style="text-align:right;color:var(--text-muted)">'+info+'</div>';
+    html += '<div style="text-align:right;font-weight:600">'+req.toLocaleString()+' '+(m.unit||'EA')+'</div>';
+    html += '</div>';
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function renderImpositionSVG(containerId, paper, cutW, cutH, bleed, grip, result) {
+  var container = document.getElementById(containerId);
+  if(!container) return;
+  var maxViewW = 360;
+  var scale = maxViewW / paper.w;
+  var svgW = Math.round(paper.w * scale);
+  var svgH = Math.round(paper.h * scale);
+  var ew = result.isRotated ? (cutH + bleed*2) : (cutW + bleed*2);
+  var eh = result.isRotated ? (cutW + bleed*2) : (cutH + bleed*2);
+
+  var svg = '<svg width="'+svgW+'" height="'+svgH+'" viewBox="0 0 '+svgW+' '+svgH+'" style="border:1px solid var(--border);border-radius:4px;background:#fff">';
+  // Paper background
+  svg += '<rect x="0" y="0" width="'+svgW+'" height="'+svgH+'" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>';
+  // Grip zone
+  var gripH = Math.round(grip * scale);
+  svg += '<rect x="0" y="0" width="'+svgW+'" height="'+gripH+'" fill="rgba(239,68,68,0.12)"/>';
+  svg += '<text x="'+(svgW/2)+'" y="'+(gripH/2+4)+'" text-anchor="middle" fill="#ef4444" font-size="10">GRIP '+grip+'mm</text>';
+  // Cut cells
+  for(var col=0; col<result.cols; col++) {
+    for(var row=0; row<result.rows; row++) {
+      var x = Math.round(col * ew * scale);
+      var y = Math.round(grip * scale + row * eh * scale);
+      var w = Math.round(ew * scale);
+      var h = Math.round(eh * scale);
+      svg += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="rgba(59,130,246,0.15)" stroke="#3b82f6" stroke-width="0.8" rx="1"/>';
+      // inner cut area (without bleed)
+      var bx = Math.round((col * ew + bleed) * scale);
+      var by = Math.round((grip + row * eh + bleed) * scale);
+      var bw = Math.round((result.isRotated ? cutH : cutW) * scale);
+      var bh = Math.round((result.isRotated ? cutW : cutH) * scale);
+      svg += '<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+bh+'" fill="rgba(59,130,246,0.08)" stroke="#3b82f6" stroke-width="0.3" stroke-dasharray="2,2"/>';
+    }
+  }
+  // Waste area
+  var usedW = Math.round(result.cols * ew * scale);
+  var usedH = Math.round((grip + result.rows * eh) * scale);
+  if(usedW < svgW) {
+    svg += '<rect x="'+usedW+'" y="0" width="'+(svgW-usedW)+'" height="'+svgH+'" fill="rgba(239,68,68,0.06)" stroke="#ef4444" stroke-width="0.5" stroke-dasharray="4,3"/>';
+  }
+  if(usedH < svgH) {
+    svg += '<rect x="0" y="'+usedH+'" width="'+usedW+'" height="'+(svgH-usedH)+'" fill="rgba(239,68,68,0.06)" stroke="#ef4444" stroke-width="0.5" stroke-dasharray="4,3"/>';
+  }
+  // Dimension labels
+  svg += '<text x="'+(svgW/2)+'" y="'+(svgH-4)+'" text-anchor="middle" fill="#6b7280" font-size="10">'+paper.w+'mm</text>';
+  svg += '<text x="8" y="'+(svgH/2)+'" fill="#6b7280" font-size="10" transform="rotate(-90,8,'+(svgH/2)+')">'+paper.h+'mm</text>';
+  // Best count label
+  svg += '<text x="'+(svgW-8)+'" y="20" text-anchor="end" fill="#1e40af" font-size="12" font-weight="bold">'+result.best+'배'+(result.isRotated?' (역)':' (정)')+'</text>';
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+function bomCalcStandalone() {
+  var stdIdx = parseInt(document.getElementById('calcPaperStd').value)||0;
+  var paper = BOM_PAPER_STANDARDS[stdIdx];
+  var cutW = parseFloat(document.getElementById('calcCutW').value)||0;
+  var cutH = parseFloat(document.getElementById('calcCutH').value)||0;
+  var bleed = parseFloat(document.getElementById('calcBleed').value)||3;
+  var grip = parseFloat(document.getElementById('calcGrip').value)||10;
+
+  if(!cutW || !cutH) {
+    document.getElementById('calcNormal').textContent = '0';
+    document.getElementById('calcRotated').textContent = '0';
+    document.getElementById('calcBest').textContent = '0';
+    document.getElementById('calcUtil').textContent = '0%';
+    document.getElementById('calcSvgContainer').innerHTML = '<div style="color:var(--text-muted);font-size:13px">완제품 크기를 입력하세요</div>';
+    return;
+  }
+
+  var result = bomCalcImposition(paper.w, paper.h, cutW, cutH, bleed, grip);
+  document.getElementById('calcNormal').textContent = result.normal;
+  document.getElementById('calcRotated').textContent = result.rotated;
+  document.getElementById('calcBest').textContent = result.best;
+
+  var ew = cutW + bleed*2;
+  var eh = cutH + bleed*2;
+  var usedArea = result.best * ew * eh;
+  var totalArea = paper.w * (paper.h - grip);
+  var util = totalArea > 0 ? Math.round(usedArea / totalArea * 1000) / 10 : 0;
+  document.getElementById('calcUtil').textContent = util + '%';
+
+  renderImpositionSVG('calcSvgContainer', paper, cutW, cutH, bleed, grip, result);
+}
+
+async function saveBomDetail() {
+  var id = document.getElementById('bomDetailId').value;
+  var productCode = document.getElementById('bomDtCode').value.trim();
+  if(!productCode) { alert('제품코드를 입력하세요'); return; }
+
+  var items = [];
+  _bomMaterials.forEach(function(m) {
+    items.push({
+      item_type: 'material',
+      material_type: m.material_type,
+      material_code: m.material_code,
+      material_name: m.material_name,
+      vendor_name: m.vendor_name,
+      paper_standard: m.paper_standard || '',
+      paper_type: m.paper_type || '',
+      gsm: m.gsm || 0,
+      finished_w: m.finished_w || 0,
+      finished_h: m.finished_h || 0,
+      bleed: m.bleed != null ? m.bleed : 3,
+      grip: m.grip != null ? m.grip : 10,
+      loss_rate: m.loss_rate || 0,
+      qty_per: m.material_type === 'FIXED' ? (m.qty_per||1) : (m.material_type === 'RATIO' ? (m.ratio||1) : 1),
+      unit: m.unit || 'EA',
+      imposition: m.imposition || 0,
+      process_type: '원재료',
+      cut_spec: m.paper_standard || '',
+      plate_spec: m.imposition ? (m.imposition+'배') : ''
+    });
+  });
+  _bomProcesses.forEach(function(p) {
+    items.push({
+      item_type: 'process',
+      process_type: p.process_name,
+      vendor_name: p.vendor_name,
+      qty_per: 1
+    });
+  });
+
+  var body = {
+    product_code: productCode,
+    product_name: document.getElementById('bomDtName').value.trim(),
+    brand: document.getElementById('bomDtBrand').value.trim(),
+    notes: document.getElementById('bomDtNotes').value,
+    finished_w: parseFloat(document.getElementById('bomDtFinW').value)||0,
+    finished_h: parseFloat(document.getElementById('bomDtFinH').value)||0,
+    base_qty: parseInt(document.getElementById('bomDtBaseQty').value)||100,
+    items: items
+  };
+
+  try {
+    var url = id ? '/api/bom/'+id : '/api/bom';
+    var method = id ? 'PUT' : 'POST';
+    var res = await fetch(url, {method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if(!res.ok) { var err = await res.json(); alert('저장 실패: '+(err.error||res.statusText)); return; }
+    alert('BOM이 저장되었습니다.');
+    switchBomTab('list');
+  } catch(e) { console.error('saveBomDetail:', e); alert('저장 중 오류: '+e.message); }
+}
+
+// Keep legacy modal functions as no-ops (modal still in DOM but unused)
+function openBomModal(data) { openBomDetail(data ? data.product_code : null); }
+function closeBomModal() { switchBomTab('list'); }
+function saveBom() { saveBomDetail(); }
+function addProcessRow() { addBomProcess(); }
+
+async function deleteBom(bomId) {
   if(!confirm('이 BOM을 삭제하시겠습니까?')) return;
-  await fetch(`/api/bom/${bomId}`, {method:'DELETE'});
+  await fetch('/api/bom/'+bomId, {method:'DELETE'});
   loadBomList();
 }
 
@@ -11907,44 +12866,44 @@ async function clearOrderHistory(){
 
 // --- BOM 엑셀 다운로드/업로드 ---
 async function downloadBomTemplate(){
-  const res = await fetch('/api/bom/export');
-  const json = await res.json();
-  const list = json.data || json;
-  const cols=['품목코드','품명','브랜드','원자재코드','원재료용지명','제지사','절','조판','재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
-  const keys=['product_code','product_name','brand','material_code','material_name','vendor_name','cut_spec','plate_spec','재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
-  let csv='\uFEFF'+cols.join(',')+'\n';
-  list.forEach(r=>{
-    csv+=keys.map(k=>{const v=r[k]||'';return typeof v==='string'&&(v.includes(',')||v.includes('"'))?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')+'\n';
+  var res = await fetch('/api/bom/export');
+  var json = await res.json();
+  var list = json.data || json;
+  var cols=['품목코드','품명','브랜드','자재유형','원자재코드','원재료용지명','제지사','용지규격','용지종류','평량','절','조판수','완제품가로','완제품세로','여백','그리퍼','손실률','수량','단위','재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+  var keys=['product_code','product_name','brand','material_type','material_code','material_name','vendor_name','paper_standard','paper_type','gsm','cut_spec','plate_spec','finished_w','finished_h','bleed','grip','loss_rate','qty_per','unit','재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+  var csv='\uFEFF'+cols.join(',')+'\n';
+  list.forEach(function(r){
+    csv+=keys.map(function(k){var v=r[k]||'';return typeof v==='string'&&(v.includes(',')||v.includes('"'))?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')+'\n';
   });
-  const a=document.createElement('a');
+  var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
-  a.download=`BOM_양식_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+  a.download='BOM_양식_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 
 async function uploadBomFile(input){
-  const file=input.files[0];if(!file)return;
-  const text=await file.text();
-  const sep=text.includes('\t')?'\t':',';
-  const lines=text.split('\n').filter(l=>l.trim());
+  var file=input.files[0];if(!file)return;
+  var text=await file.text();
+  var sep=text.includes('\t')?'\t':',';
+  var lines=text.split('\n').filter(function(l){return l.trim();});
   if(lines.length<2){alert('데이터가 없습니다');input.value='';return;}
-  const header=lines[0].split(sep).map(h=>h.replace(/^"|"$/g,'').trim());
-  const colMap={'품목코드':'product_code','품명':'product_name','브랜드':'brand','원자재코드':'material_code','원재료용지명':'material_name','제지사':'vendor_name','절':'cut_spec','조판':'plate_spec'};
-  const procs=['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
-  const rows=[];
-  for(let i=1;i<lines.length;i++){
-    const vals=lines[i].split(sep).map(v=>v.replace(/^"|"$/g,'').trim());
-    const row={};
-    header.forEach((h,j)=>{
+  var header=lines[0].split(sep).map(function(h){return h.replace(/^"|"$/g,'').trim();});
+  var colMap={'품목코드':'product_code','품명':'product_name','브랜드':'brand','자재유형':'material_type','원자재코드':'material_code','원재료용지명':'material_name','제지사':'vendor_name','용지규격':'paper_standard','용지종류':'paper_type','평량':'gsm','절':'cut_spec','조판수':'plate_spec','완제품가로':'finished_w','완제품세로':'finished_h','여백':'bleed','그리퍼':'grip','손실률':'loss_rate','수량':'qty_per','단위':'unit'};
+  var procs=['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+  var rows=[];
+  for(var i=1;i<lines.length;i++){
+    var vals=lines[i].split(sep).map(function(v){return v.replace(/^"|"$/g,'').trim();});
+    var row={};
+    header.forEach(function(h,j){
       if(colMap[h])row[colMap[h]]=vals[j]||'';
       else if(procs.includes(h))row[h]=vals[j]||'';
     });
     if(row.product_code)rows.push(row);
   }
   if(!rows.length){alert('유효한 행이 없습니다');input.value='';return;}
-  if(!confirm(`${rows.length}개 BOM을 업로드하시겠습니까? (기존 데이터는 품목코드 기준으로 덮어씁니다)`))return;
-  const res=await fetch('/api/bom/bulk-upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})});
-  const d=(await res.json()).data||{};
-  alert(`완료: 신규 ${d.created||0}건, 수정 ${d.updated||0}건`);
+  if(!confirm(rows.length+'개 BOM을 업로드하시겠습니까? (기존 데이터는 품목코드 기준으로 덮어씁니다)'))return;
+  var res=await fetch('/api/bom/bulk-upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows})});
+  var d=(await res.json()).data||{};
+  alert('완료: 신규 '+(d.created||0)+'건, 수정 '+(d.updated||0)+'건');
   input.value='';
   loadBomList();
 }
