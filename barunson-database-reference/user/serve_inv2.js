@@ -1975,6 +1975,95 @@ db.exec(`CREATE TABLE IF NOT EXISTS hometax_invoices (
 db.exec("CREATE INDEX IF NOT EXISTS idx_hometax_date ON hometax_invoices(invoice_date)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_hometax_arap ON hometax_invoices(ar_ap, invoice_date)");
 
+// ── 로트/배치 추적 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS batch_master (
+  batch_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_number    TEXT NOT NULL DEFAULT '',
+  product_code    TEXT NOT NULL DEFAULT '',
+  product_name    TEXT DEFAULT '',
+  vendor_name     TEXT DEFAULT '',
+  vendor_lot      TEXT DEFAULT '',
+  received_date   TEXT DEFAULT '',
+  po_number       TEXT DEFAULT '',
+  received_qty    REAL DEFAULT 0,
+  current_qty     REAL DEFAULT 0,
+  quality_status  TEXT DEFAULT 'GOOD',
+  warehouse       TEXT DEFAULT '',
+  mfg_date        TEXT DEFAULT '',
+  exp_date        TEXT DEFAULT '',
+  notes           TEXT DEFAULT '',
+  created_by      TEXT DEFAULT '',
+  created_at      TEXT DEFAULT (datetime('now','localtime')),
+  updated_at      TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(batch_number, product_code)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_batch_product ON batch_master(product_code)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_batch_status ON batch_master(quality_status)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_batch_date ON batch_master(received_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_batch_warehouse ON batch_master(warehouse)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS batch_transactions (
+  txn_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id        INTEGER NOT NULL,
+  batch_number    TEXT DEFAULT '',
+  txn_type        TEXT NOT NULL DEFAULT '',
+  txn_date        TEXT DEFAULT (datetime('now','localtime')),
+  from_warehouse  TEXT DEFAULT '',
+  to_warehouse    TEXT DEFAULT '',
+  product_code    TEXT DEFAULT '',
+  qty             REAL DEFAULT 0,
+  qty_before      REAL DEFAULT 0,
+  qty_after       REAL DEFAULT 0,
+  reference_no    TEXT DEFAULT '',
+  actor           TEXT DEFAULT '',
+  notes           TEXT DEFAULT '',
+  created_at      TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_btxn_batch ON batch_transactions(batch_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_btxn_date ON batch_transactions(txn_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_btxn_type ON batch_transactions(txn_type)");
+
+db.exec(`CREATE TABLE IF NOT EXISTS batch_inspections (
+  insp_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id        INTEGER NOT NULL,
+  batch_number    TEXT DEFAULT '',
+  insp_date       TEXT DEFAULT (datetime('now','localtime')),
+  inspector       TEXT DEFAULT '',
+  insp_type       TEXT DEFAULT 'RECEIVING',
+  sample_size     INTEGER DEFAULT 0,
+  defects_found   INTEGER DEFAULT 0,
+  defect_desc     TEXT DEFAULT '',
+  result          TEXT DEFAULT 'PASS',
+  next_action     TEXT DEFAULT '',
+  notes           TEXT DEFAULT '',
+  created_by      TEXT DEFAULT '',
+  created_at      TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_binsp_batch ON batch_inspections(batch_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_binsp_date ON batch_inspections(insp_date)");
+
+// ── 원재료 단가 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS material_prices (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_code    TEXT NOT NULL DEFAULT '',
+  product_name    TEXT DEFAULT '',
+  spec            TEXT DEFAULT '',
+  unit            TEXT DEFAULT 'R',
+  vendor_name     TEXT DEFAULT '',
+  list_price      REAL DEFAULT 0,
+  apply_price     REAL DEFAULT 0,
+  discount_rate   REAL DEFAULT 0,
+  apply_month     TEXT DEFAULT '',
+  notes           TEXT DEFAULT '',
+  uploaded_by     TEXT DEFAULT '',
+  created_at      TEXT DEFAULT (datetime('now','localtime')),
+  updated_at      TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(product_code, vendor_name, apply_month)
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_matprice_code ON material_prices(product_code)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_matprice_vendor ON material_prices(vendor_name)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_matprice_month ON material_prices(apply_month)");
+
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
 let JWT_SECRET;
@@ -2084,6 +2173,8 @@ const ALL_PAGES = [
   { id: 'tax-invoice', name: '세금계산서', group: '회계' },
   // 생산
   { id: 'work-order', name: '작업지시', group: '생산' },
+  { id: 'lot-tracking', name: '로트추적', group: '생산' },
+  { id: 'material-price', name: '원재료단가', group: '구매' },
   // 기준정보
   { id: 'vendors', name: '거래처 관리', group: '기준정보' },
   { id: 'product-mgmt', name: '품목관리', group: '기준정보' },
@@ -2110,7 +2201,7 @@ const ROLE_PERMISSIONS = {
   purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping',
-    'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'work-order'],
+    'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'work-order', 'lot-tracking', 'material-price'],
   production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks'],
   viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
@@ -10955,7 +11046,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     try {
-      const body = await parseBody(req);
+      const body = await readJSON(req);
       const rows = body.rows; // [{invoice_no, invoice_date, ar_ap, cs_name, cs_reg_no, supply_amt, vat_amt, total_amt, item_name, remark, electronic}]
       if (!rows || !Array.isArray(rows) || rows.length === 0) { fail(res, 400, '업로드 데이터 없음'); return; }
       const stmt = db.prepare(`INSERT OR IGNORE INTO hometax_invoices
@@ -11016,6 +11107,159 @@ async function handleRequest(req, res) {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  //  원재료 단가 API (Material Price)
+  // ════════════════════════════════════════════════════════════════════
+
+  // ── POST /api/material-price/upload ── 원재료 단가 엑셀 업로드
+  if (pathname === '/api/material-price/upload' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    try {
+      const body = await readJSON(req);
+      const rows = body.rows;
+      if (!rows || !Array.isArray(rows) || rows.length === 0) { fail(res, 400, '데이터 없음'); return; }
+      const stmt = db.prepare(`INSERT OR REPLACE INTO material_prices
+        (product_code, product_name, spec, unit, vendor_name, list_price, apply_price, discount_rate, apply_month, uploaded_by, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))`);
+      let upserted = 0;
+      const txn = db.transaction((items) => {
+        for (const r of items) {
+          stmt.run(
+            (r.product_code||'').trim(), (r.product_name||'').trim(),
+            (r.spec||'').trim(), (r.unit||'R').trim(),
+            (r.vendor_name||'').trim(),
+            parseFloat(r.list_price)||0, parseFloat(r.apply_price)||0,
+            parseFloat(r.discount_rate)||0,
+            (r.apply_month||'').trim(),
+            decoded.name || decoded.email || ''
+          );
+          upserted++;
+        }
+      });
+      txn(rows);
+      ok(res, { upserted, total: rows.length }); return;
+    } catch (e) { fail(res, 500, e.message); return; }
+  }
+
+  // ── GET /api/material-price/list ── 원재료 단가 목록
+  if (pathname === '/api/material-price/list' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const vendor = qs.get('vendor') || '';
+    const search = qs.get('search') || '';
+    const month = qs.get('month') || '';
+    let where = '1=1';
+    const params = [];
+    if (vendor) { where += ' AND vendor_name = ?'; params.push(vendor); }
+    if (month) { where += ' AND apply_month = ?'; params.push(month); }
+    if (search) { where += ' AND (product_code LIKE ? OR product_name LIKE ?)'; params.push('%'+search+'%','%'+search+'%'); }
+    const items = db.prepare('SELECT * FROM material_prices WHERE ' + where + ' ORDER BY vendor_name, product_code, apply_month DESC').all(...params);
+    // 제지사 목록
+    const vendors = db.prepare('SELECT DISTINCT vendor_name FROM material_prices ORDER BY vendor_name').all().map(r => r.vendor_name);
+    // 적용월 목록
+    const months = db.prepare('SELECT DISTINCT apply_month FROM material_prices ORDER BY apply_month DESC').all().map(r => r.apply_month);
+    ok(res, { items, vendors, months, count: items.length }); return;
+  }
+
+  // ── GET /api/material-price/latest ── 품목별 최신 단가 (중복 제거)
+  if (pathname === '/api/material-price/latest' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const vendor = qs.get('vendor') || '';
+    const search = qs.get('search') || '';
+    let where = '1=1';
+    const params = [];
+    if (vendor) { where += ' AND vendor_name = ?'; params.push(vendor); }
+    if (search) { where += ' AND (product_code LIKE ? OR product_name LIKE ?)'; params.push('%'+search+'%','%'+search+'%'); }
+    const items = db.prepare(`SELECT m.* FROM material_prices m
+      INNER JOIN (SELECT product_code, vendor_name, MAX(apply_month) AS max_month FROM material_prices GROUP BY product_code, vendor_name) g
+      ON m.product_code=g.product_code AND m.vendor_name=g.vendor_name AND m.apply_month=g.max_month
+      WHERE ${where} ORDER BY m.vendor_name, m.product_code`).all(...params);
+    const vendors = db.prepare('SELECT DISTINCT vendor_name FROM material_prices ORDER BY vendor_name').all().map(r => r.vendor_name);
+    ok(res, { items, vendors, count: items.length }); return;
+  }
+
+  // ── GET /api/material-price/compare ── XERP 실매입가 vs 단가표 비교
+  if (pathname === '/api/material-price/compare' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || (() => { const d = new Date(); d.setMonth(d.getMonth()-3); return d.toISOString().slice(0,10).replace(/-/g,''); })();
+    const to = qs.get('to') || new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const search = qs.get('search') || '';
+    const sources = { xerp: 'unknown', sqlite: 'ok' };
+
+    // SQLite 최신 단가표
+    const priceMap = {};
+    const allPrices = db.prepare(`SELECT m.* FROM material_prices m
+      INNER JOIN (SELECT product_code, vendor_name, MAX(apply_month) AS max_month FROM material_prices GROUP BY product_code, vendor_name) g
+      ON m.product_code=g.product_code AND m.vendor_name=g.vendor_name AND m.apply_month=g.max_month`).all();
+    for (const p of allPrices) priceMap[p.product_code] = p;
+
+    // XERP 실매입가 조회
+    let xerpItems = [];
+    try {
+      const pool = await ensureXerpPool();
+      sources.xerp = 'ok';
+      let searchWhere = '';
+      const req2 = pool.request().input('from', from).input('to', to);
+      if (search) { searchWhere = " AND (RTRIM(d.ItemCode) LIKE @search OR RTRIM(d.ItemName) LIKE @search)"; req2.input('search', '%'+search+'%'); }
+      const r = await req2.query(`
+        SELECT RTRIM(d.ItemCode) AS item_code, RTRIM(d.ItemName) AS item_name,
+               RTRIM(d.ItemStnd) AS item_spec, RTRIM(d.ItemUnit) AS item_unit,
+               COUNT(*) AS txn_count,
+               SUM(d.Qty) AS total_qty,
+               SUM(d.CurAmt) AS total_amt,
+               CASE WHEN SUM(d.Qty)>0 THEN SUM(d.CurAmt)/SUM(d.Qty) ELSE 0 END AS avg_price,
+               MIN(d.CurPrice) AS min_price, MAX(d.CurPrice) AS max_price
+        FROM mmInoutItem d WITH(NOLOCK)
+        INNER JOIN mmInoutHeader h WITH(NOLOCK) ON d.SiteCode=h.SiteCode AND d.InoutNo=h.InoutNo
+        WHERE d.SiteCode='BK10' AND h.InoutDate>=@from AND h.InoutDate<=@to
+          AND h.InoutType IN ('10','11') ${searchWhere}
+        GROUP BY RTRIM(d.ItemCode), RTRIM(d.ItemName), RTRIM(d.ItemStnd), RTRIM(d.ItemUnit)
+        ORDER BY RTRIM(d.ItemCode)
+      `);
+      xerpItems = r.recordset;
+    } catch (e) { sources.xerp = 'error: ' + e.message; }
+
+    // 비교 결과 생성
+    const comparison = xerpItems.map(x => {
+      const mp = priceMap[x.item_code] || null;
+      const diff = mp ? (x.avg_price - mp.apply_price) : null;
+      const diffPct = (mp && mp.apply_price > 0) ? ((x.avg_price - mp.apply_price) / mp.apply_price * 100) : null;
+      return {
+        item_code: x.item_code, item_name: x.item_name, item_spec: x.item_spec,
+        xerp_avg_price: Math.round(x.avg_price), xerp_min: x.min_price, xerp_max: x.max_price,
+        xerp_qty: x.total_qty, xerp_amt: x.total_amt, xerp_txn_count: x.txn_count,
+        our_price: mp ? mp.apply_price : null, our_list_price: mp ? mp.list_price : null,
+        our_discount: mp ? mp.discount_rate : null, our_vendor: mp ? mp.vendor_name : null,
+        our_month: mp ? mp.apply_month : null,
+        diff: diff !== null ? Math.round(diff) : null,
+        diff_pct: diffPct !== null ? Math.round(diffPct * 10) / 10 : null,
+        matched: !!mp
+      };
+    });
+
+    ok(res, { comparison, sources, from, to, totalXerp: xerpItems.length, totalMatched: comparison.filter(c=>c.matched).length }); return;
+  }
+
+  // ── DELETE /api/material-price ── 원재료 단가 삭제
+  if (pathname === '/api/material-price' && method === 'DELETE') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const month = qs.get('month');
+    const vendor = qs.get('vendor');
+    let where = '1=1'; const params = [];
+    if (month) { where += ' AND apply_month = ?'; params.push(month); }
+    if (vendor) { where += ' AND vendor_name = ?'; params.push(vendor); }
+    const info = db.prepare('DELETE FROM material_prices WHERE ' + where).run(...params);
+    ok(res, { deleted: info.changes }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   //  작업지시 API (Work Order)
   // ════════════════════════════════════════════════════════════════════
 
@@ -11040,7 +11284,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/work-orders' && method === 'POST') {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
-    const body = await parseBody(req);
+    const body = await readJSON(req);
     const now = new Date();
     const woNum = 'WO' + now.getFullYear().toString().slice(2) + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '-' + String(Math.floor(Math.random()*9999)).padStart(4,'0');
     const stmt = db.prepare(`INSERT INTO work_orders (wo_number, request_id, product_code, product_name, brand, ordered_qty, status, priority, start_date, due_date, printer_vendor, post_vendor, paper_type, notes, created_by)
@@ -11066,7 +11310,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
-    const body = await parseBody(req);
+    const body = await readJSON(req);
     const wo = db.prepare('SELECT * FROM work_orders WHERE wo_id = ?').get(id);
     if (!wo) { fail(res, 404, '작업지시 없음'); return; }
     const oldStatus = wo.status;
@@ -11167,7 +11411,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const code = decodeURIComponent(pathname.match(/^\/api\/acct\/accounts\/(.+)$/)[1]);
-    const body = await parseBody(req);
+    const body = await readJSON(req);
     if (body.acc_name !== undefined) {
       db.prepare(`UPDATE gl_account_map SET acc_name=?, updated_at=datetime('now','localtime') WHERE acc_code=?`).run(body.acc_name, code);
     }

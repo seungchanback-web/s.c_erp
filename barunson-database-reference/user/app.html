@@ -1377,7 +1377,8 @@ var _megaData = {
       {icon:'🚢',bg:'#fef2f2',fg:'#dc2626',name:'중국선적',desc:'交期表 + BL추적',page:'china-shipment',clickOrigin:'중국'},
       {icon:'📅',bg:'#ecfdf5',fg:'#0d9488',name:'입고일정',desc:'입고 예정 일정',page:'delivery-schedule',origins:['한국','중국','더기프트']},
       {icon:'📥',bg:'#f0fdf4',fg:'#059669',name:'입고관리',desc:'수령 처리 + 불량 기록',page:'receipts',origins:['한국','중국','더기프트']},
-      {icon:'🏷',bg:'#f5f3ff',fg:'#8b5cf6',name:'OS등록',desc:'외주 생산 등록',page:'os-register'}
+      {icon:'🏷',bg:'#f5f3ff',fg:'#8b5cf6',name:'OS등록',desc:'외주 생산 등록',page:'os-register'},
+      {icon:'💲',bg:'#fef9c3',fg:'#a16207',name:'원재료 단가',desc:'단가표 관리 + XERP 비교',page:'material-price'}
     ]
   },
   sales: {
@@ -5095,6 +5096,25 @@ function closeMegaMenu() { /* no-op */ }
   <div id="taxPaging" style="display:flex;justify-content:center;gap:8px;margin-top:12px"></div>
 </div>
 
+<!-- ========== 원재료 단가 (Material Price) PAGE ========== -->
+<div class="page" id="page-material-price" style="background:#fff;color:#111">
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="mpTabs">
+    <div class="tab active" data-mptab="list" onclick="switchMpTab('list')" style="padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:#2563eb;border-bottom:2px solid #2563eb">단가표</div>
+    <div class="tab" data-mptab="compare" onclick="switchMpTab('compare')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">XERP 비교</div>
+    <div class="tab" data-mptab="upload" onclick="switchMpTab('upload')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">엑셀 업로드</div>
+  </div>
+  <div id="mpToolbar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <select id="mpVendorFilter" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+      <option value="">전체 제지사</option>
+    </select>
+    <input type="text" id="mpSearch" placeholder="품목코드/품명 검색" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:180px">
+    <button class="btn btn-sm" onclick="mpDoSearch()" style="background:#2563eb;color:#fff">조회</button>
+    <button class="btn btn-sm" onclick="exportMpExcel()">엑셀</button>
+  </div>
+  <div id="mpKpi" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+  <div id="mpContent" style="min-height:400px;overflow-x:auto"></div>
+</div>
+
 <!-- ========== 작업지시 (Work Order) PAGE ========== -->
 <div class="page" id="page-work-order" style="background:#fff;color:#111">
   <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="woTabs">
@@ -5896,7 +5916,7 @@ var pageTitles={
   'tasks':'업무관리','meeting-log':'미팅일지','trends':'경영추이',
   'chart-of-accounts':'계정과목','journal':'분개장','general-ledger':'총계정원장',
   'trial-balance':'시산표','financial-statements':'재무제표','ar-ap':'채권/채무',
-  'tax-invoice':'세금계산서','work-order':'작업지시'
+  'tax-invoice':'세금계산서','work-order':'작업지시','material-price':'원재료 단가'
 };
 
 // ===== GLOBAL STATE =====
@@ -6979,7 +6999,7 @@ function showPage(page, opts){
     'invoices':'accounting','mat-purchase':'accounting','cost-mgmt':'accounting','closing':'accounting',
     'chart-of-accounts':'accounting','journal':'accounting','general-ledger':'accounting',
     'trial-balance':'accounting','financial-statements':'accounting','ar-ap':'accounting','tax-invoice':'accounting',
-    'work-order':'production',
+    'work-order':'production','material-price':'purchase',
     'vendors':'master','product-mgmt':'master','bom':'master','post-process':'master',
     'analytics':'analysis','exec-dashboard':'analysis','report':'analysis','defects':'analysis',
     'tasks':'work','notes':'work','board':'work',
@@ -7076,6 +7096,7 @@ function showPage(page, opts){
   if(page==='ar-ap') loadArApPage();
   if(page==='tax-invoice') loadTaxInvoicePage();
   if(page==='work-order') loadWorkOrderPage();
+  if(page==='material-price') loadMaterialPricePage();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8161,6 +8182,310 @@ async function loadHometaxData() {
       }
     }
   } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+
+// ── 원재료 단가 ──
+var _mpTab='list', _mpData=[], _mpVendors=[];
+
+function loadMaterialPricePage() {
+  _mpTab='list';
+  loadMpLatest();
+}
+
+function switchMpTab(t) {
+  _mpTab=t;
+  document.querySelectorAll('#mpTabs .tab').forEach(function(el){
+    var isA=el.getAttribute('data-mptab')===t;
+    el.style.color=isA?'#2563eb':'#64748b';el.style.fontWeight=isA?'600':'400';
+    el.style.borderBottom=isA?'2px solid #2563eb':'2px solid transparent';
+  });
+  var tb=document.getElementById('mpToolbar');
+  if(tb) tb.style.display=(t==='upload')?'none':'flex';
+  document.getElementById('mpKpi').innerHTML='';
+  if(t==='list') loadMpLatest();
+  else if(t==='compare') loadMpCompare();
+  else if(t==='upload') renderMpUploadUI();
+}
+
+function mpDoSearch() {
+  if(_mpTab==='compare') loadMpCompare();
+  else loadMpLatest();
+}
+
+async function loadMpLatest() {
+  var vendor=(document.getElementById('mpVendorFilter')||{}).value||'';
+  var search=(document.getElementById('mpSearch')||{}).value||'';
+  var el=document.getElementById('mpContent');
+  if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try {
+    var url='/api/material-price/latest?';
+    if(vendor) url+='vendor='+encodeURIComponent(vendor)+'&';
+    if(search) url+='search='+encodeURIComponent(search);
+    var resp=await authFetch(url);
+    var r=await resp.json();
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    _mpData=r.data.items||[];
+    // 제지사 필터 갱신
+    if(r.data.vendors&&r.data.vendors.length>0){
+      _mpVendors=r.data.vendors;
+      var sel=document.getElementById('mpVendorFilter');
+      if(sel){
+        var curVal=sel.value;
+        sel.innerHTML='<option value="">전체 제지사</option>';
+        _mpVendors.forEach(function(v){sel.innerHTML+='<option value="'+esc(v)+'">'+esc(v)+'</option>';});
+        sel.value=curVal;
+      }
+    }
+    // KPI
+    var kpi=document.getElementById('mpKpi');
+    var totalItems=_mpData.length;
+    var vendorCount=[...new Set(_mpData.map(function(i){return i.vendor_name;}))].length;
+    var avgDiscount=_mpData.length>0?(_mpData.reduce(function(s,i){return s+(i.discount_rate||0);},0)/_mpData.length*100):0;
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">등록 품목</div><div style="font-size:20px;font-weight:700">'+fmtAmt(totalItems)+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">제지사</div><div style="font-size:20px;font-weight:700">'+vendorCount+'<span style="font-size:12px;color:#94a3b8"> 개</span></div></div>',
+      '<div style="padding:12px 16px;background:#fef9c3;border-radius:8px;border-left:4px solid #eab308"><div style="font-size:11px;color:#64748b">평균 할인율</div><div style="font-size:20px;font-weight:700">'+avgDiscount.toFixed(1)+'<span style="font-size:12px;color:#94a3b8"> %</span></div></div>',
+    ].join('');
+    // 테이블
+    var h='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">';
+    h+='<th style="padding:10px;text-align:left">품목코드</th><th style="text-align:left;padding:10px">품명</th>';
+    h+='<th style="text-align:left;padding:10px">규격</th><th style="text-align:center;padding:10px">단위</th>';
+    h+='<th style="text-align:left;padding:10px">제지사</th>';
+    h+='<th style="text-align:right;padding:10px">고시가</th><th style="text-align:right;padding:10px">적용단가</th>';
+    h+='<th style="text-align:right;padding:10px">할인율</th><th style="text-align:center;padding:10px">적용월</th>';
+    h+='</tr></thead><tbody>';
+    _mpData.forEach(function(item){
+      var discPct=item.discount_rate?Math.round(item.discount_rate*100)+'%':'-';
+      var am=item.apply_month||'';if(am.length>=6) am=am.slice(0,4)+'.'+am.slice(4);
+      h+='<tr style="border-bottom:1px solid #f1f5f9">';
+      h+='<td style="padding:8px;font-family:monospace;font-size:12px;color:#2563eb">'+esc(item.product_code)+'</td>';
+      h+='<td style="padding:8px;font-weight:500">'+esc(item.product_name)+'</td>';
+      h+='<td style="padding:8px;font-size:12px;color:#64748b">'+esc(item.spec||'')+'</td>';
+      h+='<td style="padding:8px;text-align:center">'+esc(item.unit||'R')+'</td>';
+      h+='<td style="padding:8px;font-size:12px">'+esc(item.vendor_name)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#94a3b8">'+fmtAmt(item.list_price)+'</td>';
+      h+='<td style="padding:8px;text-align:right;font-weight:600">'+fmtAmt(item.apply_price)+'</td>';
+      h+='<td style="padding:8px;text-align:right;color:#f59e0b;font-weight:600">'+discPct+'</td>';
+      h+='<td style="padding:8px;text-align:center;font-size:12px;color:#64748b">'+esc(am)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(_mpData.length===0) h='<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:40px;margin-bottom:12px">💲</div><div>등록된 원재료 단가가 없습니다.</div><div style="margin-top:8px"><button class="btn btn-sm" onclick="switchMpTab(\'upload\')" style="background:#2563eb;color:#fff">엑셀 업로드</button></div></div>';
+    if(el)el.innerHTML=h;
+  } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+
+async function loadMpCompare() {
+  var search=(document.getElementById('mpSearch')||{}).value||'';
+  var el=document.getElementById('mpContent');
+  if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">XERP 매입실적과 단가표를 비교 중...</div>';
+  try {
+    var now=new Date(),m3=new Date(now);m3.setMonth(m3.getMonth()-3);
+    var from=m3.toISOString().slice(0,10).replace(/-/g,'');
+    var to=now.toISOString().slice(0,10).replace(/-/g,'');
+    var url='/api/material-price/compare?from='+from+'&to='+to;
+    if(search) url+='&search='+encodeURIComponent(search);
+    var resp=await authFetch(url);
+    var r=await resp.json();
+    if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
+    var data=r.data;
+    var cmp=data.comparison||[];
+    // KPI
+    var kpi=document.getElementById('mpKpi');
+    var matched=cmp.filter(function(c){return c.matched;});
+    var overpriced=matched.filter(function(c){return c.diff>0;});
+    var underpriced=matched.filter(function(c){return c.diff<0;});
+    if(kpi) kpi.innerHTML=[
+      '<div style="padding:12px 16px;background:#eff6ff;border-radius:8px;border-left:4px solid #2563eb"><div style="font-size:11px;color:#64748b">XERP 매입 품목</div><div style="font-size:20px;font-weight:700">'+cmp.length+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e"><div style="font-size:11px;color:#64748b">단가표 매칭</div><div style="font-size:20px;font-weight:700">'+matched.length+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#fef2f2;border-radius:8px;border-left:4px solid #ef4444"><div style="font-size:11px;color:#64748b">단가 초과</div><div style="font-size:20px;font-weight:700;color:#ef4444">'+overpriced.length+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+      '<div style="padding:12px 16px;background:#ecfdf5;border-radius:8px;border-left:4px solid #10b981"><div style="font-size:11px;color:#64748b">단가 절감</div><div style="font-size:20px;font-weight:700;color:#10b981">'+underpriced.length+'<span style="font-size:12px;color:#94a3b8"> 건</span></div></div>',
+    ].join('');
+    // 테이블
+    var h='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">비교 기간: '+from.slice(0,4)+'.'+from.slice(4,6)+'.'+from.slice(6)+' ~ '+to.slice(0,4)+'.'+to.slice(4,6)+'.'+to.slice(6)+' (최근 3개월)</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">';
+    h+='<th style="padding:8px;text-align:left">품목코드</th><th style="text-align:left;padding:8px">품명</th>';
+    h+='<th style="text-align:right;padding:8px">XERP 평균가</th><th style="text-align:right;padding:8px">우리 단가</th>';
+    h+='<th style="text-align:right;padding:8px">차이</th><th style="text-align:right;padding:8px">차이%</th>';
+    h+='<th style="text-align:right;padding:8px">XERP 수량</th><th style="text-align:right;padding:8px">XERP 금액</th>';
+    h+='<th style="text-align:left;padding:8px">제지사</th>';
+    h+='</tr></thead><tbody>';
+    cmp.sort(function(a,b){
+      if(a.matched&&!b.matched)return -1;if(!a.matched&&b.matched)return 1;
+      return (b.diff_pct||0)-(a.diff_pct||0);
+    });
+    cmp.forEach(function(c){
+      var diffColor=c.diff===null?'#94a3b8':c.diff>0?'#ef4444':c.diff<0?'#10b981':'#64748b';
+      var bg=c.diff!==null&&c.diff>0?'background:#fef2f2;':'';
+      h+='<tr style="border-bottom:1px solid #f1f5f9;'+bg+'">';
+      h+='<td style="padding:6px 8px;font-family:monospace;color:#2563eb">'+esc(c.item_code)+'</td>';
+      h+='<td style="padding:6px 8px">'+esc(c.item_name)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;font-weight:600">'+fmtAmt(c.xerp_avg_price)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right">'+(c.our_price!==null?fmtAmt(c.our_price):'<span style="color:#94a3b8">미등록</span>')+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;font-weight:600;color:'+diffColor+'">'+(c.diff!==null?(c.diff>0?'+':'')+fmtAmt(c.diff):'-')+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;color:'+diffColor+'">'+(c.diff_pct!==null?(c.diff_pct>0?'+':'')+c.diff_pct+'%':'-')+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;color:#64748b">'+fmtAmt(c.xerp_qty)+'</td>';
+      h+='<td style="padding:6px 8px;text-align:right;color:#64748b">'+fmtAmt(c.xerp_amt)+'</td>';
+      h+='<td style="padding:6px 8px;font-size:11px;color:#64748b">'+esc(c.our_vendor||'-')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    if(cmp.length===0) h='<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:40px;margin-bottom:12px">📊</div><div>XERP 매입 데이터가 없습니다.</div></div>';
+    if(el)el.innerHTML=h;
+  } catch(e){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+
+function renderMpUploadUI() {
+  var el=document.getElementById('mpContent');if(!el)return;
+  var h='<div style="max-width:700px;margin:0 auto">';
+  h+='<h3 style="font-size:16px;margin:0 0 16px">원재료 단가 엑셀 업로드</h3>';
+  h+='<div style="background:#eff6ff;border:2px dashed #93c5fd;border-radius:12px;padding:40px;text-align:center;margin-bottom:20px;cursor:pointer" id="mpDropZone" onclick="document.getElementById(\'mpFileInput\').click()">';
+  h+='<div style="font-size:40px;margin-bottom:12px">💲</div>';
+  h+='<div style="font-size:14px;font-weight:600;color:#2563eb;margin-bottom:8px">파일을 드래그하거나 클릭하여 업로드</div>';
+  h+='<div style="font-size:12px;color:#64748b">원재료 단가 엑셀(.xlsx/.xls/.csv) 파일</div>';
+  h+='<input type="file" id="mpFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleMpFileSelect(this)">';
+  h+='</div>';
+
+  h+='<div style="background:#fefce8;border-radius:8px;padding:16px;margin-bottom:16px;border-left:4px solid #eab308">';
+  h+='<div style="font-size:13px;font-weight:600;margin-bottom:8px">엑셀 양식 안내</div>';
+  h+='<div style="font-size:12px;color:#64748b;line-height:1.8">컬럼: <b>제지사, 품목코드, 품명, 규격, 단위, 고시가, 적용단가, 할인율</b><br>';
+  h+='기존 양식(원재료 단가.xlsx) 그대로 업로드 가능합니다.</div></div>';
+
+  h+='<div id="mpUploadPreview" style="display:none;margin-bottom:16px"></div>';
+  h+='<div id="mpUploadResult" style="margin-bottom:16px"></div>';
+  h+='</div>';
+  el.innerHTML=h;
+
+  var dz=document.getElementById('mpDropZone');
+  if(dz){
+    dz.addEventListener('dragover',function(e){e.preventDefault();dz.style.borderColor='#2563eb';dz.style.background='#dbeafe';});
+    dz.addEventListener('dragleave',function(e){e.preventDefault();dz.style.borderColor='#93c5fd';dz.style.background='#eff6ff';});
+    dz.addEventListener('drop',function(e){e.preventDefault();dz.style.borderColor='#93c5fd';dz.style.background='#eff6ff';if(e.dataTransfer.files.length>0) processMpFile(e.dataTransfer.files[0]);});
+  }
+}
+
+function handleMpFileSelect(input) {
+  if(input.files&&input.files[0]) processMpFile(input.files[0]);
+}
+
+async function processMpFile(file) {
+  var preview=document.getElementById('mpUploadPreview');
+  var result=document.getElementById('mpUploadResult');
+  if(preview)preview.style.display='block';
+  if(preview)preview.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">파일 분석 중... ('+esc(file.name)+')</div>';
+  if(result)result.innerHTML='';
+
+  try {
+    if(typeof XLSX==='undefined'){throw new Error('SheetJS 미로드');}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try {
+        var wb=XLSX.read(e.target.result,{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var json=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(!json||json.length<5){if(preview)preview.innerHTML='<div style="color:#ef4444">데이터가 부족합니다.</div>';return;}
+
+        // 헤더 행 찾기 (제지사, 품목코드 포함 행)
+        var headerRow=-1;
+        for(var i=0;i<Math.min(10,json.length);i++){
+          var row=json[i].map(function(c){return String(c);});
+          if(row.some(function(c){return /제지사/.test(c);})&&row.some(function(c){return /품목코드/.test(c);})){headerRow=i;break;}
+        }
+        if(headerRow<0){
+          // 바른손 양식: 행0=타이틀, 행3=제지사/품목코드/품명, 행4=월별 서브헤더
+          headerRow=3;
+        }
+
+        // 마지막 적용단가 컬럼 찾기 (마지막 열이 최신 적용단가)
+        var subHeader=json[headerRow+1]||[];
+        var lastPriceCol=json[0].length-1; // 마지막 열 = 최신 적용단가
+
+        // 데이터 파싱
+        var rows=[];
+        var lastVendor='';
+        for(var di=headerRow+2;di<json.length;di++){
+          var row=json[di];
+          if(!row||row.length<3)continue;
+          var vendor=String(row[0]||'').trim();
+          if(vendor&&vendor!=='NaN'&&!/제지사|^3\./.test(vendor)&&!/국내지|할인적용/.test(vendor)) lastVendor=vendor;
+          var code=String(row[1]||'').trim();
+          if(!code||!/^BP\d/.test(code))continue;
+          var pname=String(row[2]||'').trim();
+          var spec=String(row[3]||'').trim();
+          var unit=String(row[4]||'R').trim();
+          var listPrice=parseFloat(String(row[5]||'0').replace(/[,\s]/g,''))||0;
+
+          // 최신 적용단가 (마지막 열)
+          var applyPrice=parseFloat(String(row[lastPriceCol]||'0').replace(/[,\s]/g,''))||0;
+          // 할인율: 고시가 대비 계산
+          var discountRate=listPrice>0&&applyPrice>0?Math.round((1-applyPrice/listPrice)*100)/100:0;
+
+          // 적용월 (마지막 열 헤더에서 추출)
+          var monthLabel=String(json[headerRow+1]?json[headerRow+1][lastPriceCol]||json[headerRow][lastPriceCol]||'':json[headerRow][lastPriceCol]||'');
+          var applyMonth=monthLabel.replace(/[.\s]/g,'');
+          if(applyMonth.length===6) applyMonth=applyMonth; // 202505 형태
+          else if(applyMonth.length===4) applyMonth=applyMonth+'01';
+          else applyMonth=new Date().toISOString().slice(0,7).replace(/-/g,'');
+
+          if(applyPrice>0){
+            rows.push({
+              product_code:code,product_name:pname,spec:spec,unit:unit,
+              vendor_name:lastVendor||vendor,list_price:listPrice,
+              apply_price:applyPrice,discount_rate:discountRate,
+              apply_month:applyMonth
+            });
+          }
+        }
+
+        if(rows.length===0){if(preview)preview.innerHTML='<div style="color:#ef4444">파싱된 단가 데이터가 없습니다.</div>';return;}
+
+        // 미리보기
+        var ph='<div style="font-size:13px;font-weight:600;margin-bottom:8px">미리보기 ('+rows.length+'건)</div>';
+        ph+='<div style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px">';
+        ph+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;position:sticky;top:0"><th style="padding:6px">코드</th><th style="padding:6px">품명</th><th style="padding:6px">규격</th><th style="padding:6px">제지사</th><th style="padding:6px;text-align:right">고시가</th><th style="padding:6px;text-align:right">적용가</th><th style="padding:6px;text-align:right">할인율</th><th style="padding:6px">적용월</th></tr></thead><tbody>';
+        rows.slice(0,50).forEach(function(r){
+          ph+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:monospace;font-size:11px">'+esc(r.product_code)+'</td>';
+          ph+='<td style="padding:4px 6px">'+esc(r.product_name)+'</td>';
+          ph+='<td style="padding:4px 6px;font-size:11px">'+esc(r.spec)+'</td>';
+          ph+='<td style="padding:4px 6px;font-size:11px">'+esc(r.vendor_name)+'</td>';
+          ph+='<td style="padding:4px 6px;text-align:right">'+fmtAmt(r.list_price)+'</td>';
+          ph+='<td style="padding:4px 6px;text-align:right;font-weight:600">'+fmtAmt(r.apply_price)+'</td>';
+          ph+='<td style="padding:4px 6px;text-align:right;color:#f59e0b">'+Math.round(r.discount_rate*100)+'%</td>';
+          ph+='<td style="padding:4px 6px;font-size:11px">'+esc(r.apply_month)+'</td></tr>';
+        });
+        if(rows.length>50) ph+='<tr><td colspan="8" style="padding:8px;text-align:center;color:#94a3b8">...외 '+(rows.length-50)+'건</td></tr>';
+        ph+='</tbody></table></div>';
+        ph+='<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-sm" onclick="uploadMpRows()" style="background:#2563eb;color:#fff;padding:8px 24px">업로드 확정 ('+rows.length+'건)</button>';
+        ph+='<button class="btn btn-sm" onclick="renderMpUploadUI()">취소</button></div>';
+        if(preview)preview.innerHTML=ph;
+        window._mpUploadRows=rows;
+      } catch(ex){if(preview)preview.innerHTML='<div style="color:#ef4444">파싱 오류: '+esc(ex.message)+'</div>';}
+    };
+    reader.onerror=function(){if(preview)preview.innerHTML='<div style="color:#ef4444">파일 읽기 실패</div>';};
+    reader.readAsArrayBuffer(file);
+  } catch(e){if(preview)preview.innerHTML='<div style="color:#ef4444">'+esc(e.message)+'</div>';}
+}
+
+async function uploadMpRows() {
+  var rows=window._mpUploadRows;
+  if(!rows||rows.length===0){alert('업로드할 데이터가 없습니다.');return;}
+  var result=document.getElementById('mpUploadResult');
+  if(result)result.innerHTML='<div style="text-align:center;padding:12px;color:#94a3b8">업로드 중...</div>';
+  try {
+    var resp=await authFetch('/api/material-price/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:rows})});
+    var r=await resp.json();
+    if(!r.ok){if(result)result.innerHTML='<div style="color:#ef4444;padding:12px">업로드 실패: '+esc(r.error||'')+'</div>';return;}
+    var d=r.data;
+    if(result)result.innerHTML='<div style="background:#f0fdf4;border-radius:8px;padding:16px;border-left:4px solid #22c55e">'
+      +'<div style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:4px">업로드 완료!</div>'
+      +'<div style="font-size:13px;color:#64748b">등록/갱신: <b>'+d.upserted+'건</b></div></div>';
+    window._mpUploadRows=null;
+    document.getElementById('mpUploadPreview').style.display='none';
+  } catch(e){if(result)result.innerHTML='<div style="color:#ef4444;padding:12px">'+esc(e.message)+'</div>';}
+}
+
+function exportMpExcel() {
+  if(typeof XLSX==='undefined'){alert('SheetJS 미로드');return;}
+  var rows=_mpData.map(function(i){return{'품목코드':i.product_code,'품명':i.product_name,'규격':i.spec,'단위':i.unit,'제지사':i.vendor_name,'고시가':i.list_price,'적용단가':i.apply_price,'할인율':i.discount_rate,'적용월':i.apply_month};});
+  var ws=XLSX.utils.json_to_sheet(rows);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'원재료단가');XLSX.writeFile(wb,'원재료단가_'+new Date().toISOString().slice(0,10)+'.xlsx');
 }
 
 // ── 작업지시 ──
