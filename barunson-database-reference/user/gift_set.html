@@ -63,6 +63,15 @@ body{font-family:'Malgun Gothic',-apple-system,sans-serif;background:#f8fafc;col
 .bom-row select,.bom-row input{padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
 .bom-row button{background:none;border:none;font-size:18px;color:#ef4444;cursor:pointer}
 .logout-btn{background:none;border:1px solid rgba(255,255,255,0.3);color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer}
+/* 수정 모달 */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:300;justify-content:center;align-items:center;padding:20px}
+.modal-bg.show{display:flex}
+.modal{background:#fff;width:100%;max-width:440px;border-radius:14px;padding:24px 20px;max-height:90vh;overflow-y:auto;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+.modal h3{font-size:18px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
+.modal h3 button{background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8}
+.edit-btn{background:none;border:1px solid #e2e8f0;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer}
+.edit-btn:active{background:#f5f3ff}
 .tab-bar{display:flex;gap:4px;margin-bottom:16px;background:#f1f5f9;padding:3px;border-radius:8px}
 .tab-bar .tab{flex:1;text-align:center;padding:8px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;color:#64748b}
 .tab-bar .tab.active{background:#fff;color:#7c3aed;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
@@ -172,6 +181,44 @@ body{font-family:'Malgun Gothic',-apple-system,sans-serif;background:#f8fafc;col
   </div>
 </div>
 
+<!-- 수정 모달 -->
+<div class="modal-bg" id="editModalBg" onclick="if(event.target===this)closeEditModal()">
+  <div class="modal">
+    <h3><span>세트 수정</span><button onclick="closeEditModal()">&times;</button></h3>
+    <input type="hidden" id="editSetId">
+    <div class="form-group">
+      <label>세트코드</label>
+      <input type="text" id="editCode" disabled style="background:#f8fafc;color:#94a3b8">
+    </div>
+    <div class="form-group">
+      <label>세트명 *</label>
+      <input type="text" id="editName">
+    </div>
+    <div class="form-group">
+      <label>구성 설명</label>
+      <input type="text" id="editDesc">
+    </div>
+    <div class="form-group">
+      <label>기초재고</label>
+      <input type="number" id="editBase" min="0">
+    </div>
+    <div class="form-group">
+      <label>상태</label>
+      <select id="editStatus" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px">
+        <option value="active">활성</option>
+        <option value="inactive">비활성</option>
+      </select>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px">
+      <label style="font-size:13px;font-weight:600;color:#334155">구성품 (BOM)</label>
+      <button onclick="addEditBomRow()" style="font-size:12px;padding:4px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer">+ 추가</button>
+    </div>
+    <div id="editBomRows"></div>
+    <button onclick="saveEditSet()" class="btn" style="margin-top:16px;background:#8b5cf6;color:#fff">저장</button>
+    <button onclick="closeEditModal()" class="btn btn-gray" style="margin-top:8px">취소</button>
+  </div>
+</div>
+
 <script>
 const API = '';
 let authToken = localStorage.getItem('gs_token') || '';
@@ -181,6 +228,20 @@ let capacityData = [];
 
 // ── Auth ──
 async function initApp() {
+  // 로컬 환경: local-bypass로 자동 로그인 (서버 배포 시 이 블록 제거)
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    try {
+      const bypass = await apiFetch('/api/auth/local-bypass');
+      if (bypass && bypass.token) {
+        authToken = bypass.token;
+        localStorage.setItem('gs_token', authToken);
+        currentUser = bypass.user || { display_name: '관리자', username: 'admin' };
+        showApp();
+        return;
+      }
+    } catch(e) {}
+  }
+
   const config = await apiFetch('/api/auth/config');
   if (config && config.google_client_id) {
     loadGoogleSignIn(config.google_client_id);
@@ -282,29 +343,48 @@ function renderSetCards() {
   e.style.display = 'none';
   c.innerHTML = giftSets.map(s => {
     const cap = capacityData.find(x => x.id === s.id) || {};
-    const stockColor = s.current_stock > 0 ? '#059669' : '#ef4444';
-    const capColor = cap.max_production > 0 ? '#2563eb' : '#94a3b8';
+    const remainColor = s.remaining_stock > 0 ? '#059669' : '#ef4444';
+    const availColor = (s.available_stock||0) > 0 ? '#059669' : '#ef4444';
+    const upcomingTotal = s.upcoming_total || 0;
+    const upcoming = s.upcoming_shipments || [];
+    const needMore = Math.max(0, upcomingTotal - (s.remaining_stock || 0));
     return `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div><div class="card-title">${esc(s.set_name)}</div><div class="card-sub">${esc(s.set_code)}</div></div>
       </div>
       ${s.description ? `<div class="card-desc">${esc(s.description)}</div>` : '<div style="height:8px"></div>'}
       <div class="stats">
-        <div class="stat" style="background:#f0fdf4">
-          <div class="stat-label">현재고</div>
-          <div class="stat-value" style="color:${stockColor}">${s.current_stock.toLocaleString()}</div>
+        <div class="stat" style="background:#f8fafc">
+          <div class="stat-label">기초재고</div>
+          <div class="stat-value" style="color:#334155;font-size:22px">${(s.base_stock||0).toLocaleString()}</div>
         </div>
         <div class="stat" style="background:#eff6ff">
-          <div class="stat-label">최대생산</div>
-          <div class="stat-value" style="color:${capColor}">${(cap.max_production || 0).toLocaleString()}</div>
-          <div class="stat-note">병목: ${esc(cap.bottleneck || '-')}</div>
+          <div class="stat-label">생산재고</div>
+          <div class="stat-value" style="color:#2563eb;font-size:22px">${(s.production_stock||0).toLocaleString()}</div>
+          <div class="stat-note">오늘 +${s.today_assembled||0}</div>
         </div>
-        <div class="stat" style="background:#faf5ff">
-          <div class="stat-label">오늘</div>
-          <div style="font-size:14px;font-weight:700;color:#059669;margin-top:4px">+${s.today_assembled || 0}</div>
-          <div style="font-size:14px;font-weight:700;color:#ef4444">-${s.today_shipped || 0}</div>
+        <div class="stat" style="background:#fef2f2">
+          <div class="stat-label">금일 출고</div>
+          <div class="stat-value" style="color:#ef4444;font-size:22px">${(s.today_shipped||0).toLocaleString()}</div>
+          <div class="stat-note">누적 ${(s.shipped_stock||0).toLocaleString()}</div>
         </div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
+        <div style="text-align:center;padding:8px 4px;background:#fef3c7;border-radius:8px">
+          <div style="font-size:10px;color:#92400e;margin-bottom:2px">출고예정(7일)</div>
+          <div style="font-size:20px;font-weight:800;color:#d97706">${upcomingTotal.toLocaleString()}</div>
+        </div>
+        <div style="text-align:center;padding:8px 4px;background:#f0fdf4;border-radius:8px">
+          <div style="font-size:10px;color:#064e3b;margin-bottom:2px">잔여재고</div>
+          <div style="font-size:20px;font-weight:800;color:${remainColor}">${(s.remaining_stock||0).toLocaleString()}</div>
+        </div>
+        <div style="text-align:center;padding:8px 4px;background:${needMore>0?'#fef2f2':'#f0fdf4'};border-radius:8px;border:${needMore>0?'2px solid #fecaca':'none'}">
+          <div style="font-size:10px;color:#064e3b;margin-bottom:2px">가용재고</div>
+          <div style="font-size:20px;font-weight:800;color:${availColor}">${(s.available_stock||0).toLocaleString()}</div>
+        </div>
+      </div>
+      ${needMore > 0 ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;font-weight:700;text-align:center">⚠️ ${needMore.toLocaleString()}개 추가 생산 필요</div>` : ''}
+      ${upcoming.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">${upcoming.map(d => `<span style="padding:2px 6px;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;font-size:10px"><b>${d.ship_date.slice(5)}</b> ${d.qty}개</span>`).join('')}</div>` : ''}
       <div class="btn-row">
         <button class="btn btn-green" onclick="openSheet(${s.id},'assembly','${esc(s.set_name)}')">+ 조립입고</button>
         <button class="btn btn-red" onclick="openSheet(${s.id},'shipment','${esc(s.set_name)}')">- 출고</button>
@@ -453,13 +533,73 @@ function loadManagedList() {
   if (!giftSets.length) { c.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px">등록된 세트 없음</div>'; return; }
   c.innerHTML = giftSets.map(s => `<div class="card" style="padding:12px 16px">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
+      <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:14px">${esc(s.set_name)}</div>
         <div style="font-size:11px;color:#94a3b8">${esc(s.set_code)} · 구성품 ${(s.bom || []).length}개 · 현재고 ${s.current_stock}</div>
       </div>
-      <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.status === 'active' ? '#f0fdf4' : '#fef2f2'};color:${s.status === 'active' ? '#16a34a' : '#ef4444'}">${s.status === 'active' ? '활성' : '비활성'}</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <button class="edit-btn" onclick="openEditModal(${s.id})">수정</button>
+        <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.status === 'active' ? '#f0fdf4' : '#fef2f2'};color:${s.status === 'active' ? '#16a34a' : '#ef4444'}">${s.status === 'active' ? '활성' : '비활성'}</span>
+      </div>
     </div>
   </div>`).join('');
+}
+
+function openEditModal(setId) {
+  const s = giftSets.find(g => g.id === setId);
+  if (!s) return;
+  document.getElementById('editSetId').value = s.id;
+  document.getElementById('editCode').value = s.set_code;
+  document.getElementById('editName').value = s.set_name;
+  document.getElementById('editDesc').value = s.description || '';
+  document.getElementById('editBase').value = s.base_stock || 0;
+  document.getElementById('editStatus').value = s.status || 'active';
+  const bomC = document.getElementById('editBomRows');
+  bomC.innerHTML = '';
+  (s.bom || []).forEach(b => addEditBomRow(b));
+  document.getElementById('editModalBg').classList.add('show');
+}
+
+function closeEditModal() {
+  document.getElementById('editModalBg').classList.remove('show');
+}
+
+function addEditBomRow(data) {
+  const c = document.getElementById('editBomRows');
+  const div = document.createElement('div');
+  div.className = 'bom-row';
+  div.innerHTML = `
+    <select><option value="material" ${data && data.item_type==='material'?'selected':''}>원재료</option><option value="sub" ${data && data.item_type==='sub'?'selected':''}>반제품</option><option value="pkg" ${data && data.item_type==='pkg'?'selected':''}>포장재</option></select>
+    <input type="text" placeholder="품목코드" value="${data ? esc(data.item_code||'') : ''}">
+    <input type="text" placeholder="품목명" value="${data ? esc(data.item_name||'') : ''}">
+    <input type="number" placeholder="수량" value="${data ? data.qty_per||1 : 1}" min="1">
+    <button onclick="this.parentElement.remove()">&times;</button>`;
+  c.appendChild(div);
+}
+
+async function saveEditSet() {
+  const id = document.getElementById('editSetId').value;
+  const name = document.getElementById('editName').value.trim();
+  const desc = document.getElementById('editDesc').value.trim();
+  const base = parseInt(document.getElementById('editBase').value) || 0;
+  const status = document.getElementById('editStatus').value;
+  if (!name) { alert('세트명은 필수입니다'); return; }
+  const bom = [];
+  for (const row of document.getElementById('editBomRows').children) {
+    const inputs = row.querySelectorAll('input');
+    const sel = row.querySelector('select');
+    if (inputs[0].value.trim() || inputs[1].value.trim()) {
+      bom.push({ item_type: sel.value, item_code: inputs[0].value.trim(), item_name: inputs[1].value.trim(), qty_per: parseFloat(inputs[2].value) || 1 });
+    }
+  }
+  const resp = await apiFetch('/api/gift-sets/' + id, { method: 'PUT', body: JSON.stringify({ set_name: name, description: desc, base_stock: base, status, bom }) });
+  if (resp && resp.updated) {
+    closeEditModal();
+    loadAll();
+    alert('수정되었습니다');
+  } else {
+    alert((resp && resp.error) || '수정 실패');
+  }
 }
 
 // ── 탭 전환 ──

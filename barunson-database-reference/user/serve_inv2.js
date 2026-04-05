@@ -1107,6 +1107,48 @@ try { db.exec("ALTER TABLE china_shipment_log ADD COLUMN bl_number TEXT DEFAULT 
 try { db.exec("ALTER TABLE china_shipment_log ADD COLUMN ship_date TEXT DEFAULT ''"); } catch(_) {}
 try { db.exec("ALTER TABLE china_shipment_log ADD COLUMN eta_date TEXT DEFAULT ''"); } catch(_) {}
 
+// ── 선적 ↔ PO 아이템 연결 (파셜 입고 추적) ──
+db.exec(`CREATE TABLE IF NOT EXISTS shipment_po_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shipment_id INTEGER NOT NULL,
+  po_id INTEGER NOT NULL,
+  po_item_id INTEGER,
+  product_code TEXT DEFAULT '',
+  product_name TEXT DEFAULT '',
+  shipped_qty INTEGER DEFAULT 0,
+  received_qty INTEGER DEFAULT 0,
+  notes TEXT DEFAULT '',
+  UNIQUE(shipment_id, po_item_id)
+)`);
+
+// ── 더기프트 포장작업 ──
+db.exec(`CREATE TABLE IF NOT EXISTS gift_assembly (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assembly_no TEXT UNIQUE,
+  product_code TEXT NOT NULL,
+  product_name TEXT DEFAULT '',
+  target_qty INTEGER DEFAULT 0,
+  completed_qty INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'planned',
+  assembly_date TEXT,
+  completed_date TEXT,
+  worker_name TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS gift_assembly_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assembly_id INTEGER NOT NULL,
+  item_code TEXT NOT NULL,
+  item_name TEXT DEFAULT '',
+  required_qty INTEGER DEFAULT 0,
+  issued_qty INTEGER DEFAULT 0,
+  lot_id INTEGER,
+  UNIQUE(assembly_id, item_code)
+)`);
+
 // ── 거래명세서 파일 관리 ──
 db.exec(`CREATE TABLE IF NOT EXISTS trade_doc_files (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1368,6 +1410,30 @@ try { db.exec("ALTER TABLE product_post_vendor ADD COLUMN step_order INTEGER DEF
 try { db.exec("ALTER TABLE po_header ADD COLUMN process_step INTEGER DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE po_header ADD COLUMN parent_po_id INTEGER DEFAULT NULL"); } catch {}
 try { db.exec("ALTER TABLE po_header ADD COLUMN process_chain TEXT DEFAULT ''"); } catch {}
+// ±5% tolerance + force-approve columns
+try { db.exec("ALTER TABLE po_header ADD COLUMN tolerance_pct REAL DEFAULT 5.0"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN force_completed INTEGER DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN force_completed_by TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN force_completed_at TEXT DEFAULT ''"); } catch {}
+// 제지사→후공정 2-stage flow columns
+try { db.exec("ALTER TABLE po_header ADD COLUMN material_vendor_name TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN process_vendor_name TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN material_send_date TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN material_confirmed_at TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE po_header ADD COLUMN process_email_sent INTEGER DEFAULT 0"); } catch {}
+// 거래처 입고일 확정
+try { db.exec("ALTER TABLE po_header ADD COLUMN vendor_confirmed_date TEXT DEFAULT ''"); } catch {} // 거래처가 확정한 입고일
+try { db.exec("ALTER TABLE po_header ADD COLUMN vendor_confirmed_at TEXT DEFAULT ''"); } catch {} // 확정 시각
+// 중국 신제품/리오더 구분
+try { db.exec("ALTER TABLE po_header ADD COLUMN order_type TEXT DEFAULT ''"); } catch {} // new/reorder
+// 더기프트 출고 트래킹
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN delivery_status TEXT DEFAULT ''"); } catch {} // packed/shipped/delivered
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN tracking_number TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN carrier TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN shipped_date TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN delivered_date TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN delivery_address TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE gift_assembly ADD COLUMN recipient_name TEXT DEFAULT ''"); } catch {}
 
 // ── po_header.origin 빈 값 backfill (품목 → products.origin 매핑) ──
 try {
@@ -1638,6 +1704,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS gift_set_transactions (
 )`);
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_set ON gift_set_transactions(set_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_gst_created ON gift_set_transactions(created_at)");
+
+// ── 더기프트 출고 스케줄 (출고예정 관리) ──
+db.exec(`CREATE TABLE IF NOT EXISTS gift_shipment_schedule (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  set_id        INTEGER NOT NULL,
+  set_code      TEXT DEFAULT '',
+  set_name      TEXT DEFAULT '',
+  ship_date     TEXT NOT NULL,
+  planned_qty   INTEGER DEFAULT 0,
+  shipped_qty   INTEGER DEFAULT 0,
+  status        TEXT DEFAULT 'planned',
+  order_ref     TEXT DEFAULT '',
+  recipient     TEXT DEFAULT '',
+  address       TEXT DEFAULT '',
+  notes         TEXT DEFAULT '',
+  created_at    TEXT DEFAULT (datetime('now','localtime')),
+  updated_at    TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_gss_set ON gift_shipment_schedule(set_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_gss_date ON gift_shipment_schedule(ship_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_gss_status ON gift_shipment_schedule(status)");
 
 // ── 매출관리 캐시 테이블 ──
 db.exec(`CREATE TABLE IF NOT EXISTS sales_daily_cache (
@@ -2136,11 +2223,158 @@ db.exec(`CREATE TABLE IF NOT EXISTS daily_cash (
   UNIQUE(cash_date, acc_code)
 )`);
 
+// ── 수동 분개 (Manual Journal Entries) ──
+db.exec(`CREATE TABLE IF NOT EXISTS journal_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_no TEXT UNIQUE,
+  entry_date TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  total_amount REAL DEFAULT 0,
+  status TEXT DEFAULT 'posted',
+  created_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS journal_entry_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id INTEGER NOT NULL,
+  line_no INTEGER DEFAULT 1,
+  acc_code TEXT NOT NULL,
+  acc_name TEXT DEFAULT '',
+  debit REAL DEFAULT 0,
+  credit REAL DEFAULT 0,
+  description TEXT DEFAULT ''
+)`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_je_date ON journal_entries(entry_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_jel_entry ON journal_entry_lines(entry_id)");
+
 // ── Phase 6: 생산실적 ──
 db.exec(`CREATE TABLE IF NOT EXISTS work_order_results (
   id INTEGER PRIMARY KEY, work_order_id INTEGER NOT NULL,
   result_date TEXT NOT NULL, good_qty INTEGER DEFAULT 0, defect_qty INTEGER DEFAULT 0,
   worker_name TEXT DEFAULT '', work_hours REAL DEFAULT 0, notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+// ── Phase 1-6 확장 테이블 ──
+
+// 안전재고 규칙
+db.exec(`CREATE TABLE IF NOT EXISTS safety_stock_rules (
+  id INTEGER PRIMARY KEY, product_code TEXT NOT NULL UNIQUE,
+  product_name TEXT DEFAULT '', min_qty INTEGER DEFAULT 0,
+  reorder_qty INTEGER DEFAULT 0, reorder_point INTEGER DEFAULT 0,
+  lead_time_days INTEGER DEFAULT 7, warehouse TEXT DEFAULT '',
+  auto_po INTEGER DEFAULT 0, vendor_name TEXT DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+// 재고실사
+db.exec(`CREATE TABLE IF NOT EXISTS cycle_count_plans (
+  id INTEGER PRIMARY KEY, plan_no TEXT UNIQUE,
+  plan_date TEXT NOT NULL, warehouse TEXT DEFAULT '',
+  status TEXT DEFAULT 'planned', note TEXT DEFAULT '',
+  created_by TEXT DEFAULT '', completed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS cycle_count_items (
+  id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL,
+  product_code TEXT NOT NULL, product_name TEXT DEFAULT '',
+  system_qty INTEGER DEFAULT 0, counted_qty INTEGER,
+  variance INTEGER DEFAULT 0, adjusted INTEGER DEFAULT 0,
+  note TEXT DEFAULT '',
+  UNIQUE(plan_id, product_code)
+)`);
+
+// 제조원가
+db.exec(`CREATE TABLE IF NOT EXISTS mfg_cost_cards (
+  id INTEGER PRIMARY KEY, product_code TEXT NOT NULL,
+  product_name TEXT DEFAULT '', calc_date TEXT NOT NULL,
+  material_cost REAL DEFAULT 0, labor_cost REAL DEFAULT 0,
+  overhead_cost REAL DEFAULT 0, outsource_cost REAL DEFAULT 0,
+  total_cost REAL DEFAULT 0, unit_cost REAL DEFAULT 0,
+  qty INTEGER DEFAULT 1, source TEXT DEFAULT 'auto',
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(product_code, calc_date)
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS cost_rates (
+  id INTEGER PRIMARY KEY, rate_type TEXT NOT NULL,
+  rate_key TEXT NOT NULL, rate_value REAL DEFAULT 0,
+  unit TEXT DEFAULT '', effective_from TEXT,
+  notes TEXT DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(rate_type, rate_key)
+)`);
+// 기본 노무비/경비 시드
+try {
+  db.prepare("INSERT OR IGNORE INTO cost_rates (rate_type,rate_key,rate_value,unit,notes) VALUES (?,?,?,?,?)").run('labor','default',25000,'원/시간','기본 노무비 단가');
+  db.prepare("INSERT OR IGNORE INTO cost_rates (rate_type,rate_key,rate_value,unit,notes) VALUES (?,?,?,?,?)").run('overhead','rate',15,'%','제조경비 비율 (재료비+노무비 대비)');
+} catch(_){}
+
+// RBAC 권한
+db.exec(`CREATE TABLE IF NOT EXISTS role_permissions (
+  id INTEGER PRIMARY KEY, role TEXT NOT NULL,
+  permission TEXT NOT NULL, resource TEXT DEFAULT '*',
+  granted INTEGER DEFAULT 1,
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(role, permission, resource)
+)`);
+// 기본 권한 시드
+try {
+  const seedPerms = db.transaction(() => {
+    const ins = db.prepare("INSERT OR IGNORE INTO role_permissions (role,permission,resource) VALUES (?,?,?)");
+    ['admin'].forEach(r => ins.run(r, '*', '*'));
+    ['purchase'].forEach(r => { ['read','write'].forEach(p => ['po','vendor','receipt','inventory','auto-order'].forEach(res => ins.run(r,p,res))); ins.run(r,'read','dashboard'); });
+    ['sales'].forEach(r => { ['read','write'].forEach(p => ['sales-order','customer-orders','shipping'].forEach(res => ins.run(r,p,res))); ins.run(r,'read','dashboard'); ins.run(r,'read','inventory'); });
+    ['production'].forEach(r => { ['read','write'].forEach(p => ['work-order','production-req','bom','equipment','process-routing'].forEach(res => ins.run(r,p,res))); ins.run(r,'read','dashboard'); ins.run(r,'read','inventory'); });
+    ['accounting'].forEach(r => { ['read','write'].forEach(p => ['journal','budget','tax-invoice','ar-ap','mfg-cost'].forEach(res => ins.run(r,p,res))); ins.run(r,'read','dashboard'); });
+    ['executive'].forEach(r => { ins.run(r,'read','*'); });
+    ['viewer'].forEach(r => { ins.run(r,'read','*'); });
+  });
+  seedPerms();
+} catch(_){}
+
+// 공정 라우팅
+db.exec(`CREATE TABLE IF NOT EXISTS process_routing (
+  id INTEGER PRIMARY KEY, product_code TEXT NOT NULL,
+  step_no INTEGER NOT NULL, process_name TEXT NOT NULL,
+  process_type TEXT DEFAULT 'internal',
+  equipment_id INTEGER, vendor_name TEXT DEFAULT '',
+  std_time_min REAL DEFAULT 0, setup_time_min REAL DEFAULT 0,
+  notes TEXT DEFAULT '',
+  UNIQUE(product_code, step_no)
+)`);
+
+// 공정별 실적
+db.exec(`CREATE TABLE IF NOT EXISTS process_results (
+  id INTEGER PRIMARY KEY, wo_id INTEGER NOT NULL,
+  routing_id INTEGER, step_no INTEGER NOT NULL,
+  process_name TEXT NOT NULL, equipment_id INTEGER,
+  start_time TEXT, end_time TEXT,
+  good_qty INTEGER DEFAULT 0, defect_qty INTEGER DEFAULT 0,
+  worker_name TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+// 설비 마스터
+db.exec(`CREATE TABLE IF NOT EXISTS equipment (
+  id INTEGER PRIMARY KEY, eq_code TEXT UNIQUE NOT NULL,
+  eq_name TEXT NOT NULL, eq_type TEXT DEFAULT '',
+  location TEXT DEFAULT '', status TEXT DEFAULT 'active',
+  purchase_date TEXT, manufacturer TEXT DEFAULT '',
+  model TEXT DEFAULT '', capacity_per_hour REAL DEFAULT 0,
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+
+// 설비 로그 (가동/비가동/정비)
+db.exec(`CREATE TABLE IF NOT EXISTS equipment_logs (
+  id INTEGER PRIMARY KEY, equipment_id INTEGER NOT NULL,
+  log_date TEXT NOT NULL, log_type TEXT NOT NULL,
+  start_time TEXT, end_time TEXT,
+  duration_min REAL DEFAULT 0, reason TEXT DEFAULT '',
+  worker_name TEXT DEFAULT '', notes TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now','localtime'))
 )`);
 
@@ -2282,11 +2516,28 @@ const ALL_PAGES = [
   { id: 'tasks', name: '업무관리', group: '업무' },
   { id: 'notes', name: '미팅일지', group: '업무' },
   { id: 'board', name: '공지/게시판', group: '업무' },
+  // 통합발주
+  { id: 'procurement', name: '통합발주관리', group: '구매' },
+  // 재고 확장
+  { id: 'safety-stock', name: '안전재고관리', group: '재고' },
+  { id: 'cycle-count', name: '재고실사', group: '재고' },
+  // 생산 확장
+  { id: 'process-routing', name: '공정라우팅', group: '생산' },
+  { id: 'equipment', name: '설비관리', group: '생산' },
+  // 회계 확장
+  { id: 'mfg-cost', name: '제조원가', group: '회계' },
+  { id: 'vat-report', name: '부가세 신고', group: '회계' },
+  { id: 'journal-auto', name: '자동 분개', group: '회계' },
+  // 재고 확장
+  { id: 'barcode', name: '바코드/QR', group: '재고' },
+  // 경영분석 확장
+  { id: 'report-builder', name: '보고서 빌더', group: '경영분석' },
   // 시스템
   { id: 'settings', name: '설정', group: '시스템' },
   { id: 'user-mgmt', name: '사용자 관리', group: '시스템' },
   { id: 'audit-log', name: '감사로그', group: '시스템' },
   { id: 'notification', name: '알림센터', group: '시스템' },
+  { id: 'rbac', name: '권한관리', group: '시스템' },
 ];
 
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
@@ -2296,8 +2547,9 @@ const ROLE_PERMISSIONS = {
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'work-order', 'lot-tracking',
-    'approval', 'sales-order', 'budget', 'notification'],
-  production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking'],
+    'approval', 'sales-order', 'budget', 'notification', 'safety-stock', 'cycle-count', 'mfg-cost'],
+  production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking',
+    'process-routing', 'equipment', 'mfg-cost', 'safety-stock'],
   viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
 };
@@ -2318,6 +2570,22 @@ function hasPermission(role, page, userPermissions) {
 
 // GET /api/auth/pages — 전체 페이지 목록 (관리자 권한 UI용)
 // (handleRequest 내에서 처리)
+
+// ── 메뉴 활성화/비활성화 설정 테이블 ──
+db.exec(`CREATE TABLE IF NOT EXISTS menu_settings (
+  page_id    TEXT PRIMARY KEY,
+  is_enabled INTEGER DEFAULT 1,
+  sort_order INTEGER DEFAULT 0,
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+// 기본값: 모든 페이지 활성화 (dashboard, settings는 항상 활성)
+try {
+  const existing = db.prepare('SELECT page_id FROM menu_settings').all().map(r => r.page_id);
+  const insertStmt = db.prepare('INSERT OR IGNORE INTO menu_settings (page_id, is_enabled, sort_order) VALUES (?, 1, ?)');
+  ALL_PAGES.forEach((p, idx) => {
+    if (!existing.includes(p.id)) insertStmt.run(p.id, idx);
+  });
+} catch (_) {}
 
 // ── DB 자동 백업 ──────────────────────────────────────────────────
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
@@ -2470,6 +2738,61 @@ function generatePoNumber() {
   return prefix + String(seq).padStart(3, '0');
 }
 
+// ── Route Modules (모듈화) ──────────────────────────────────────────
+const routeCtx = require('./routes/_ctx');
+// ctx 초기화 — 모든 공유 상태를 route 모듈에 전달
+Object.assign(routeCtx, {
+  db, ok, fail, jsonRes, readBody, readJSON, parseMultipart,
+  signToken, verifyToken, extractToken,
+  auditLog, logError, logPOActivity: typeof logPOActivity !== 'undefined' ? logPOActivity : null,
+  createNotification, generatePoNumber, hasPermission,
+  ALL_PAGES, ROLE_PERMISSIONS, KNOWN_ACCOUNTS: typeof KNOWN_ACCOUNTS !== 'undefined' ? KNOWN_ACCOUNTS : {},
+  DEPT_GUBUN_LABELS: typeof DEPT_GUBUN_LABELS !== 'undefined' ? DEPT_GUBUN_LABELS : {},
+  BRAND_LABELS: typeof BRAND_LABELS !== 'undefined' ? BRAND_LABELS : {},
+  bcrypt, jwt, sql, nodemailer, fs, path,
+  _smtpTransporter: typeof smtpTransporter !== 'undefined' ? smtpTransporter : null,
+  SMTP_FROM: typeof SMTP_FROM !== 'undefined' ? SMTP_FROM : '',
+  xerpInventoryCache: typeof xerpInventoryCache !== 'undefined' ? xerpInventoryCache : null,
+  getXerpPool: () => typeof xerpPool !== 'undefined' ? xerpPool : null,
+  getDdPool: () => typeof ddPool !== 'undefined' ? ddPool : null,
+  ensureXerpPool: typeof ensureXerpPool !== 'undefined' ? ensureXerpPool : null,
+});
+
+// 라우트 모듈 로드 (새 기능은 모듈로 추가)
+const moduleRouters = [];
+try {
+  const journalAuto = require('./routes/journal-auto');
+  if (journalAuto.initTables) journalAuto.initTables();
+  if (journalAuto.router) moduleRouters.push(journalAuto.router);
+  // 입고 시 자동 전표 훅을 전역에 등록
+  global._hookReceiveJournal = journalAuto.hookReceiveJournal || null;
+  global._hookShipmentJournal = journalAuto.hookShipmentJournal || null;
+  console.log('✅ 모듈 로드: journal-auto (' + (journalAuto.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ journal-auto 모듈 미로드:', e.message); }
+
+try {
+  const vatReport = require('./routes/vat-report');
+  if (vatReport.initTables) vatReport.initTables();
+  if (vatReport.router) moduleRouters.push(vatReport.router);
+  console.log('✅ 모듈 로드: vat-report (' + (vatReport.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ vat-report 모듈 미로드:', e.message); }
+
+try {
+  const barcode = require('./routes/barcode');
+  if (barcode.initTables) barcode.initTables();
+  if (barcode.router) moduleRouters.push(barcode.router);
+  console.log('✅ 모듈 로드: barcode (' + (barcode.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ barcode 모듈 미로드:', e.message); }
+
+try {
+  const reportEngine = require('./routes/report-engine');
+  if (reportEngine.initTables) reportEngine.initTables();
+  if (reportEngine.router) moduleRouters.push(reportEngine.router);
+  console.log('✅ 모듈 로드: report-engine (' + (reportEngine.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ report-engine 모듈 미로드:', e.message); }
+
+console.log(`📦 총 ${moduleRouters.reduce((s,r) => s + r.count, 0)}개 모듈 라우트 등록`);
+
 // ── Server ──────────────────────────────────────────────────────────
 http.createServer(async (req, res) => {
   try {
@@ -2508,6 +2831,11 @@ async function handleRequest(req, res) {
     res.writeHead(204, CORS);
     res.end();
     return;
+  }
+
+  // ── 모듈 라우터 우선 처리 ──
+  for (const mr of moduleRouters) {
+    if (await mr.handle(req, res, pathname, method, parsed)) return;
   }
 
   // GET /api/health — 시스템 헬스체크 (최상위 배치 — Docker 배포 안정성)
@@ -2701,13 +3029,52 @@ async function handleRequest(req, res) {
     const userPerms = user.permissions ? JSON.parse(user.permissions) : [];
     const effectivePerms = user.role === 'admin' ? ['*'] : (userPerms.length > 0 ? userPerms : (ROLE_PERMISSIONS[user.role] || []));
     let favs = []; try { favs = JSON.parse(user.favorites || '[]'); } catch {}
-    ok(res, { user: { ...user, permissions: undefined, favorites: undefined }, permissions: effectivePerms, favorites: favs });
+    // ���뉴 활성화 상태 포함
+    let menuEnabled = {};
+    try {
+      const ms = db.prepare('SELECT page_id, is_enabled FROM menu_settings').all();
+      ms.forEach(r => { menuEnabled[r.page_id] = r.is_enabled; });
+    } catch (_) {}
+    ok(res, { user: { ...user, permissions: undefined, favorites: undefined }, permissions: effectivePerms, favorites: favs, menuEnabled });
     return;
   }
 
   // GET /api/auth/pages — 전체 페이지 목록 (관리자 권한 UI용)
   if (pathname === '/api/auth/pages' && method === 'GET') {
     ok(res, ALL_PAGES);
+    return;
+  }
+
+  // ��─ 메뉴 활성화/비활성화 API ──
+  if (pathname === '/api/menu-settings' && method === 'GET') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const rows = db.prepare('SELECT page_id, is_enabled, sort_order FROM menu_settings ORDER BY sort_order').all();
+    const map = {};
+    rows.forEach(r => { map[r.page_id] = { is_enabled: r.is_enabled, sort_order: r.sort_order }; });
+    ok(res, map);
+    return;
+  }
+  if (pathname === '/api/menu-settings' && method === 'POST') {
+    const token = extractToken(req);
+    const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const user = db.prepare("SELECT role FROM users WHERE user_id = ?").get(decoded.userId);
+    if (!user || user.role !== 'admin') { fail(res, 403, '관리자만 메뉴 설정을 변경할 수 있습니다'); return; }
+    const body = await readJSON(req);
+    // body: { settings: { page_id: { is_enabled: 0|1, sort_order?: N }, ... } }
+    const upsert = db.prepare(`INSERT INTO menu_settings (page_id, is_enabled, sort_order, updated_at) VALUES (?, ?, ?, datetime('now','localtime'))
+      ON CONFLICT(page_id) DO UPDATE SET is_enabled=excluded.is_enabled, sort_order=excluded.sort_order, updated_at=excluded.updated_at`);
+    const PROTECTED = ['dashboard', 'settings']; // 항상 활성��
+    const tx = db.transaction(() => {
+      for (const [pageId, cfg] of Object.entries(body.settings || {})) {
+        const enabled = PROTECTED.includes(pageId) ? 1 : (cfg.is_enabled ? 1 : 0);
+        upsert.run(pageId, enabled, cfg.sort_order || 0);
+      }
+    });
+    tx();
+    ok(res, { message: '메뉴 설정이 저장되었��니다' });
     return;
   }
 
@@ -4103,6 +4470,485 @@ async function handleRequest(req, res) {
     }
     ok(res, { updated: true });
     return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  통합발주관리 API (한국/중국/더기프트 origin별 워크플로우)
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/procurement/dashboard — origin별 파이프라인 요약
+  if (pathname === '/api/procurement/dashboard' && method === 'GET') {
+    const origins = ['한국', '중국', '더기프트'];
+    const result = {};
+    for (const org of origins) {
+      const total = db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=?").get(org);
+      const byStatus = db.prepare("SELECT status, COUNT(*) AS c FROM po_header WHERE origin=? GROUP BY status").all(org);
+      const partial = db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=? AND status='partial'").get(org);
+      const overdue = db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=? AND status NOT IN ('received','cancelled','completed') AND expected_date < date('now','localtime') AND expected_date != ''").get(org);
+      const recentPo = db.prepare("SELECT po_id, po_number, vendor_name, status, expected_date, po_date, total_qty FROM po_header WHERE origin=? ORDER BY created_at DESC LIMIT 5").all(org);
+      // 입고율 (전체 아이템 기준)
+      const rcvRate = db.prepare(`
+        SELECT COALESCE(SUM(i.received_qty),0) AS received, COALESCE(SUM(i.ordered_qty),0) AS ordered
+        FROM po_items i JOIN po_header h ON h.po_id=i.po_id WHERE h.origin=? AND h.status NOT IN ('cancelled','draft')
+      `).get(org);
+      result[org] = {
+        total: total.c,
+        by_status: Object.fromEntries(byStatus.map(r => [r.status, r.c])),
+        partial: partial.c,
+        overdue: overdue.c,
+        receive_rate: rcvRate.ordered > 0 ? Math.round(rcvRate.received / rcvRate.ordered * 100) : 0,
+        recent: recentPo
+      };
+    }
+    // 중국 선적 현황
+    const shipments = db.prepare("SELECT * FROM china_shipment_log WHERE status NOT IN ('completed','cancelled') ORDER BY eta_date ASC LIMIT 10").all();
+    // 더기프트 포장 현황
+    const assemblies = db.prepare("SELECT * FROM gift_assembly WHERE status NOT IN ('completed','cancelled') ORDER BY created_at DESC LIMIT 10").all();
+    ok(res, { origins: result, shipments, assemblies }); return;
+  }
+
+  // GET /api/procurement/po-receive-status — PO별 아이템 입고현황 (분할입고 추적)
+  if (pathname === '/api/procurement/po-receive-status' && method === 'GET') {
+    const qs = new URL(req.url, `http://${req.headers.host}`).searchParams;
+    const origin = qs.get('origin') || '';
+    const status = qs.get('status') || '';
+    let where = "WHERE 1=1";
+    const params = [];
+    if (origin) { where += " AND h.origin=?"; params.push(origin); }
+    if (status) { where += " AND h.status=?"; params.push(status); }
+    else { where += " AND h.status NOT IN ('cancelled','draft')"; }
+    const rows = db.prepare(`
+      SELECT h.po_id, h.po_number, h.origin, h.vendor_name, h.status, h.po_date, h.expected_date,
+             h.po_type, h.material_status, h.process_status, h.process_step, h.notes,
+             i.item_id, i.product_code, i.brand, i.process_type, i.ordered_qty, i.received_qty, i.spec
+      FROM po_header h JOIN po_items i ON h.po_id = i.po_id ${where}
+      ORDER BY h.created_at DESC
+    `).all(...params);
+    // Group by PO
+    const poMap = new Map();
+    for (const r of rows) {
+      if (!poMap.has(r.po_id)) {
+        poMap.set(r.po_id, {
+          po_id: r.po_id, po_number: r.po_number, origin: r.origin,
+          vendor_name: r.vendor_name, status: r.status, po_date: r.po_date,
+          expected_date: r.expected_date, po_type: r.po_type,
+          material_status: r.material_status, process_status: r.process_status,
+          process_step: r.process_step, notes: r.notes,
+          items: [], total_ordered: 0, total_received: 0
+        });
+      }
+      const po = poMap.get(r.po_id);
+      po.items.push({ item_id: r.item_id, product_code: r.product_code, brand: r.brand, process_type: r.process_type, ordered_qty: r.ordered_qty, received_qty: r.received_qty, spec: r.spec, progress: r.ordered_qty > 0 ? Math.round(r.received_qty / r.ordered_qty * 100) : 0 });
+      po.total_ordered += r.ordered_qty;
+      po.total_received += r.received_qty;
+    }
+    const data = Array.from(poMap.values()).map(po => ({ ...po, progress: po.total_ordered > 0 ? Math.round(po.total_received / po.total_ordered * 100) : 0 }));
+    ok(res, data); return;
+  }
+
+  // POST /api/procurement/receive — 분할입고 (아이템 단위)
+  if (pathname === '/api/procurement/receive' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.po_id) { fail(res, 400, 'po_id required'); return; }
+    const items = body.items || []; // [{po_item_id, product_code, received_qty, defect_qty, notes}]
+    if (!items.length) { fail(res, 400, 'items required'); return; }
+    const tx = db.transaction(() => {
+      const rInfo = db.prepare("INSERT INTO receipts (po_id, receipt_date, received_by, notes) VALUES (?, ?, ?, ?)").run(
+        body.po_id, body.receipt_date || new Date().toISOString().slice(0,10), body.received_by || '', body.notes || '');
+      const receiptId = rInfo.lastInsertRowid;
+      const riStmt = db.prepare("INSERT INTO receipt_items (receipt_id, po_item_id, product_code, received_qty, defect_qty, notes) VALUES (?,?,?,?,?,?)");
+      const updItem = db.prepare("UPDATE po_items SET received_qty = received_qty + ? WHERE item_id = ?");
+      for (const it of items) {
+        riStmt.run(receiptId, it.po_item_id || null, it.product_code || '', it.received_qty || 0, it.defect_qty || 0, it.notes || '');
+        if (it.po_item_id && it.received_qty) updItem.run(it.received_qty, it.po_item_id);
+      }
+      // PO 상태 자동 갱신 (±tolerance% 허용 로직)
+      const poHeader = db.prepare('SELECT tolerance_pct, origin FROM po_header WHERE po_id=?').get(body.po_id);
+      const tolerancePct = poHeader?.tolerance_pct || 5.0;
+      const poItems = db.prepare('SELECT ordered_qty, received_qty FROM po_items WHERE po_id=?').all(body.po_id);
+      const totalOrdered = poItems.reduce((s, pi) => s + pi.ordered_qty, 0);
+      const totalReceived = poItems.reduce((s, pi) => s + pi.received_qty, 0);
+      const lowerBound = totalOrdered * (1 - tolerancePct / 100); // e.g. 9,500 for 10,000 @ 5%
+      const upperBound = totalOrdered * (1 + tolerancePct / 100); // e.g. 10,500
+      const allExact = poItems.length > 0 && poItems.every(pi => pi.received_qty >= pi.ordered_qty);
+      const withinTolerance = totalReceived >= lowerBound && totalReceived <= upperBound;
+      const anyDone = poItems.some(pi => pi.received_qty > 0);
+      let autoCompleted = false;
+      if (allExact || (withinTolerance && totalReceived >= lowerBound)) {
+        db.prepare("UPDATE po_header SET status='received', updated_at=datetime('now','localtime') WHERE po_id=?").run(body.po_id);
+        autoCompleted = true;
+        if (withinTolerance && !allExact) {
+          db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+            body.po_id, 'auto_complete_tolerance', 'system',
+            `±${tolerancePct}% 허용범위 자동완료 (발주:${totalOrdered}, 입고:${totalReceived}, 범위:${Math.round(lowerBound)}~${Math.round(upperBound)})`);
+        }
+      } else if (anyDone) {
+        db.prepare("UPDATE po_header SET status='partial', updated_at=datetime('now','localtime') WHERE po_id=?").run(body.po_id);
+      }
+      // 입고 활동 로그
+      db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+        body.po_id, 'receive', body.received_by || 'system',
+        JSON.stringify(items.map(i => ({ code: i.product_code, qty: i.received_qty })))
+      );
+      // 선적 연결 (중국인 경우)
+      if (body.shipment_id) {
+        const spStmt = db.prepare("INSERT OR REPLACE INTO shipment_po_items (shipment_id, po_id, po_item_id, product_code, shipped_qty, received_qty) VALUES (?,?,?,?,?,?)");
+        for (const it of items) {
+          spStmt.run(body.shipment_id, body.po_id, it.po_item_id || null, it.product_code || '', it.shipped_qty || it.received_qty, it.received_qty || 0);
+        }
+      }
+      return receiptId;
+    });
+    const receiptId = tx();
+    // 알림
+    const po = db.prepare("SELECT po_number, origin, vendor_name FROM po_header WHERE po_id=?").get(body.po_id);
+    if (po) createNotification(null, 'po', `입고완료: ${po.po_number}`, `${po.vendor_name} - ${items.length}건 입고`, 'procurement');
+    // 자동 전표 생성 훅 (입고→매입전표)
+    if (global._hookReceiveJournal) {
+      try { global._hookReceiveJournal(body.po_id, items, body.received_by || ''); }
+      catch(e) { console.error('전표 자동생성 오류:', e.message); }
+    }
+    ok(res, { receipt_id: receiptId }); return;
+  }
+
+  // GET /api/procurement/receive-history/:poId — PO의 입고이력
+  const rcvHistMatch = pathname.match(/^\/api\/procurement\/receive-history\/(\d+)$/);
+  if (rcvHistMatch && method === 'GET') {
+    const poId = rcvHistMatch[1];
+    const receipts = db.prepare(`
+      SELECT r.receipt_id, r.receipt_date, r.received_by, r.notes AS receipt_notes,
+             ri.product_code, ri.received_qty, ri.defect_qty, ri.notes AS item_notes
+      FROM receipts r JOIN receipt_items ri ON r.receipt_id = ri.receipt_id
+      WHERE r.po_id = ? ORDER BY r.receipt_date DESC
+    `).all(poId);
+    ok(res, receipts); return;
+  }
+
+  // ── 중국 선적 ↔ PO 연결 ──
+
+  // POST /api/procurement/shipment-link — 선적에 PO 아이템 연결
+  if (pathname === '/api/procurement/shipment-link' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.shipment_id || !body.items?.length) { fail(res, 400, 'shipment_id + items required'); return; }
+    const stmt = db.prepare("INSERT OR REPLACE INTO shipment_po_items (shipment_id, po_id, po_item_id, product_code, product_name, shipped_qty, notes) VALUES (?,?,?,?,?,?,?)");
+    const tx = db.transaction(() => {
+      for (const it of body.items) {
+        stmt.run(body.shipment_id, it.po_id, it.po_item_id || null, it.product_code || '', it.product_name || '', it.shipped_qty || 0, it.notes || '');
+      }
+    });
+    tx();
+    ok(res, { linked: body.items.length }); return;
+  }
+
+  // GET /api/procurement/shipment-items/:shipmentId — 선적에 포함된 PO 아이템
+  const shipItemsMatch = pathname.match(/^\/api\/procurement\/shipment-items\/(\d+)$/);
+  if (shipItemsMatch && method === 'GET') {
+    const rows = db.prepare(`
+      SELECT s.*, h.po_number, h.vendor_name, h.origin
+      FROM shipment_po_items s
+      JOIN po_header h ON h.po_id = s.po_id
+      WHERE s.shipment_id = ?
+    `).all(shipItemsMatch[1]);
+    ok(res, rows); return;
+  }
+
+  // ── 더기프트 포장작업 ──
+
+  // GET /api/procurement/assembly — 포장작업 목록
+  if (pathname === '/api/procurement/assembly' && method === 'GET') {
+    const rows = db.prepare("SELECT * FROM gift_assembly ORDER BY created_at DESC").all();
+    for (const r of rows) {
+      r.materials = db.prepare("SELECT * FROM gift_assembly_materials WHERE assembly_id=?").all(r.id);
+    }
+    ok(res, rows); return;
+  }
+
+  // POST /api/procurement/assembly — 포장작업 생성
+  if (pathname === '/api/procurement/assembly' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.product_code || !body.target_qty) { fail(res, 400, 'product_code + target_qty required'); return; }
+    const no = 'GA-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Math.random()).slice(2,5);
+    const info = db.prepare("INSERT INTO gift_assembly (assembly_no, product_code, product_name, target_qty, assembly_date, worker_name, notes) VALUES (?,?,?,?,?,?,?)").run(
+      no, body.product_code, body.product_name || '', body.target_qty, body.assembly_date || new Date().toISOString().slice(0,10), body.worker_name || '', body.notes || '');
+    const asmId = info.lastInsertRowid;
+    // 자재 등록
+    if (body.materials?.length) {
+      const stmt = db.prepare("INSERT INTO gift_assembly_materials (assembly_id, item_code, item_name, required_qty) VALUES (?,?,?,?)");
+      for (const m of body.materials) stmt.run(asmId, m.item_code, m.item_name || '', m.required_qty || 0);
+    }
+    ok(res, { id: asmId, assembly_no: no }); return;
+  }
+
+  // POST /api/procurement/assembly/:id/complete — 포장완료
+  const asmCompleteMatch = pathname.match(/^\/api\/procurement\/assembly\/(\d+)\/complete$/);
+  if (asmCompleteMatch && method === 'POST') {
+    const body = await readJSON(req);
+    const id = asmCompleteMatch[1];
+    db.prepare("UPDATE gift_assembly SET status='completed', completed_qty=?, completed_date=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?").run(body.completed_qty || 0, id);
+    const asm = db.prepare("SELECT * FROM gift_assembly WHERE id=?").get(id);
+    if (asm) {
+      createNotification(null, 'po', `포장완료: ${asm.assembly_no}`, `${asm.product_name} ${body.completed_qty}개 포장 완료`, 'procurement');
+      // 생산재고 연동: gift_sets에 매칭되는 세트가 있으면 assembly 트랜잭션 기록
+      const matchedSet = db.prepare("SELECT id, set_name FROM gift_sets WHERE set_code=? OR set_name=?").get(asm.product_code, asm.product_name);
+      if (matchedSet) {
+        db.prepare("INSERT INTO gift_set_transactions (set_id, tx_type, qty, operator, memo) VALUES (?,?,?,?,?)").run(
+          matchedSet.id, 'assembly', body.completed_qty || 0, asm.worker_name || '', `포장작업 연동: ${asm.assembly_no}`);
+      }
+    }
+    ok(res, { completed: true }); return;
+  }
+
+  // POST /api/procurement/force-complete — 허용범위 미달 시 관리자 강제완료
+  if (pathname === '/api/procurement/force-complete' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.po_id) { fail(res, 400, 'po_id required'); return; }
+    const po = db.prepare('SELECT * FROM po_header WHERE po_id=?').get(body.po_id);
+    if (!po) { fail(res, 404, 'PO not found'); return; }
+    const poItems = db.prepare('SELECT ordered_qty, received_qty FROM po_items WHERE po_id=?').all(body.po_id);
+    const totalOrdered = poItems.reduce((s, pi) => s + pi.ordered_qty, 0);
+    const totalReceived = poItems.reduce((s, pi) => s + pi.received_qty, 0);
+    db.prepare("UPDATE po_header SET status='received', force_completed=1, force_completed_by=?, force_completed_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE po_id=?")
+      .run(body.completed_by || 'admin', body.po_id);
+    db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+      body.po_id, 'force_complete', body.completed_by || 'admin',
+      `강제완료 (발주:${totalOrdered}, 입고:${totalReceived}, 사유:${body.reason || '관리자 승인'})`);
+    createNotification(null, 'po', `강제완료: ${po.po_number}`, `${po.vendor_name} - 관리자 강제완료 (${totalReceived}/${totalOrdered})`, 'procurement');
+    ok(res, { force_completed: true, ordered: totalOrdered, received: totalReceived }); return;
+  }
+
+  // POST /api/procurement/confirm-material-date — 제지사가 후공정 업체에 자재 보내는 날짜 확정
+  if (pathname === '/api/procurement/confirm-material-date' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.po_id || !body.material_send_date) { fail(res, 400, 'po_id + material_send_date required'); return; }
+    const po = db.prepare('SELECT * FROM po_header WHERE po_id=?').get(body.po_id);
+    if (!po) { fail(res, 404, 'PO not found'); return; }
+    db.prepare("UPDATE po_header SET material_send_date=?, material_confirmed_at=datetime('now','localtime'), material_status='confirmed', updated_at=datetime('now','localtime') WHERE po_id=?")
+      .run(body.material_send_date, body.po_id);
+    db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+      body.po_id, 'material_date_confirmed', body.actor || 'vendor',
+      `자재 출고일 확정: ${body.material_send_date}`);
+    // 후공정 업체에 이메일 자동 발송
+    let emailResult = null;
+    const processVendor = po.process_vendor_name || '';
+    if (processVendor) {
+      const vendor = db.prepare('SELECT * FROM vendors WHERE name=?').get(processVendor);
+      if (vendor && vendor.email && smtpTransporter) {
+        const items = db.prepare('SELECT * FROM po_items WHERE po_id=?').all(body.po_id);
+        const itemsList = items.map(i => `<tr><td>${i.product_code}</td><td>${i.brand||''}</td><td>${i.ordered_qty}</td><td>${i.spec||''}</td></tr>`).join('');
+        const html = `<h3>바른컴퍼니 - 자재 출고 안내</h3>
+          <p>발주번호: <b>${po.po_number}</b></p>
+          <p>원재료 업체(${po.material_vendor_name||po.vendor_name})에서 <b>${body.material_send_date}</b>에 자재를 출고합니다.</p>
+          <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th>품목코드</th><th>브랜드</th><th>수량</th><th>규격</th></tr></thead><tbody>${itemsList}</tbody></table>
+          <p>작업 일정 확인 부탁드립니다.</p>`;
+        try {
+          await smtpTransporter.sendMail({ from: `바른컴퍼니 <${SMTP_FROM}>`, to: vendor.email, cc: vendor.email_cc || undefined, subject: `[바른컴퍼니] 자재 출고 안내 - ${po.po_number}`, html });
+          db.prepare("UPDATE po_header SET process_email_sent=1 WHERE po_id=?").run(body.po_id);
+          emailResult = { sent: true, to: vendor.email };
+        } catch(e) { emailResult = { sent: false, error: e.message }; }
+      }
+    }
+    createNotification(null, 'po', `자재출고 확정: ${po.po_number}`, `${body.material_send_date} 후공정(${processVendor})으로 출고`, 'procurement');
+    ok(res, { confirmed: true, material_send_date: body.material_send_date, email: emailResult }); return;
+  }
+
+  // POST /api/procurement/confirm-delivery-date — 거래처가 입고일 확정 (후공정 업체가 입고일 클릭)
+  if (pathname === '/api/procurement/confirm-delivery-date' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.po_id || !body.confirmed_date) { fail(res, 400, 'po_id + confirmed_date required'); return; }
+    const po = db.prepare('SELECT * FROM po_header WHERE po_id=?').get(body.po_id);
+    if (!po) { fail(res, 404, 'PO not found'); return; }
+    db.prepare("UPDATE po_header SET vendor_confirmed_date=?, vendor_confirmed_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE po_id=?")
+      .run(body.confirmed_date, body.po_id);
+    db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+      body.po_id, 'delivery_date_confirmed', body.actor || 'vendor',
+      `입고일 확정: ${body.confirmed_date}`);
+    createNotification(null, 'po', `입고일 확정: ${po.po_number}`, `${po.vendor_name} → ${body.confirmed_date} 입고 확정`, 'procurement');
+    ok(res, { confirmed: true, vendor_confirmed_date: body.confirmed_date }); return;
+  }
+
+  // POST /api/procurement/create-korea-po — 한국 후공정 PO 생성 (제지사+후공정 2단계)
+  if (pathname === '/api/procurement/create-korea-po' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.material_vendor || !body.process_vendor || !body.items?.length) {
+      fail(res, 400, 'material_vendor, process_vendor, items required'); return;
+    }
+    const poNum = 'PO-KR-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Math.random()).slice(2,5);
+    const totalQty = body.items.reduce((s, i) => s + (i.ordered_qty || 0), 0);
+    const info = db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, material_vendor_name, process_vendor_name, status, expected_date, total_qty, notes, origin, po_date, tolerance_pct) VALUES (?,?,?,?,?,?,?,?,?,?,date('now','localtime'),?)`)
+      .run(poNum, '후공정', body.material_vendor, body.material_vendor, body.process_vendor, 'sent', body.expected_date || '', totalQty, body.notes || '', '한국', body.tolerance_pct || 5.0);
+    const poId = info.lastInsertRowid;
+    const stmt = db.prepare("INSERT INTO po_items (po_id, product_code, brand, process_type, ordered_qty, spec) VALUES (?,?,?,?,?,?)");
+    for (const it of body.items) stmt.run(poId, it.product_code, it.brand || '', it.process_type || '', it.ordered_qty || 0, it.spec || '');
+    // 거래명세서 자동 생성
+    db.prepare("INSERT INTO trade_document (po_id, po_number, vendor_name, vendor_type, items_json, status) VALUES (?,?,?,?,?,'sent')")
+      .run(poId, poNum, body.material_vendor, 'material', JSON.stringify(body.items));
+    db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
+      poId, 'created', body.actor || 'system', `한국 후공정 PO 생성 (원재료:${body.material_vendor}, 후공정:${body.process_vendor})`);
+    ok(res, { po_id: poId, po_number: poNum }); return;
+  }
+
+  // POST /api/procurement/assembly/:id/ship — 더기프트 출고 등록
+  const asmShipMatch = pathname.match(/^\/api\/procurement\/assembly\/(\d+)\/ship$/);
+  if (asmShipMatch && method === 'POST') {
+    const body = await readJSON(req);
+    const id = asmShipMatch[1];
+    db.prepare(`UPDATE gift_assembly SET delivery_status=?, tracking_number=?, carrier=?, shipped_date=?, delivery_address=?, recipient_name=?, updated_at=datetime('now','localtime') WHERE id=?`)
+      .run(body.delivery_status || 'shipped', body.tracking_number || '', body.carrier || '', body.shipped_date || new Date().toISOString().slice(0,10), body.delivery_address || '', body.recipient_name || '', id);
+    const asm = db.prepare("SELECT * FROM gift_assembly WHERE id=?").get(id);
+    if (asm) createNotification(null, 'po', `출고: ${asm.assembly_no}`, `${asm.product_name} 출고 (${body.carrier||''} ${body.tracking_number||''})`, 'procurement');
+    ok(res, { shipped: true }); return;
+  }
+
+  // POST /api/procurement/assembly/:id/deliver — 더기프트 배송완료
+  const asmDeliverMatch = pathname.match(/^\/api\/procurement\/assembly\/(\d+)\/deliver$/);
+  if (asmDeliverMatch && method === 'POST') {
+    const id = asmDeliverMatch[1];
+    db.prepare("UPDATE gift_assembly SET delivery_status='delivered', delivered_date=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?").run(id);
+    ok(res, { delivered: true }); return;
+  }
+
+  // GET /api/procurement/korea-detail/:poId — 한국 PO 상세 (2단계 flow 포함)
+  const koreaDetailMatch = pathname.match(/^\/api\/procurement\/korea-detail\/(\d+)$/);
+  if (koreaDetailMatch && method === 'GET') {
+    const poId = koreaDetailMatch[1];
+    const po = db.prepare('SELECT * FROM po_header WHERE po_id=?').get(poId);
+    if (!po) { fail(res, 404, 'PO not found'); return; }
+    const items = db.prepare('SELECT * FROM po_items WHERE po_id=?').all(poId);
+    const totalOrdered = items.reduce((s, i) => s + i.ordered_qty, 0);
+    const totalReceived = items.reduce((s, i) => s + i.received_qty, 0);
+    const tolerancePct = po.tolerance_pct || 5;
+    const lowerBound = Math.round(totalOrdered * (1 - tolerancePct / 100));
+    const upperBound = Math.round(totalOrdered * (1 + tolerancePct / 100));
+    const needsForceApprove = totalReceived > 0 && totalReceived < lowerBound && po.status !== 'received';
+    const tradeDocs = db.prepare('SELECT * FROM trade_document WHERE po_id=? ORDER BY created_at DESC').all(poId);
+    const logs = db.prepare('SELECT * FROM po_activity_log WHERE po_id=? ORDER BY id DESC LIMIT 20').all(poId);
+    ok(res, { po, items, totalOrdered, totalReceived, tolerancePct, lowerBound, upperBound, needsForceApprove, tradeDocs, logs }); return;
+  }
+
+  // GET /api/procurement/china-shipments — 중국 합선적 현황 (여러 PO 합선적)
+  if (pathname === '/api/procurement/china-shipments' && method === 'GET') {
+    const shipments = db.prepare(`SELECT * FROM china_shipment_log ORDER BY created_at DESC LIMIT 50`).all();
+    for (const s of shipments) {
+      s.po_items = db.prepare(`SELECT sp.*, h.po_number, h.vendor_name, h.order_type FROM shipment_po_items sp JOIN po_header h ON h.po_id=sp.po_id WHERE sp.shipment_id=?`).all(s.id);
+    }
+    ok(res, shipments); return;
+  }
+
+  // POST /api/procurement/china-shipment-link — 중국 합선적에 여러 PO 연결
+  if (pathname === '/api/procurement/china-shipment-link' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.shipment_id || !body.po_items?.length) { fail(res, 400, 'shipment_id + po_items required'); return; }
+    const stmt = db.prepare("INSERT OR REPLACE INTO shipment_po_items (shipment_id, po_id, po_item_id, product_code, product_name, shipped_qty, notes) VALUES (?,?,?,?,?,?,?)");
+    const tx = db.transaction(() => {
+      for (const it of body.po_items) {
+        stmt.run(body.shipment_id, it.po_id, it.po_item_id || null, it.product_code || '', it.product_name || '', it.shipped_qty || 0, it.notes || '');
+      }
+    });
+    tx();
+    // 연결된 PO들 선적 상태 업데이트
+    const poIds = [...new Set(body.po_items.map(i => i.po_id))];
+    for (const pid of poIds) {
+      db.prepare("UPDATE po_header SET status='shipped', process_status='shipped', updated_at=datetime('now','localtime') WHERE po_id=? AND status NOT IN ('received','cancelled')").run(pid);
+    }
+    ok(res, { linked: body.po_items.length, shipment_id: body.shipment_id }); return;
+  }
+
+  // GET /api/procurement/pipeline — origin별 워크플로우 단계 현황
+  if (pathname === '/api/procurement/pipeline' && method === 'GET') {
+    const qs = new URL(req.url, `http://${req.headers.host}`).searchParams;
+    const origin = qs.get('origin') || '';
+    // 한국: draft → sent → 자재지급(material_sent) → 가공중(processing) → partial → received
+    // 중국: draft → sent → 제작중(processing) → 선적(shipped) → 통관(customs) → partial → received
+    // 더기프트: draft → sent → partial → received → 포장(assembly) → 출고(shipped)
+    const stages = {
+      '한국': ['draft','sent','자재지급','가공중','partial','received'],
+      '중국': ['draft','sent','제작중','선적','통관','partial','received'],
+      '더기프트': ['draft','sent','partial','received','포장','출고']
+    };
+    if (origin && stages[origin]) {
+      const pos = db.prepare(`
+        SELECT po_id, po_number, vendor_name, status, material_status, process_status,
+               expected_date, po_date, total_qty, notes, process_step,
+               material_vendor_name, process_vendor_name, material_send_date,
+               material_confirmed_at, process_email_sent, force_completed,
+               tolerance_pct, order_type, vendor_confirmed_date
+        FROM po_header WHERE origin=? AND status != 'cancelled'
+        ORDER BY created_at DESC LIMIT 100
+      `).all(origin);
+      // Map PO to pipeline stage
+      for (const po of pos) {
+        if (origin === '한국') {
+          if (po.status === 'received') po.stage = 'received';
+          else if (po.status === 'partial') po.stage = 'partial';
+          else if (po.process_status === 'processing' || po.process_status === 'in_progress') po.stage = '가공중';
+          else if (po.material_status === 'sent') po.stage = '자재지급';
+          else if (po.status === 'sent') po.stage = 'sent';
+          else po.stage = 'draft';
+        } else if (origin === '중국') {
+          if (po.status === 'received') po.stage = 'received';
+          else if (po.status === 'partial') po.stage = 'partial';
+          else if (po.process_status === 'customs') po.stage = '통관';
+          else if (po.status === 'shipped' || po.shipped_at) po.stage = '선적';
+          else if (po.process_status === 'processing' || po.process_status === 'in_progress') po.stage = '제작중';
+          else if (po.status === 'sent') po.stage = 'sent';
+          else po.stage = 'draft';
+        } else {
+          if (po.process_status === 'shipped') po.stage = '출고';
+          else if (po.process_status === 'assembly') po.stage = '포장';
+          else if (po.status === 'received') po.stage = 'received';
+          else if (po.status === 'partial') po.stage = 'partial';
+          else if (po.status === 'sent') po.stage = 'sent';
+          else po.stage = 'draft';
+        }
+        // 입고율 + 강제완료 필요 여부
+        const items = db.prepare("SELECT COALESCE(SUM(ordered_qty),0) AS ord, COALESCE(SUM(received_qty),0) AS rcv FROM po_items WHERE po_id=?").get(po.po_id);
+        po.progress = items.ord > 0 ? Math.round(items.rcv / items.ord * 100) : 0;
+        po.total_ordered = items.ord;
+        po.total_received = items.rcv;
+        const tol = po.tolerance_pct || 5;
+        const lb = items.ord * (1 - tol / 100);
+        po.needs_force_approve = items.rcv > 0 && items.rcv < lb && po.status !== 'received';
+      }
+      ok(res, { origin, stages: stages[origin], orders: pos }); return;
+    }
+    ok(res, { stages }); return;
+  }
+
+  // POST /api/procurement/update-stage — PO 워크플로우 단계 전환
+  if (pathname === '/api/procurement/update-stage' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.po_id || !body.stage) { fail(res, 400, 'po_id + stage required'); return; }
+    const po = db.prepare("SELECT * FROM po_header WHERE po_id=?").get(body.po_id);
+    if (!po) { fail(res, 404, 'PO not found'); return; }
+    const updates = [];
+    const params = [];
+    // Map stage back to status fields
+    const stageMap = {
+      'draft': { status: 'draft' },
+      'sent': { status: 'sent' },
+      '자재지급': { material_status: 'sent', status: 'sent' },
+      '가공중': { process_status: 'processing', status: 'sent' },
+      '제작중': { process_status: 'processing', status: 'sent' },
+      '선적': { status: 'shipped' },
+      '통관': { process_status: 'customs' },
+      'partial': { status: 'partial' },
+      'received': { status: 'received' },
+      '포장': { process_status: 'assembly' },
+      '출고': { process_status: 'shipped' }
+    };
+    const mapping = stageMap[body.stage];
+    if (mapping) {
+      for (const [k, v] of Object.entries(mapping)) {
+        updates.push(`${k}=?`); params.push(v);
+      }
+    }
+    updates.push("updated_at=datetime('now','localtime')");
+    params.push(body.po_id);
+    db.prepare(`UPDATE po_header SET ${updates.join(',')} WHERE po_id=?`).run(...params);
+    // Activity log
+    db.prepare("INSERT INTO po_activity_log (po_id, po_number, action, actor, from_status, to_status, details) VALUES (?,?,?,?,?,?,?)").run(
+      body.po_id, po.po_number, 'stage_change', body.actor || 'system', po.status, body.stage, body.notes || '');
+    ok(res, { updated: true, stage: body.stage }); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -7434,6 +8280,169 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── MRP Calculate (BOM Explosion from Work Orders + Sales Orders) ──
+  if (pathname === '/api/mrp/calculate' && method === 'POST') {
+    const b = await readJSON(req);
+    const roundUnit = b.round_unit || 1;
+
+    // 1) Pending work orders (not completed/cancelled)
+    const pendingWOs = db.prepare(
+      "SELECT wo_id, product_code, product_name, ordered_qty, produced_qty FROM work_orders WHERE status NOT IN ('completed','cancelled')"
+    ).all();
+
+    // 2) Confirmed / in_production sales orders with their items
+    const confirmedSOs = db.prepare(
+      "SELECT so.id, soi.product_code, soi.product_name, soi.qty FROM sales_orders so JOIN sales_order_items soi ON so.id=soi.order_id WHERE so.status IN ('confirmed','in_production') AND soi.qty > 0"
+    ).all();
+
+    // 3) Build gross requirements per material via BOM explosion
+    const grossMap = {}; // material_code -> { product_name, gross_req }
+
+    const explodeBOM = (productCode, productName, qty) => {
+      const bomRows = db.prepare(
+        "SELECT bi.material_code, bi.material_name, bi.qty_per, bi.unit FROM bom_items bi JOIN bom_header bh ON bi.bom_id=bh.bom_id WHERE bh.product_code=? AND bi.item_type='material' AND bi.material_code IS NOT NULL AND bi.material_code != '' ORDER BY bi.sort_order"
+      ).all(productCode);
+      if (!bomRows.length) return;
+      for (const bi of bomRows) {
+        const need = qty * (bi.qty_per || 1);
+        if (!grossMap[bi.material_code]) {
+          grossMap[bi.material_code] = { product_name: bi.material_name || '', unit: bi.unit || 'EA', gross_req: 0 };
+        }
+        grossMap[bi.material_code].gross_req += need;
+      }
+    };
+
+    // Explode from work orders (remaining qty = ordered - produced)
+    for (const wo of pendingWOs) {
+      const remaining = Math.max(0, (wo.ordered_qty || 0) - (wo.produced_qty || 0));
+      if (remaining > 0 && wo.product_code) {
+        explodeBOM(wo.product_code, wo.product_name, remaining);
+      }
+    }
+
+    // Explode from sales orders
+    for (const so of confirmedSOs) {
+      if (so.qty > 0 && so.product_code) {
+        explodeBOM(so.product_code, so.product_name, so.qty);
+      }
+    }
+
+    // 4) Get on-hand inventory per material (sum across all warehouses)
+    const invRows = db.prepare(
+      "SELECT product_code, SUM(quantity) AS total_qty FROM warehouse_inventory GROUP BY product_code"
+    ).all();
+    const invMap = {};
+    for (const r of invRows) { invMap[r.product_code] = r.total_qty || 0; }
+
+    // 5) Get on-order (pending PO) per material
+    const poRows = db.prepare(
+      "SELECT pi.product_code, SUM(pi.ordered_qty - pi.received_qty) AS pending FROM po_items pi JOIN po_header ph ON pi.po_id=ph.po_id WHERE ph.status NOT IN ('완료','취소','cancelled','received') AND pi.ordered_qty > pi.received_qty GROUP BY pi.product_code"
+    ).all();
+    const poMap = {};
+    for (const r of poRows) { poMap[r.product_code] = r.pending || 0; }
+
+    // 6) Build result array
+    const materials = [];
+    let shortageCount = 0;
+    for (const [matCode, info] of Object.entries(grossMap)) {
+      const onHand = invMap[matCode] || 0;
+      const onOrder = poMap[matCode] || 0;
+      const netReq = Math.max(0, info.gross_req - onHand - onOrder);
+      const orderQty = netReq > 0 && roundUnit > 1 ? Math.ceil(netReq / roundUnit) * roundUnit : netReq;
+      const status = netReq > 0 ? 'shortage' : 'sufficient';
+      if (netReq > 0) shortageCount++;
+      materials.push({
+        product_code: matCode,
+        product_name: info.product_name,
+        unit: info.unit,
+        gross_req: info.gross_req,
+        on_hand: onHand,
+        on_order: onOrder,
+        net_req: netReq,
+        order_qty: orderQty,
+        status
+      });
+    }
+
+    // Sort: shortages first, then by net_req descending
+    materials.sort((a, b) => (b.net_req - a.net_req) || a.product_code.localeCompare(b.product_code));
+
+    ok(res, {
+      materials,
+      summary: { total_materials: materials.length, shortage_count: shortageCount },
+      sources: { work_orders: pendingWOs.length, sales_orders: confirmedSOs.length }
+    });
+    return;
+  }
+
+  // ── MRP Shortage (items with net_req > 0 only) ──
+  if (pathname === '/api/mrp/shortage' && method === 'GET') {
+    const pendingWOs = db.prepare(
+      "SELECT wo_id, product_code, product_name, ordered_qty, produced_qty FROM work_orders WHERE status NOT IN ('completed','cancelled')"
+    ).all();
+    const confirmedSOs = db.prepare(
+      "SELECT so.id, soi.product_code, soi.product_name, soi.qty FROM sales_orders so JOIN sales_order_items soi ON so.id=soi.order_id WHERE so.status IN ('confirmed','in_production') AND soi.qty > 0"
+    ).all();
+
+    const grossMap = {};
+    const explodeBOM = (productCode, qty) => {
+      const bomRows = db.prepare(
+        "SELECT bi.material_code, bi.material_name, bi.qty_per, bi.unit FROM bom_items bi JOIN bom_header bh ON bi.bom_id=bh.bom_id WHERE bh.product_code=? AND bi.item_type='material' AND bi.material_code IS NOT NULL AND bi.material_code != '' ORDER BY bi.sort_order"
+      ).all(productCode);
+      for (const bi of bomRows) {
+        const need = qty * (bi.qty_per || 1);
+        if (!grossMap[bi.material_code]) {
+          grossMap[bi.material_code] = { product_name: bi.material_name || '', unit: bi.unit || 'EA', gross_req: 0 };
+        }
+        grossMap[bi.material_code].gross_req += need;
+      }
+    };
+
+    for (const wo of pendingWOs) {
+      const remaining = Math.max(0, (wo.ordered_qty || 0) - (wo.produced_qty || 0));
+      if (remaining > 0 && wo.product_code) explodeBOM(wo.product_code, remaining);
+    }
+    for (const so of confirmedSOs) {
+      if (so.qty > 0 && so.product_code) explodeBOM(so.product_code, so.qty);
+    }
+
+    const invRows = db.prepare("SELECT product_code, SUM(quantity) AS total_qty FROM warehouse_inventory GROUP BY product_code").all();
+    const invMap = {};
+    for (const r of invRows) { invMap[r.product_code] = r.total_qty || 0; }
+
+    const poRows = db.prepare(
+      "SELECT pi.product_code, SUM(pi.ordered_qty - pi.received_qty) AS pending FROM po_items pi JOIN po_header ph ON pi.po_id=ph.po_id WHERE ph.status NOT IN ('완료','취소','cancelled','received') AND pi.ordered_qty > pi.received_qty GROUP BY pi.product_code"
+    ).all();
+    const poMap = {};
+    for (const r of poRows) { poMap[r.product_code] = r.pending || 0; }
+
+    const shortages = [];
+    for (const [matCode, info] of Object.entries(grossMap)) {
+      const onHand = invMap[matCode] || 0;
+      const onOrder = poMap[matCode] || 0;
+      const netReq = Math.max(0, info.gross_req - onHand - onOrder);
+      if (netReq > 0) {
+        shortages.push({
+          product_code: matCode,
+          product_name: info.product_name,
+          unit: info.unit,
+          gross_req: info.gross_req,
+          on_hand: onHand,
+          on_order: onOrder,
+          net_req: netReq,
+          status: 'shortage'
+        });
+      }
+    }
+    shortages.sort((a, b) => (b.net_req - a.net_req) || a.product_code.localeCompare(b.product_code));
+
+    ok(res, {
+      materials: shortages,
+      summary: { total_materials: shortages.length, shortage_count: shortages.length }
+    });
+    return;
+  }
+
   // Create POs from MRP results
   if (pathname === '/api/mrp/create-po' && method === 'POST') {
     const b = await readJSON(req);
@@ -8503,18 +9512,31 @@ async function handleRequest(req, res) {
     }
     const xerpShipments = giftSetShipmentCache;
 
+    // 금일 출고 (오늘 날짜 shipped된 스케줄)
+    const todayShipStmt = db.prepare("SELECT COALESCE(SUM(shipped_qty),0) as total FROM gift_shipment_schedule WHERE set_id=? AND ship_date=date('now','localtime') AND status='shipped'");
+    // 출고 예정 (오늘~7일, 미출고 planned)
+    const upcomingShipStmt = db.prepare("SELECT ship_date, SUM(planned_qty) as qty FROM gift_shipment_schedule WHERE set_id=? AND status='planned' AND ship_date >= date('now','localtime') AND ship_date <= date('now','localtime','+7 days') GROUP BY ship_date ORDER BY ship_date");
+    const upcomingTotalStmt = db.prepare("SELECT COALESCE(SUM(planned_qty),0) as total FROM gift_shipment_schedule WHERE set_id=? AND status='planned' AND ship_date >= date('now','localtime') AND ship_date <= date('now','localtime','+7 days')");
+
     for (const s of sets) {
       s.bom = bomStmt.all(s.id);
       const totalAssembly = totalAssemblyStmt.get(s.id).total;
       const todayAssembly = todayAssemblyStmt.get(s.id).total;
       const xerpCode = (s.xerp_code || '').trim();
       const totalShipped = xerpCode ? (xerpShipments[xerpCode] || 0) : 0;
-      // 4가지 재고
-      s.production_stock = totalAssembly;          // 생산재고 (조립 누적)
-      s.shipped_stock = totalShipped;              // 출고재고 (XERP)
+      // 금일 출고 + 출고예정
+      const todayShipped = todayShipStmt.get(s.id).total;
+      const upcomingDays = upcomingShipStmt.all(s.id);
+      const upcomingTotal = upcomingTotalStmt.get(s.id).total;
+      // 재고 계산
+      s.production_stock = totalAssembly;                              // 생산재고 (조립 누적)
+      s.shipped_stock = totalShipped;                                  // 출고재고 (XERP 누적)
+      s.today_shipped = todayShipped;                                  // 금일 출고
+      s.today_assembled = todayAssembly;                               // 금일 생산
+      s.upcoming_shipments = upcomingDays;                             // 출고예정 일별 내역
+      s.upcoming_total = upcomingTotal;                                // 출고예정 합계 (7일)
       s.remaining_stock = s.base_stock + totalAssembly - totalShipped; // 잔여재고
-      s.today_assembled = todayAssembly;
-      // current_stock도 잔여재고로 동기화
+      s.available_stock = s.remaining_stock - upcomingTotal;           // 가용재고 (잔여 - 출고예정)
       s.current_stock = s.remaining_stock;
     }
     ok(res, sets);
@@ -8645,6 +9667,87 @@ async function handleRequest(req, res) {
     }
     ok(res, result);
     return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  더기프트 출고 스케줄 API
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/gift-shipment-schedule — 출고 스케줄 목록 (기간/상태 필터)
+  if (pathname === '/api/gift-shipment-schedule' && method === 'GET') {
+    const from = parsed.searchParams.get('from') || new Date().toISOString().slice(0,10);
+    const to = parsed.searchParams.get('to') || '';
+    const status = parsed.searchParams.get('status') || '';
+    const setId = parsed.searchParams.get('set_id') || '';
+    let q = 'SELECT * FROM gift_shipment_schedule WHERE ship_date >= ?';
+    const p = [from];
+    if (to) { q += ' AND ship_date <= ?'; p.push(to); }
+    if (status) { q += ' AND status = ?'; p.push(status); }
+    if (setId) { q += ' AND set_id = ?'; p.push(setId); }
+    q += ' ORDER BY ship_date ASC, id ASC';
+    const rows = db.prepare(q).all(...p);
+    ok(res, rows); return;
+  }
+
+  // POST /api/gift-shipment-schedule — 출고 스케줄 등록
+  if (pathname === '/api/gift-shipment-schedule' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.set_id || !body.ship_date || !body.planned_qty) { fail(res, 400, 'set_id, ship_date, planned_qty required'); return; }
+    const gs = db.prepare('SELECT * FROM gift_sets WHERE id=?').get(body.set_id);
+    const info = db.prepare("INSERT INTO gift_shipment_schedule (set_id, set_code, set_name, ship_date, planned_qty, order_ref, recipient, address, notes) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(body.set_id, gs?.set_code || '', gs?.set_name || '', body.ship_date, body.planned_qty, body.order_ref || '', body.recipient || '', body.address || '', body.notes || '');
+    ok(res, { id: info.lastInsertRowid }); return;
+  }
+
+  // POST /api/gift-shipment-schedule/:id/ship — 출고 처리 (planned → shipped)
+  const gssShipMatch = pathname.match(/^\/api\/gift-shipment-schedule\/(\d+)\/ship$/);
+  if (gssShipMatch && method === 'POST') {
+    const id = gssShipMatch[1];
+    const body = await readJSON(req);
+    const sched = db.prepare('SELECT * FROM gift_shipment_schedule WHERE id=?').get(id);
+    if (!sched) { fail(res, 404, 'Schedule not found'); return; }
+    const shippedQty = body.shipped_qty || sched.planned_qty;
+    db.prepare("UPDATE gift_shipment_schedule SET status='shipped', shipped_qty=?, updated_at=datetime('now','localtime') WHERE id=?").run(shippedQty, id);
+    // gift_set_transactions에 출고 기록
+    db.prepare("INSERT INTO gift_set_transactions (set_id, tx_type, qty, operator, memo) VALUES (?,?,?,?,?)").run(
+      sched.set_id, 'shipment', shippedQty, body.operator || '', `출고: ${sched.recipient || ''} ${sched.order_ref || ''}`);
+    ok(res, { shipped: true, qty: shippedQty }); return;
+  }
+
+  // DELETE /api/gift-shipment-schedule/:id — 출고 스케줄 삭제 (planned만)
+  const gssDelMatch = pathname.match(/^\/api\/gift-shipment-schedule\/(\d+)$/);
+  if (gssDelMatch && method === 'DELETE') {
+    const id = gssDelMatch[1];
+    db.prepare("UPDATE gift_shipment_schedule SET status='cancelled', updated_at=datetime('now','localtime') WHERE id=? AND status='planned'").run(id);
+    ok(res, { cancelled: true }); return;
+  }
+
+  // GET /api/gift-production-summary — 생산재고 종합 대시보드
+  if (pathname === '/api/gift-production-summary' && method === 'GET') {
+    const sets = db.prepare("SELECT * FROM gift_sets WHERE status='active' ORDER BY set_name").all();
+    const result = [];
+    for (const s of sets) {
+      const totalAssembly = db.prepare("SELECT COALESCE(SUM(qty),0) as t FROM gift_set_transactions WHERE set_id=? AND tx_type='assembly'").get(s.id).t;
+      const totalShipment = db.prepare("SELECT COALESCE(SUM(qty),0) as t FROM gift_set_transactions WHERE set_id=? AND tx_type='shipment'").get(s.id).t;
+      const todayShipped = db.prepare("SELECT COALESCE(SUM(shipped_qty),0) as t FROM gift_shipment_schedule WHERE set_id=? AND ship_date=date('now','localtime') AND status='shipped'").get(s.id).t;
+      const todayAssembly = db.prepare("SELECT COALESCE(SUM(qty),0) as t FROM gift_set_transactions WHERE set_id=? AND tx_type='assembly' AND date(created_at)=date('now','localtime')").get(s.id).t;
+      const upcoming = db.prepare("SELECT ship_date, SUM(planned_qty) as qty FROM gift_shipment_schedule WHERE set_id=? AND status='planned' AND ship_date >= date('now','localtime') AND ship_date <= date('now','localtime','+7 days') GROUP BY ship_date ORDER BY ship_date").all(s.id);
+      const upcomingTotal = upcoming.reduce((sum, d) => sum + d.qty, 0);
+      const productionStock = s.base_stock + totalAssembly - totalShipment; // 기초 + 생산 - 출고
+      result.push({
+        id: s.id, set_code: s.set_code, set_name: s.set_name,
+        base_stock: s.base_stock,
+        production_stock: productionStock,
+        today_assembled: todayAssembly,
+        today_shipped: todayShipped,
+        upcoming_days: upcoming,
+        upcoming_total: upcomingTotal,
+        remaining_stock: productionStock - todayShipped,
+        available_stock: productionStock - todayShipped - upcomingTotal,
+        need_to_produce: Math.max(0, upcomingTotal - (productionStock - todayShipped))
+      });
+    }
+    ok(res, result); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -11949,7 +13052,7 @@ async function handleRequest(req, res) {
       woid, body.result_date||new Date().toISOString().slice(0,10), body.good_qty||0, body.defect_qty||0, body.worker_name||'', body.work_hours||0, body.notes||'');
     // 작업지시에 누적 반영
     const totals = db.prepare("SELECT COALESCE(SUM(good_qty),0) AS good, COALESCE(SUM(defect_qty),0) AS defect FROM work_order_results WHERE work_order_id=?").get(woid);
-    db.prepare("UPDATE work_orders SET completed_qty=?, updated_at=datetime('now','localtime') WHERE id=?").run(totals.good, woid);
+    db.prepare("UPDATE work_orders SET produced_qty=?, defect_qty=?, updated_at=datetime('now','localtime') WHERE wo_id=?").run(totals.good, totals.defect, woid);
     ok(res, { saved: true, total_good: totals.good, total_defect: totals.defect }); return;
   }
   if (pathname.match(/^\/api\/work-orders\/(\d+)\/results$/) && method === 'GET') {
@@ -11963,6 +13066,638 @@ async function handleRequest(req, res) {
     const rows = db.prepare("SELECT r.*, w.wo_number, w.product_name FROM work_order_results r JOIN work_orders w ON w.wo_id=r.work_order_id WHERE r.result_date=? ORDER BY r.created_at DESC").all(date);
     const summary = db.prepare("SELECT COUNT(*) AS cnt, COALESCE(SUM(good_qty),0) AS good, COALESCE(SUM(defect_qty),0) AS defect, COALESCE(SUM(work_hours),0) AS hours FROM work_order_results WHERE result_date=?").get(date);
     ok(res, { total_good: summary.good, total_defect: summary.defect, total_hours: summary.hours, order_count: summary.cnt, results: rows }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 1: 경영자 통합 대시보드 API
+  // ════════���═══════════════════════════════════════════════════════════
+
+  if (pathname === '/api/exec/dashboard-full' && method === 'GET') {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const fmtDate = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    const s = fmtDate(monthStart), e = fmtDate(now);
+    const today = now.toISOString().slice(0,10);
+    const sources = { xerp: 'unknown', bar_shop1: 'unknown', dd: 'unknown', sqlite: 'ok' };
+
+    // 1) 매출 KPI (XERP + bar_shop1)
+    let salesKpi = { total_sales: 0, total_supply: 0, total_fee: 0, order_count: 0, prev_month_sales: 0 };
+    let barKpi = { total_revenue: 0, total_cost: 0, order_count: 0 };
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request().input('s',s).input('e',e).query(`SELECT COUNT(DISTINCT h_orderid) AS orders, ISNULL(SUM(h_sumPrice),0) AS sales, ISNULL(SUM(h_offerPrice),0) AS supply, ISNULL(SUM(FeeAmnt),0) AS fee FROM ERP_SalesData WITH(NOLOCK) WHERE h_date>=@s AND h_date<=@e`);
+      const row = r.recordset[0]||{}; salesKpi.total_sales=row.sales||0; salesKpi.total_supply=row.supply||0; salesKpi.total_fee=row.fee||0; salesKpi.order_count=row.orders||0;
+      const pm=new Date(now.getFullYear(),now.getMonth()-1,1); const pmEnd=new Date(now.getFullYear(),now.getMonth(),0);
+      const r2=await pool.request().input('s',fmtDate(pm)).input('e',fmtDate(pmEnd)).query(`SELECT ISNULL(SUM(h_sumPrice),0) AS t FROM ERP_SalesData WITH(NOLOCK) WHERE h_date>=@s AND h_date<=@e`);
+      salesKpi.prev_month_sales=(r2.recordset[0]||{}).t||0; sources.xerp='ok';
+    } catch(_){ sources.xerp='error'; }
+    try {
+      await withBarShop1Pool(async(pool)=>{
+        const r=await pool.request().input('s',s).input('e',e+' 23:59:59').query(`SELECT SUM(i.item_sale_price*i.item_count) AS rev, SUM(i.item_price*i.item_count) AS cost, COUNT(DISTINCT o.order_seq) AS cnt FROM custom_order o WITH(NOLOCK) JOIN custom_order_item i WITH(NOLOCK) ON o.order_seq=i.order_seq WHERE o.order_date>=@s AND o.order_date<=@e AND o.status_seq>=1 AND i.item_sale_price>0`);
+        const row=r.recordset[0]||{}; barKpi.total_revenue=row.rev||0; barKpi.total_cost=row.cost||0; barKpi.order_count=row.cnt||0;
+      }); sources.bar_shop1='ok';
+    } catch(_){ sources.bar_shop1='error'; }
+
+    // DD 매출
+    let ddKpi = { order_count: 0, total_sales: 0 };
+    try {
+      const ddP = await ensureDdPool();
+      if (ddP) {
+        const sDate=s.substring(0,4)+'-'+s.substring(4,6)+'-'+s.substring(6,8);
+        const eDate=e.substring(0,4)+'-'+e.substring(4,6)+'-'+e.substring(6,8);
+        const [rows]=await ddP.query('SELECT COUNT(*) AS cnt, IFNULL(SUM(total_price),0) AS sales FROM orders WHERE created_at>=? AND created_at<DATE_ADD(?,INTERVAL 1 DAY) AND order_state IN ("P","D","F")',[sDate,eDate]);
+        ddKpi.order_count=(rows[0]||{}).cnt||0; ddKpi.total_sales=(rows[0]||{}).sales||0; sources.dd='ok';
+      }
+    } catch(_){ sources.dd='error'; }
+
+    const totalSales = salesKpi.total_sales + barKpi.total_revenue + ddKpi.total_sales;
+    const totalCost = barKpi.total_cost + salesKpi.total_fee;
+    const grossProfit = totalSales - totalCost;
+    const marginRate = totalSales > 0 ? Math.round(grossProfit/totalSales*1000)/10 : 0;
+    const salesGrowth = salesKpi.prev_month_sales > 0 ? Math.round((salesKpi.total_sales - salesKpi.prev_month_sales)/salesKpi.prev_month_sales*1000)/10 : 0;
+
+    // 2) 구매 KPI
+    let poKpi = { total: 0, pending: 0, overdue: 0, this_month_amount: 0 };
+    try {
+      poKpi.total = (db.prepare("SELECT COUNT(*) AS c FROM po_header").get()||{}).c||0;
+      poKpi.pending = (db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE status IN ('draft','sent','confirmed','partial')").get()||{}).c||0;
+      poKpi.overdue = (db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE status IN ('sent','confirmed','partial') AND expected_date < ?").get(today)||{}).c||0;
+      const amt = db.prepare("SELECT COALESCE(SUM(pi.unit_price*pi.ordered_qty),0) AS t FROM po_header ph JOIN po_items pi ON ph.po_id=pi.po_id WHERE ph.po_date >= ?").get(monthStart.toISOString().slice(0,10));
+      poKpi.this_month_amount = amt ? amt.t : 0;
+    } catch(_){}
+
+    // 3) 재고 KPI
+    let invKpi = { total_items: 0, low_stock: 0, expiring_soon: 0, total_value: 0 };
+    try {
+      invKpi.total_items = (db.prepare("SELECT COUNT(*) AS c FROM batch_master WHERE current_qty > 0").get()||{}).c||0;
+      const lowRules = db.prepare("SELECT sr.product_code, sr.min_qty FROM safety_stock_rules sr").all();
+      for (const r of lowRules) {
+        const stock = db.prepare("SELECT COALESCE(SUM(current_qty),0) AS q FROM batch_master WHERE product_code=? AND quality_status='GOOD'").get(r.product_code);
+        if (stock && stock.q < r.min_qty) invKpi.low_stock++;
+      }
+      invKpi.expiring_soon = (db.prepare("SELECT COUNT(*) AS c FROM batch_master WHERE exp_date IS NOT NULL AND exp_date != '' AND exp_date <= date('now','+30 days') AND current_qty > 0").get()||{}).c||0;
+    } catch(_){}
+
+    // 4) 생산 KPI
+    let prodKpi = { active_wo: 0, completed_wo: 0, today_good: 0, today_defect: 0, defect_rate: 0 };
+    try {
+      prodKpi.active_wo = (db.prepare("SELECT COUNT(*) AS c FROM work_orders WHERE status='in_progress'").get()||{}).c||0;
+      prodKpi.completed_wo = (db.prepare("SELECT COUNT(*) AS c FROM work_orders WHERE status='completed' AND completed_date >= ?").get(monthStart.toISOString().slice(0,10))||{}).c||0;
+      const todayProd = db.prepare("SELECT COALESCE(SUM(good_qty),0) AS good, COALESCE(SUM(defect_qty),0) AS defect FROM work_order_results WHERE result_date=?").get(today);
+      if (todayProd) { prodKpi.today_good=todayProd.good; prodKpi.today_defect=todayProd.defect; }
+      const monthProd = db.prepare("SELECT COALESCE(SUM(good_qty),0) AS good, COALESCE(SUM(defect_qty),0) AS defect FROM work_order_results WHERE result_date >= ?").get(monthStart.toISOString().slice(0,10));
+      if (monthProd && (monthProd.good+monthProd.defect)>0) prodKpi.defect_rate = Math.round(monthProd.defect/(monthProd.good+monthProd.defect)*1000)/10;
+    } catch(_){}
+
+    // 5) 회계 KPI
+    let acctKpi = { budget_total: 0, actual_total: 0, budget_exec_rate: 0, ar_total: 0, ap_total: 0 };
+    try {
+      const yr = String(now.getFullYear());
+      const budSum = db.prepare("SELECT COALESCE(SUM(budget_amount),0) AS b, COALESCE(SUM(actual_amount),0) AS a FROM budgets WHERE year=?").get(yr);
+      if (budSum) { acctKpi.budget_total=budSum.b; acctKpi.actual_total=budSum.a; acctKpi.budget_exec_rate=budSum.b>0?Math.round(budSum.a/budSum.b*1000)/10:0; }
+    } catch(_){}
+
+    // 6) 업무 KPI
+    let taskKpi = { total: 0, done: 0, in_progress: 0, overdue: 0 };
+    try {
+      const ts = db.prepare("SELECT status, COUNT(*) AS c FROM tasks GROUP BY status").all();
+      ts.forEach(t => { taskKpi.total+=t.c; if(t.status==='done') taskKpi.done=t.c; if(t.status==='in_progress') taskKpi.in_progress=t.c; });
+      taskKpi.overdue = (db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE status != 'done' AND due_date < ? AND due_date IS NOT NULL AND due_date != ''").get(today)||{}).c||0;
+    } catch(_){}
+
+    // 7) 결재 KPI
+    let approvalKpi = { pending: 0, approved_month: 0, rejected_month: 0 };
+    try {
+      approvalKpi.pending = (db.prepare("SELECT COUNT(*) AS c FROM approvals WHERE status='pending'").get()||{}).c||0;
+      approvalKpi.approved_month = (db.prepare("SELECT COUNT(*) AS c FROM approvals WHERE status='approved' AND updated_at >= ?").get(monthStart.toISOString().slice(0,10))||{}).c||0;
+    } catch(_){}
+
+    // 8) 불량 KPI
+    let defectKpi = { month_count: 0, month_qty: 0, top_vendor: '' };
+    try {
+      const dc = db.prepare("SELECT COUNT(*) AS c, COALESCE(SUM(defect_qty),0) AS q FROM defects WHERE created_at >= ?").get(monthStart.toISOString().slice(0,10));
+      if (dc) { defectKpi.month_count=dc.c; defectKpi.month_qty=dc.q; }
+      const tv = db.prepare("SELECT vendor_name, COUNT(*) AS c FROM defects WHERE created_at >= ? GROUP BY vendor_name ORDER BY c DESC LIMIT 1").get(monthStart.toISOString().slice(0,10));
+      if (tv) defectKpi.top_vendor = tv.vendor_name;
+    } catch(_){}
+
+    // 9) 제조원가 최신
+    let costKpi = { avg_unit_cost: 0, total_material: 0, total_labor: 0 };
+    try {
+      const cc = db.prepare("SELECT COALESCE(AVG(unit_cost),0) AS u, COALESCE(SUM(material_cost),0) AS m, COALESCE(SUM(labor_cost),0) AS l FROM mfg_cost_cards WHERE calc_date >= ?").get(monthStart.toISOString().slice(0,10));
+      if (cc) { costKpi.avg_unit_cost=Math.round(cc.u); costKpi.total_material=cc.m; costKpi.total_labor=cc.l; }
+    } catch(_){}
+
+    // 10) 설비 가동률
+    let eqKpi = { total: 0, active: 0, maintenance: 0, avg_oee: 0 };
+    try {
+      eqKpi.total = (db.prepare("SELECT COUNT(*) AS c FROM equipment").get()||{}).c||0;
+      eqKpi.active = (db.prepare("SELECT COUNT(*) AS c FROM equipment WHERE status='active'").get()||{}).c||0;
+      eqKpi.maintenance = (db.prepare("SELECT COUNT(*) AS c FROM equipment WHERE status='maintenance'").get()||{}).c||0;
+    } catch(_){}
+
+    ok(res, {
+      sources, period: { start: s, end: e, month: (now.getMonth()+1)+'월', year: now.getFullYear() },
+      sales: { ...salesKpi, bar: barKpi, dd: ddKpi, total: totalSales, gross_profit: grossProfit, margin_rate: marginRate, growth: salesGrowth },
+      purchasing: poKpi, inventory: invKpi, production: prodKpi,
+      accounting: acctKpi, tasks: taskKpi, approvals: approvalKpi,
+      quality: defectKpi, cost: costKpi, equipment: eqKpi
+    }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 2: PDF 생성 API (견적서/거래명세서/세금계산서)
+  // ════════════════════════════════════════════════════════════════════
+
+  if (pathname.match(/^\/api\/pdf\/quotation\/(\d+)$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/pdf\/quotation\/(\d+)$/)[1];
+    const order = db.prepare("SELECT * FROM sales_orders WHERE id=?").get(id);
+    if (!order) { fail(res, 404, 'Not Found'); return; }
+    const items = db.prepare("SELECT * FROM sales_order_items WHERE order_id=?").all(id);
+    ok(res, { order, items, doc_type: order.order_type === 'quote' ? '견적서' : '수주확인서',
+      company: { name: '바른컴퍼니(주)', tel: '02-2103-2600', fax: '02-2103-2609', addr: '서울시 용산구 한강대로 366 트윈시티남산2' }
+    }); return;
+  }
+
+  if (pathname.match(/^\/api\/pdf\/invoice\/(\d+)$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/pdf\/invoice\/(\d+)$/)[1];
+    const doc = db.prepare("SELECT * FROM trade_document WHERE id=?").get(id);
+    if (!doc) { fail(res, 404, 'Not Found'); return; }
+    ok(res, { doc, doc_type: '거래명세서',
+      company: { name: '바른컴퍼니(주)', tel: '02-2103-2600', fax: '02-2103-2609', addr: '서울시 용산구 한강대로 366 트윈시티남산2' }
+    }); return;
+  }
+
+  if (pathname.match(/^\/api\/pdf\/tax-invoice\/(\d+)$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/pdf\/tax-invoice\/(\d+)$/)[1];
+    const inv = db.prepare("SELECT * FROM hometax_invoices WHERE id=?").get(id);
+    if (!inv) { fail(res, 404, 'Not Found'); return; }
+    ok(res, { invoice: inv, doc_type: '세금계산서' }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 3: 안전재고 + 재고실사 API
+  // ════════════════════════════════════════════════════════════════════
+
+  if (pathname === '/api/safety-stock' && method === 'GET') {
+    const rules = db.prepare("SELECT * FROM safety_stock_rules ORDER BY product_code").all();
+    // 현재 재고와 조인
+    const result = rules.map(r => {
+      const stock = db.prepare("SELECT COALESCE(SUM(current_qty),0) AS qty FROM batch_master WHERE product_code=? AND quality_status='GOOD'").get(r.product_code);
+      return { ...r, current_qty: stock ? stock.qty : 0, is_below: stock ? stock.qty < r.min_qty : false };
+    });
+    ok(res, result); return;
+  }
+
+  if (pathname === '/api/safety-stock' && method === 'POST') {
+    const body = await readJSON(req);
+    const items = body.items || [body];
+    const upsert = db.prepare("INSERT INTO safety_stock_rules (product_code,product_name,min_qty,reorder_qty,reorder_point,lead_time_days,warehouse,auto_po,vendor_name) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(product_code) DO UPDATE SET product_name=excluded.product_name, min_qty=excluded.min_qty, reorder_qty=excluded.reorder_qty, reorder_point=excluded.reorder_point, lead_time_days=excluded.lead_time_days, warehouse=excluded.warehouse, auto_po=excluded.auto_po, vendor_name=excluded.vendor_name, updated_at=datetime('now','localtime')");
+    items.forEach(it => upsert.run(it.product_code, it.product_name||'', it.min_qty||0, it.reorder_qty||0, it.reorder_point||0, it.lead_time_days||7, it.warehouse||'', it.auto_po?1:0, it.vendor_name||''));
+    ok(res, { saved: items.length }); return;
+  }
+
+  if (pathname === '/api/safety-stock/check' && method === 'POST') {
+    const rules = db.prepare("SELECT * FROM safety_stock_rules").all();
+    const alerts = [];
+    for (const r of rules) {
+      const stock = db.prepare("SELECT COALESCE(SUM(current_qty),0) AS qty FROM batch_master WHERE product_code=? AND quality_status='GOOD'").get(r.product_code);
+      const qty = stock ? stock.qty : 0;
+      if (qty <= r.reorder_point || qty < r.min_qty) {
+        alerts.push({ product_code: r.product_code, product_name: r.product_name, current_qty: qty, min_qty: r.min_qty, reorder_point: r.reorder_point, shortage: r.min_qty - qty });
+        createNotification(null, 'alert', '안전재고 부족: ' + (r.product_name||r.product_code), r.product_code + ' 현재 ' + qty + '개 (최소 ' + r.min_qty + '개)', 'safety-stock');
+      }
+    }
+    ok(res, { checked: rules.length, alerts }); return;
+  }
+
+  if (pathname === '/api/safety-stock/import-from-xerp' && method === 'POST') {
+    // XERP 재고에서 안전재고 규칙 자동 생성 (현재재고의 30%를 min_qty로 설정)
+    try {
+      const pool = await ensureXerpPool();
+      const r = await pool.request().query(`SELECT RTRIM(ItemCode) AS code, RTRIM(ItemName) AS name, OhQty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='BK10' AND OhQty > 0`);
+      const upsert = db.prepare("INSERT OR IGNORE INTO safety_stock_rules (product_code,product_name,min_qty,reorder_qty,reorder_point) VALUES (?,?,?,?,?)");
+      let cnt = 0;
+      for (const row of r.recordset||[]) {
+        const minQ = Math.max(1, Math.round(row.OhQty * 0.3));
+        upsert.run(row.code, row.name, minQ, Math.round(row.OhQty * 0.5), Math.round(row.OhQty * 0.4));
+        cnt++;
+      }
+      ok(res, { imported: cnt }); return;
+    } catch(e) { fail(res, 503, 'XERP 연결 실패: ' + e.message); return; }
+  }
+
+  // 재고실사
+  if (pathname === '/api/cycle-count' && method === 'GET') {
+    const plans = db.prepare("SELECT * FROM cycle_count_plans ORDER BY created_at DESC").all();
+    const result = plans.map(p => {
+      const items = db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN counted_qty IS NOT NULL THEN 1 ELSE 0 END) AS counted, SUM(ABS(variance)) AS total_variance FROM cycle_count_items WHERE plan_id=?").get(p.id);
+      return { ...p, item_count: items.total||0, counted_count: items.counted||0, total_variance: items.total_variance||0 };
+    });
+    ok(res, result); return;
+  }
+
+  if (pathname === '/api/cycle-count' && method === 'POST') {
+    const body = await readJSON(req);
+    const planNo = 'CC-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + String(Math.floor(Math.random()*900)+100);
+    const r = db.prepare("INSERT INTO cycle_count_plans (plan_no,plan_date,warehouse,note,created_by) VALUES (?,?,?,?,?)").run(planNo, body.plan_date||new Date().toISOString().slice(0,10), body.warehouse||'', body.note||'', body.created_by||'');
+    const planId = r.lastInsertRowid;
+    // 아이템 자동 생성: 해당 창고의 모든 재고품목
+    const stocks = db.prepare("SELECT product_code, product_name, COALESCE(SUM(current_qty),0) AS sys_qty FROM batch_master WHERE current_qty > 0 " + (body.warehouse ? "AND warehouse=?" : "") + " GROUP BY product_code").all(...(body.warehouse ? [body.warehouse] : []));
+    const ins = db.prepare("INSERT INTO cycle_count_items (plan_id,product_code,product_name,system_qty) VALUES (?,?,?,?)");
+    stocks.forEach(s => ins.run(planId, s.product_code, s.product_name, s.sys_qty));
+    ok(res, { plan_id: planId, plan_no: planNo, items: stocks.length }); return;
+  }
+
+  if (pathname.match(/^\/api\/cycle-count\/(\d+)$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/cycle-count\/(\d+)$/)[1];
+    const plan = db.prepare("SELECT * FROM cycle_count_plans WHERE id=?").get(id);
+    if (!plan) { fail(res, 404, 'Not Found'); return; }
+    const items = db.prepare("SELECT * FROM cycle_count_items WHERE plan_id=? ORDER BY product_code").all(id);
+    ok(res, { ...plan, items }); return;
+  }
+
+  if (pathname.match(/^\/api\/cycle-count\/(\d+)\/count$/) && method === 'POST') {
+    const id = pathname.match(/^\/api\/cycle-count\/(\d+)\/count$/)[1];
+    const body = await readJSON(req);
+    const items = body.items || [];
+    const upd = db.prepare("UPDATE cycle_count_items SET counted_qty=?, variance=?-system_qty, note=? WHERE plan_id=? AND product_code=?");
+    items.forEach(it => upd.run(it.counted_qty, it.counted_qty, it.note||'', id, it.product_code));
+    ok(res, { updated: items.length }); return;
+  }
+
+  if (pathname.match(/^\/api\/cycle-count\/(\d+)\/complete$/) && method === 'POST') {
+    const id = pathname.match(/^\/api\/cycle-count\/(\d+)\/complete$/)[1];
+    const items = db.prepare("SELECT * FROM cycle_count_items WHERE plan_id=? AND counted_qty IS NOT NULL AND variance != 0").all(id);
+    // 재고 조정 반영
+    for (const it of items) {
+      const batch = db.prepare("SELECT batch_id, current_qty FROM batch_master WHERE product_code=? AND quality_status='GOOD' ORDER BY received_date DESC LIMIT 1").get(it.product_code);
+      if (batch) {
+        const newQty = batch.current_qty + it.variance;
+        db.prepare("UPDATE batch_master SET current_qty=?, updated_at=datetime('now','localtime') WHERE batch_id=?").run(Math.max(0, newQty), batch.batch_id);
+        db.prepare("INSERT INTO batch_transactions (batch_id,batch_number,txn_type,txn_date,product_code,qty,qty_before,qty_after,reference_no,actor,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+          batch.batch_id, '', 'adjust', new Date().toISOString().slice(0,10), it.product_code, Math.abs(it.variance), batch.current_qty, Math.max(0, newQty), 'CC-'+id, '', '재고실사 조정');
+        db.prepare("UPDATE cycle_count_items SET adjusted=1 WHERE id=?").run(it.id);
+      }
+    }
+    db.prepare("UPDATE cycle_count_plans SET status='completed', completed_at=datetime('now','localtime') WHERE id=?").run(id);
+    createNotification(null, 'system', '재고실사 완료', 'CC-'+id+' 실사 완료, '+items.length+'건 조정', 'cycle-count');
+    ok(res, { adjusted: items.length }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 4: 제조원가 계산 API
+  // ══════════════���═════════════════════════════════════════════════════
+
+  if (pathname === '/api/mfg-cost/rates' && method === 'GET') {
+    const rates = db.prepare("SELECT * FROM cost_rates ORDER BY rate_type, rate_key").all();
+    ok(res, rates); return;
+  }
+
+  if (pathname === '/api/mfg-cost/rates' && method === 'POST') {
+    const body = await readJSON(req);
+    const items = body.items || [body];
+    const upsert = db.prepare("INSERT INTO cost_rates (rate_type,rate_key,rate_value,unit,notes) VALUES (?,?,?,?,?) ON CONFLICT(rate_type,rate_key) DO UPDATE SET rate_value=excluded.rate_value, unit=excluded.unit, notes=excluded.notes, updated_at=datetime('now','localtime')");
+    items.forEach(it => upsert.run(it.rate_type, it.rate_key, it.rate_value||0, it.unit||'', it.notes||''));
+    ok(res, { saved: items.length }); return;
+  }
+
+  if (pathname.match(/^\/api\/mfg-cost\/calculate\/(.+)$/) && method === 'POST') {
+    const productCode = decodeURIComponent(pathname.match(/^\/api\/mfg-cost\/calculate\/(.+)$/)[1]);
+    const body = await readJSON(req);
+    const qty = body.qty || 1;
+
+    // BOM에서 재료비 계산
+    const bom = db.prepare("SELECT * FROM bom_header WHERE product_code=?").get(productCode);
+    if (!bom) { fail(res, 404, 'BOM not found for ' + productCode); return; }
+    const bomItems = db.prepare("SELECT * FROM bom_items WHERE bom_id=?").all(bom.bom_id);
+
+    let materialCost = 0, outsourceCost = 0;
+    const materialDetails = [], processDetails = [];
+    for (const item of bomItems) {
+      if (item.item_type === 'material') {
+        // material_prices에서 최신 단가 조회
+        const price = db.prepare("SELECT apply_price FROM material_prices WHERE product_code=? ORDER BY apply_month DESC LIMIT 1").get(item.material_code || item.product_code);
+        const unitPrice = price ? price.apply_price : 0;
+        const cost = unitPrice * (item.qty_per || 1) * qty;
+        materialCost += cost;
+        materialDetails.push({ code: item.material_code||item.product_code, name: item.material_name, qty_per: item.qty_per, unit_price: unitPrice, cost });
+      } else if (item.item_type === 'process') {
+        // post_process_price에서 단가 조회
+        const price = db.prepare("SELECT unit_price FROM post_process_price WHERE vendor_name=? AND process_type=? ORDER BY effective_from DESC LIMIT 1").get(item.vendor_name||'', item.process_type||'');
+        const unitPrice = price ? price.unit_price : 0;
+        const cost = unitPrice * (item.qty_per || 1) * qty;
+        outsourceCost += cost;
+        processDetails.push({ process: item.process_type, vendor: item.vendor_name, qty_per: item.qty_per, unit_price: unitPrice, cost });
+      }
+    }
+
+    // 노무비: work_order_results에서 실적 기반 또는 표준
+    const laborRate = (db.prepare("SELECT rate_value FROM cost_rates WHERE rate_type='labor' AND rate_key='default'").get()||{}).rate_value || 25000;
+    const overheadRate = (db.prepare("SELECT rate_value FROM cost_rates WHERE rate_type='overhead' AND rate_key='rate'").get()||{}).rate_value || 15;
+
+    // 최근 작업지시의 실제 노무시간 기반
+    const woResult = db.prepare("SELECT COALESCE(SUM(work_hours),0) AS hours, COALESCE(SUM(good_qty),0) AS good FROM work_order_results r JOIN work_orders w ON w.wo_id=r.work_order_id WHERE w.product_code=? ORDER BY r.result_date DESC LIMIT 10").get(productCode);
+    let laborCost = 0;
+    if (woResult && woResult.good > 0) {
+      const hoursPerUnit = woResult.hours / woResult.good;
+      laborCost = hoursPerUnit * laborRate * qty;
+    } else {
+      laborCost = laborRate * 0.5 * qty; // 기본 30분/개
+    }
+
+    const overheadCost = (materialCost + laborCost) * overheadRate / 100;
+    const totalCost = materialCost + laborCost + overheadCost + outsourceCost;
+    const unitCost = qty > 0 ? Math.round(totalCost / qty) : 0;
+
+    // 저장
+    const calcDate = new Date().toISOString().slice(0,10);
+    db.prepare("INSERT INTO mfg_cost_cards (product_code,product_name,calc_date,material_cost,labor_cost,overhead_cost,outsource_cost,total_cost,unit_cost,qty,source) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(product_code,calc_date) DO UPDATE SET material_cost=excluded.material_cost, labor_cost=excluded.labor_cost, overhead_cost=excluded.overhead_cost, outsource_cost=excluded.outsource_cost, total_cost=excluded.total_cost, unit_cost=excluded.unit_cost, qty=excluded.qty").run(
+      productCode, bom.product_name||'', calcDate, materialCost, laborCost, overheadCost, outsourceCost, totalCost, unitCost, qty, 'auto');
+
+    ok(res, {
+      product_code: productCode, product_name: bom.product_name, qty, calc_date: calcDate,
+      material: { total: materialCost, details: materialDetails },
+      labor: { total: laborCost, rate: laborRate, hours_per_unit: woResult && woResult.good > 0 ? woResult.hours/woResult.good : 0.5 },
+      overhead: { total: overheadCost, rate: overheadRate },
+      outsource: { total: outsourceCost, details: processDetails },
+      total_cost: totalCost, unit_cost: unitCost
+    }); return;
+  }
+
+  if (pathname === '/api/mfg-cost/cards' && method === 'GET') {
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+    const cards = db.prepare("SELECT * FROM mfg_cost_cards WHERE calc_date >= ? ORDER BY calc_date DESC, product_code").all(from);
+    ok(res, cards); return;
+  }
+
+  if (pathname === '/api/mfg-cost/summary' && method === 'GET') {
+    const latest = db.prepare(`SELECT product_code, product_name, MAX(calc_date) AS calc_date,
+      material_cost, labor_cost, overhead_cost, outsource_cost, total_cost, unit_cost, qty
+      FROM mfg_cost_cards GROUP BY product_code ORDER BY product_name`).all();
+    const totals = db.prepare(`SELECT COALESCE(SUM(material_cost),0) AS material, COALESCE(SUM(labor_cost),0) AS labor,
+      COALESCE(SUM(overhead_cost),0) AS overhead, COALESCE(SUM(outsource_cost),0) AS outsource, COALESCE(SUM(total_cost),0) AS total
+      FROM (SELECT product_code, material_cost, labor_cost, overhead_cost, outsource_cost, total_cost FROM mfg_cost_cards
+      WHERE calc_date = (SELECT MAX(calc_date) FROM mfg_cost_cards c2 WHERE c2.product_code=mfg_cost_cards.product_code) GROUP BY product_code)`).get();
+    ok(res, { cards: latest, totals: totals||{} }); return;
+  }
+
+  if (pathname === '/api/mfg-cost/calculate-all' && method === 'POST') {
+    // 모든 BOM 제품의 원가를 일괄 계산
+    const boms = db.prepare("SELECT product_code, product_name FROM bom_header").all();
+    let calculated = 0;
+    const laborRate = (db.prepare("SELECT rate_value FROM cost_rates WHERE rate_type='labor' AND rate_key='default'").get()||{}).rate_value || 25000;
+    const overheadRate = (db.prepare("SELECT rate_value FROM cost_rates WHERE rate_type='overhead' AND rate_key='rate'").get()||{}).rate_value || 15;
+    const calcDate = new Date().toISOString().slice(0,10);
+
+    const tx = db.transaction(() => {
+      for (const bom of boms) {
+        const items = db.prepare("SELECT * FROM bom_items WHERE bom_id=(SELECT bom_id FROM bom_header WHERE product_code=?)").all(bom.product_code);
+        let mat = 0, out = 0;
+        for (const it of items) {
+          if (it.item_type === 'material') {
+            const p = db.prepare("SELECT apply_price FROM material_prices WHERE product_code=? ORDER BY apply_month DESC LIMIT 1").get(it.material_code||it.product_code);
+            mat += (p ? p.apply_price : 0) * (it.qty_per||1);
+          } else if (it.item_type === 'process') {
+            const p = db.prepare("SELECT unit_price FROM post_process_price WHERE vendor_name=? AND process_type=? ORDER BY effective_from DESC LIMIT 1").get(it.vendor_name||'', it.process_type||'');
+            out += (p ? p.unit_price : 0) * (it.qty_per||1);
+          }
+        }
+        const wo = db.prepare("SELECT COALESCE(SUM(work_hours),0) AS h, COALESCE(SUM(good_qty),0) AS g FROM work_order_results r JOIN work_orders w ON w.wo_id=r.work_order_id WHERE w.product_code=?").get(bom.product_code);
+        const lab = wo && wo.g > 0 ? (wo.h/wo.g)*laborRate : laborRate*0.5;
+        const oh = (mat+lab)*overheadRate/100;
+        const total = mat+lab+oh+out;
+        db.prepare("INSERT INTO mfg_cost_cards (product_code,product_name,calc_date,material_cost,labor_cost,overhead_cost,outsource_cost,total_cost,unit_cost,qty,source) VALUES (?,?,?,?,?,?,?,?,?,1,'batch') ON CONFLICT(product_code,calc_date) DO UPDATE SET material_cost=excluded.material_cost, labor_cost=excluded.labor_cost, overhead_cost=excluded.overhead_cost, outsource_cost=excluded.outsource_cost, total_cost=excluded.total_cost, unit_cost=excluded.unit_cost").run(
+          bom.product_code, bom.product_name, calcDate, mat, lab, oh, out, total, Math.round(total));
+        calculated++;
+      }
+    });
+    tx();
+    ok(res, { calculated }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 5: RBAC 권한관리 API
+  // ════════════════════════════════════════════════════════════════════
+
+  if (pathname === '/api/rbac/roles' && method === 'GET') {
+    const roles = db.prepare("SELECT DISTINCT role FROM role_permissions ORDER BY role").all().map(r => r.role);
+    const result = roles.map(role => {
+      const perms = db.prepare("SELECT permission, resource FROM role_permissions WHERE role=? AND granted=1").all(role);
+      const userCount = (db.prepare("SELECT COUNT(*) AS c FROM users WHERE role=?").get(role)||{}).c||0;
+      return { role, permissions: perms, user_count: userCount };
+    });
+    ok(res, result); return;
+  }
+
+  if (pathname === '/api/rbac/roles' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.role) { fail(res, 400, 'role 필수'); return; }
+    // 기존 권한 삭제 후 재생성
+    db.prepare("DELETE FROM role_permissions WHERE role=?").run(body.role);
+    const ins = db.prepare("INSERT INTO role_permissions (role,permission,resource) VALUES (?,?,?)");
+    (body.permissions || []).forEach(p => ins.run(body.role, p.permission||'read', p.resource||'*'));
+    ok(res, { saved: true }); return;
+  }
+
+  if (pathname === '/api/rbac/permissions' && method === 'GET') {
+    // 모든 가능한 권한 목록
+    const resources = ALL_PAGES.map(p => p.id);
+    const permissions = ['read', 'write', 'delete', 'approve', 'export'];
+    ok(res, { resources, permissions }); return;
+  }
+
+  if (pathname === '/api/rbac/user-permissions' && method === 'GET') {
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const userId = qs.get('user_id');
+    if (!userId) { fail(res, 400, 'user_id 필수'); return; }
+    const user = db.prepare("SELECT user_id, username, display_name, role FROM users WHERE user_id=?").get(userId);
+    if (!user) { fail(res, 404, 'User not found'); return; }
+    const perms = db.prepare("SELECT permission, resource FROM role_permissions WHERE role=? AND granted=1").all(user.role);
+    ok(res, { user, permissions: perms }); return;
+  }
+
+  if (pathname === '/api/rbac/check' && method === 'POST') {
+    const body = await readJSON(req);
+    const perms = db.prepare("SELECT * FROM role_permissions WHERE role=? AND granted=1 AND (resource=? OR resource='*') AND (permission=? OR permission='*')").get(body.role||'', body.resource||'', body.permission||'read');
+    ok(res, { allowed: !!perms }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Phase 6: 공정 라우팅 + 설비관리 API
+  // ════════════════════════════════════════════════════════════════════
+
+  // 공정 라우팅
+  if (pathname === '/api/process-routing' && method === 'GET') {
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const productCode = qs.get('product_code');
+    if (productCode) {
+      const routes = db.prepare("SELECT r.*, e.eq_name FROM process_routing r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.product_code=? ORDER BY r.step_no").all(productCode);
+      ok(res, routes);
+    } else {
+      const all = db.prepare("SELECT product_code, COUNT(*) AS step_count, GROUP_CONCAT(process_name,' → ') AS flow FROM process_routing GROUP BY product_code ORDER BY product_code").all();
+      ok(res, all);
+    }
+    return;
+  }
+
+  if (pathname === '/api/process-routing' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.product_code || !body.steps) { fail(res, 400, 'product_code, steps 필수'); return; }
+    db.prepare("DELETE FROM process_routing WHERE product_code=?").run(body.product_code);
+    const ins = db.prepare("INSERT INTO process_routing (product_code,step_no,process_name,process_type,equipment_id,vendor_name,std_time_min,setup_time_min,notes) VALUES (?,?,?,?,?,?,?,?,?)");
+    body.steps.forEach((s,i) => ins.run(body.product_code, i+1, s.process_name, s.process_type||'internal', s.equipment_id||null, s.vendor_name||'', s.std_time_min||0, s.setup_time_min||0, s.notes||''));
+    ok(res, { saved: body.steps.length }); return;
+  }
+
+  if (pathname === '/api/process-routing/import-from-bom' && method === 'POST') {
+    // BOM의 공정 항목에서 자동으로 라우팅 생성
+    const boms = db.prepare("SELECT DISTINCT bom_id, product_code FROM bom_header").all();
+    let imported = 0;
+    const ins = db.prepare("INSERT OR IGNORE INTO process_routing (product_code,step_no,process_name,process_type,vendor_name,std_time_min) VALUES (?,?,?,?,?,?)");
+    for (const b of boms) {
+      const procs = db.prepare("SELECT * FROM bom_items WHERE bom_id=? AND item_type='process' ORDER BY sort_order").all(b.bom_id);
+      procs.forEach((p,i) => {
+        ins.run(b.product_code, i+1, p.process_type||p.material_name||'공정'+(i+1), p.vendor_name?'outsource':'internal', p.vendor_name||'', 30);
+        imported++;
+      });
+    }
+    ok(res, { imported }); return;
+  }
+
+  // 공정별 실적
+  if (pathname === '/api/process-results' && method === 'POST') {
+    const body = await readJSON(req);
+    db.prepare("INSERT INTO process_results (wo_id,routing_id,step_no,process_name,equipment_id,start_time,end_time,good_qty,defect_qty,worker_name,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").run(
+      body.wo_id, body.routing_id||null, body.step_no, body.process_name, body.equipment_id||null, body.start_time||'', body.end_time||'', body.good_qty||0, body.defect_qty||0, body.worker_name||'', body.status||'completed', body.notes||'');
+
+    // 설비 가동 로그 자동 생성
+    if (body.equipment_id && body.start_time && body.end_time) {
+      const start = new Date(body.start_time); const end = new Date(body.end_time);
+      const duration = (end - start) / 60000;
+      if (duration > 0) {
+        db.prepare("INSERT INTO equipment_logs (equipment_id,log_date,log_type,start_time,end_time,duration_min,reason,worker_name) VALUES (?,?,?,?,?,?,?,?)").run(
+          body.equipment_id, (body.start_time||'').slice(0,10), 'production', body.start_time, body.end_time, duration, body.process_name||'', body.worker_name||'');
+      }
+    }
+
+    // 해당 WO의 공정 진행률 업데이트
+    const routing = db.prepare("SELECT COUNT(*) AS total FROM process_routing WHERE product_code=(SELECT product_code FROM work_orders WHERE wo_id=?)").get(body.wo_id);
+    const completed = db.prepare("SELECT COUNT(DISTINCT step_no) AS done FROM process_results WHERE wo_id=? AND status='completed'").get(body.wo_id);
+    if (routing && completed && routing.total > 0 && completed.done >= routing.total) {
+      // 모든 공정 완료 → 작업지시 완료 처리
+      const totalGood = (db.prepare("SELECT MIN(good_qty) AS g FROM process_results WHERE wo_id=? AND status='completed'").get(body.wo_id)||{}).g||0;
+      db.prepare("UPDATE work_orders SET status='completed', produced_qty=?, completed_date=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE wo_id=?").run(totalGood, body.wo_id);
+      createNotification(null, 'system', '작업지시 완료', 'WO-'+body.wo_id+' 모든 공정 완료', 'work-order');
+    }
+    ok(res, { saved: true }); return;
+  }
+
+  if (pathname === '/api/process-results' && method === 'GET') {
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const woId = qs.get('wo_id');
+    if (woId) {
+      const results = db.prepare("SELECT pr.*, e.eq_name FROM process_results pr LEFT JOIN equipment e ON e.id=pr.equipment_id WHERE pr.wo_id=? ORDER BY pr.step_no").all(woId);
+      ok(res, results);
+    } else {
+      const results = db.prepare("SELECT pr.*, w.wo_number, w.product_name, e.eq_name FROM process_results pr JOIN work_orders w ON w.wo_id=pr.wo_id LEFT JOIN equipment e ON e.id=pr.equipment_id ORDER BY pr.created_at DESC LIMIT 100").all();
+      ok(res, results);
+    }
+    return;
+  }
+
+  // 설비 관리
+  if (pathname === '/api/equipment' && method === 'GET') {
+    const eqs = db.prepare("SELECT * FROM equipment ORDER BY eq_code").all();
+    // 각 설비의 이번달 가동 통계
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10);
+    const result = eqs.map(eq => {
+      const logs = db.prepare("SELECT log_type, COALESCE(SUM(duration_min),0) AS total_min FROM equipment_logs WHERE equipment_id=? AND log_date >= ? GROUP BY log_type").all(eq.id, monthStart);
+      const stats = {};
+      logs.forEach(l => stats[l.log_type] = l.total_min);
+      const prodMin = stats.production || 0;
+      const downMin = stats.downtime || 0;
+      const maintMin = stats.maintenance || 0;
+      const totalMin = prodMin + downMin + maintMin;
+      const availability = totalMin > 0 ? Math.round(prodMin / totalMin * 1000) / 10 : 0;
+      return { ...eq, stats: { production_min: prodMin, downtime_min: downMin, maintenance_min: maintMin, availability } };
+    });
+    ok(res, result); return;
+  }
+
+  if (pathname === '/api/equipment' && method === 'POST') {
+    const body = await readJSON(req);
+    if (body.id) {
+      db.prepare("UPDATE equipment SET eq_name=?,eq_type=?,location=?,status=?,manufacturer=?,model=?,capacity_per_hour=?,notes=?,updated_at=datetime('now','localtime') WHERE id=?").run(
+        body.eq_name, body.eq_type||'', body.location||'', body.status||'active', body.manufacturer||'', body.model||'', body.capacity_per_hour||0, body.notes||'', body.id);
+      ok(res, { updated: true }); return;
+    }
+    const code = body.eq_code || 'EQ-' + String(Date.now()).slice(-6);
+    db.prepare("INSERT INTO equipment (eq_code,eq_name,eq_type,location,status,purchase_date,manufacturer,model,capacity_per_hour,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+      code, body.eq_name||'', body.eq_type||'', body.location||'', body.status||'active', body.purchase_date||'', body.manufacturer||'', body.model||'', body.capacity_per_hour||0, body.notes||'');
+    ok(res, { created: true, eq_code: code }); return;
+  }
+
+  if (pathname.match(/^\/api\/equipment\/(\d+)\/oee$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/equipment\/(\d+)\/oee$/)[1];
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+    const to = qs.get('to') || new Date().toISOString().slice(0,10);
+    const eq = db.prepare("SELECT * FROM equipment WHERE id=?").get(id);
+    if (!eq) { fail(res, 404, 'Not Found'); return; }
+
+    // OEE = Availability × Performance × Quality
+    const logs = db.prepare("SELECT log_type, COALESCE(SUM(duration_min),0) AS mins FROM equipment_logs WHERE equipment_id=? AND log_date BETWEEN ? AND ? GROUP BY log_type").all(id, from, to);
+    const logMap = {}; logs.forEach(l => logMap[l.log_type] = l.mins);
+    const prodMin = logMap.production || 0;
+    const downMin = logMap.downtime || 0;
+    const plannedMin = prodMin + downMin + (logMap.maintenance || 0);
+    const availability = plannedMin > 0 ? prodMin / plannedMin : 0;
+
+    // Performance: 실제 생산량 vs 이론적 최대 생산량
+    const results = db.prepare("SELECT COALESCE(SUM(good_qty),0) AS good, COALESCE(SUM(defect_qty),0) AS defect FROM process_results WHERE equipment_id=? AND created_at >= ? AND created_at <= ?").get(id, from, to + ' 23:59:59');
+    const totalProd = (results.good||0) + (results.defect||0);
+    const maxProd = eq.capacity_per_hour > 0 ? eq.capacity_per_hour * (prodMin / 60) : totalProd || 1;
+    const performance = maxProd > 0 ? Math.min(1, totalProd / maxProd) : 0;
+
+    // Quality
+    const quality = totalProd > 0 ? (results.good||0) / totalProd : 1;
+
+    const oee = Math.round(availability * performance * quality * 1000) / 10;
+
+    // 일별 추이
+    const daily = db.prepare("SELECT log_date, log_type, SUM(duration_min) AS mins FROM equipment_logs WHERE equipment_id=? AND log_date BETWEEN ? AND ? GROUP BY log_date, log_type ORDER BY log_date").all(id, from, to);
+
+    ok(res, {
+      equipment: eq, period: { from, to },
+      oee, availability: Math.round(availability*1000)/10, performance: Math.round(performance*1000)/10, quality: Math.round(quality*1000)/10,
+      production: { good: results.good||0, defect: results.defect||0, total: totalProd, max_capacity: Math.round(maxProd) },
+      time: { production_min: prodMin, downtime_min: downMin, maintenance_min: logMap.maintenance||0, planned_min: plannedMin },
+      daily
+    }); return;
+  }
+
+  if (pathname.match(/^\/api\/equipment\/(\d+)\/log$/) && method === 'POST') {
+    const id = pathname.match(/^\/api\/equipment\/(\d+)\/log$/)[1];
+    const body = await readJSON(req);
+    db.prepare("INSERT INTO equipment_logs (equipment_id,log_date,log_type,start_time,end_time,duration_min,reason,worker_name,notes) VALUES (?,?,?,?,?,?,?,?,?)").run(
+      id, body.log_date||new Date().toISOString().slice(0,10), body.log_type||'downtime', body.start_time||'', body.end_time||'', body.duration_min||0, body.reason||'', body.worker_name||'', body.notes||'');
+    // 설비 상태 자동 업데이트
+    if (body.log_type === 'maintenance') {
+      db.prepare("UPDATE equipment SET status='maintenance', updated_at=datetime('now','localtime') WHERE id=?").run(id);
+    } else if (body.log_type === 'production') {
+      db.prepare("UPDATE equipment SET status='active', updated_at=datetime('now','localtime') WHERE id=?").run(id);
+    }
+    ok(res, { saved: true }); return;
+  }
+
+  if (pathname.match(/^\/api\/equipment\/(\d+)\/logs$/) && method === 'GET') {
+    const id = pathname.match(/^\/api\/equipment\/(\d+)\/logs$/)[1];
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const from = qs.get('from') || new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+    const logs = db.prepare("SELECT * FROM equipment_logs WHERE equipment_id=? AND log_date >= ? ORDER BY log_date DESC, start_time DESC").all(id, from);
+    ok(res, logs); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -12556,6 +14291,80 @@ async function handleRequest(req, res) {
       payments = pResult.recordset;
     } catch (e) { sources.xerp = 'error: ' + e.message; }
     ok(res, { cs_code: cs, bills, payments, sources }); return;
+  }
+
+  // ── POST /api/acct/journal-entry ── 수동 분개 생성
+  if (pathname === '/api/acct/journal-entry' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    try {
+      const body = await readJSON(req);
+      const { entry_date, description, lines } = body;
+      if (!entry_date) { fail(res, 400, '전표일자를 입력하세요'); return; }
+      if (!lines || !Array.isArray(lines) || lines.length === 0) { fail(res, 400, '분개 라인을 입력하세요'); return; }
+      let totalDebit = 0, totalCredit = 0;
+      for (const ln of lines) {
+        if (!ln.acc_code) { fail(res, 400, '계정코드가 누락된 라인이 있습니다'); return; }
+        totalDebit += (parseFloat(ln.debit) || 0);
+        totalCredit += (parseFloat(ln.credit) || 0);
+      }
+      if (Math.abs(totalDebit - totalCredit) > 0.5) { fail(res, 400, '차변합계와 대변합계가 일치하지 않습니다 (차변: ' + totalDebit + ', 대변: ' + totalCredit + ')'); return; }
+      // entry_no 생성: JE-YYYYMMDD-NNN
+      const dateStr = entry_date.replace(/-/g, '');
+      const prefix = 'JE-' + dateStr + '-';
+      const last = db.prepare("SELECT entry_no FROM journal_entries WHERE entry_no LIKE ? ORDER BY entry_no DESC LIMIT 1").get(prefix + '%');
+      let seq = 1;
+      if (last && last.entry_no) {
+        const parts = last.entry_no.split('-');
+        seq = parseInt(parts[parts.length - 1], 10) + 1;
+      }
+      const entry_no = prefix + String(seq).padStart(3, '0');
+      const ins = db.prepare("INSERT INTO journal_entries (entry_no, entry_date, description, total_amount, status, created_by) VALUES (?,?,?,?,?,?)");
+      const result = ins.run(entry_no, entry_date, description || '', totalDebit, 'posted', decoded.name || decoded.username || '');
+      const entryId = result.lastInsertRowid;
+      const insLine = db.prepare("INSERT INTO journal_entry_lines (entry_id, line_no, acc_code, acc_name, debit, credit, description) VALUES (?,?,?,?,?,?,?)");
+      for (let i = 0; i < lines.length; i++) {
+        const ln = lines[i];
+        insLine.run(entryId, i + 1, ln.acc_code, ln.acc_name || '', parseFloat(ln.debit) || 0, parseFloat(ln.credit) || 0, ln.description || '');
+      }
+      ok(res, { id: entryId, entry_no, total_amount: totalDebit }); return;
+    } catch (e) { fail(res, 500, '수동 분개 생성 실패: ' + e.message); return; }
+  }
+
+  // ── GET /api/acct/journal-entries ── 수동 분개 목록
+  if (pathname === '/api/acct/journal-entries' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    try {
+      const qs = new URL(req.url, 'http://localhost').searchParams;
+      const from = qs.get('from') || '';
+      const to = qs.get('to') || '';
+      let sql = "SELECT e.*, (SELECT COUNT(*) FROM journal_entry_lines WHERE entry_id=e.id) AS line_count FROM journal_entries e WHERE 1=1";
+      const params = [];
+      if (from) { sql += " AND e.entry_date >= ?"; params.push(from); }
+      if (to) { sql += " AND e.entry_date <= ?"; params.push(to); }
+      sql += " ORDER BY e.entry_date DESC, e.id DESC";
+      const entries = db.prepare(sql).all(...params);
+      // 각 entry에 lines 포함
+      const stmtLines = db.prepare("SELECT * FROM journal_entry_lines WHERE entry_id=? ORDER BY line_no");
+      for (const e of entries) { e.lines = stmtLines.all(e.id); }
+      ok(res, { entries }); return;
+    } catch (e) { fail(res, 500, '수동 분개 조회 실패: ' + e.message); return; }
+  }
+
+  // ── DELETE /api/acct/journal-entries/:id ── 수동 분개 삭제
+  if (pathname.match(/^\/api\/acct\/journal-entries\/(\d+)$/) && method === 'DELETE') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
+    try {
+      const id = parseInt(pathname.match(/^\/api\/acct\/journal-entries\/(\d+)$/)[1], 10);
+      const entry = db.prepare("SELECT * FROM journal_entries WHERE id=?").get(id);
+      if (!entry) { fail(res, 404, '분개 전표를 찾을 수 없습니다'); return; }
+      if (entry.status !== 'posted') { fail(res, 400, '삭제할 수 없는 상태입니다: ' + entry.status); return; }
+      db.prepare("DELETE FROM journal_entry_lines WHERE entry_id=?").run(id);
+      db.prepare("DELETE FROM journal_entries WHERE id=?").run(id);
+      ok(res, { deleted: id }); return;
+    } catch (e) { fail(res, 500, '수동 분개 삭제 실패: ' + e.message); return; }
   }
 
   // ════════════════════════════════════════════════════════════════════
