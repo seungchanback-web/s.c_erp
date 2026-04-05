@@ -6411,7 +6411,7 @@ buildHeader();
 
 // ===== UTILITY FUNCTIONS =====
 function fN(v){if(v===0||v===''||v==null)return'<span class="zero">0</span>';if(typeof v==='number')return v.toLocaleString();return String(v)}
-function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
+function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;'):'';}
 
 // 연(R) 변환: R = 수량 / 500 / 절 / 조판
 function parseJeol(val){ // 'T3K'→3, '2'→2, 'A4'→4 등 문자열에서 숫자 추출
@@ -7541,7 +7541,8 @@ async function loadChartOfAccountsPage() {
   var el=document.getElementById('coaContent');
   if(el) el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
   try {
-    var r=await authFetch('/api/acct/accounts');
+    var res=await authFetch('/api/acct/accounts');
+    var r=await res.json();
     if(r.ok){_coaAccounts=r.data.accounts;renderCoaTab();}
     else if(el) el.innerHTML='<div style="color:#ef4444;padding:20px">'+esc(r.error||'로드 실패')+'</div>';
   } catch(e){ if(el) el.innerHTML='<div style="color:#ef4444;padding:20px">'+esc(e.message)+'</div>'; }
@@ -7601,7 +7602,8 @@ function renderCoaList(el) {
 async function loadCoaStats(el) {
   el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">통계 로딩 중...</div>';
   try {
-    var r=await authFetch('/api/acct/account-stats?year='+new Date().getFullYear());
+    var res=await authFetch('/api/acct/account-stats?year='+new Date().getFullYear());
+    var r=await res.json();
     if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     document.getElementById('coaSourceBar').innerHTML=acctSourceBadge(r.data.sources);
     var stats=r.data.stats||[];
@@ -7616,7 +7618,8 @@ async function loadCoaStats(el) {
 async function seedAccounts() {
   if(!confirm('XERP에서 계정과목을 동기화합니다. 진행하시겠습니까?')) return;
   try {
-    var r=await authFetch('/api/acct/seed-accounts');
+    var res=await authFetch('/api/acct/seed-accounts');
+    var r=await res.json();
     if(r.ok) { alert('동기화 완료: '+r.data.seeded+'개 계정 (총 '+r.data.total+'개)'); loadChartOfAccountsPage(); }
     else alert('실패: '+(r.error||''));
   } catch(e){alert('오류: '+e.message);}
@@ -7663,14 +7666,16 @@ async function loadJournalData() {
   try {
     var url='/api/acct/vouchers?from='+from+'&to='+to+'&status='+status+'&offset='+_jnlOffset+'&limit=100';
     if(search) url+='&search='+encodeURIComponent(search);
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     document.getElementById('jnlSourceBar').innerHTML=acctSourceBadge(r.data.sources);
     _jnlData=r.data.vouchers||[];_jnlTotal=r.data.totalCount||0;
     // 수동 분개도 병합
     try {
       var mjeUrl='/api/acct/journal-entries?from='+encodeURIComponent(fromDash)+'&to='+encodeURIComponent(toDash);
-      var mr=await authFetch(mjeUrl);
+      var mres=await authFetch(mjeUrl);
+      var mr=await mres.json();
       if(mr.ok&&mr.data&&mr.data.entries) {
         var manualEntries=mr.data.entries.map(function(e){
           var totalDr=0,totalCr=0;
@@ -7738,7 +7743,8 @@ async function loadVoucherDetail(docNo) {
   el.style.display='block';
   el.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">전표 상세 로딩 중...</div>';
   try {
-    var r=await authFetch('/api/acct/voucher/'+encodeURIComponent(docNo));
+    var res=await authFetch('/api/acct/voucher/'+encodeURIComponent(docNo));
+    var r=await res.json();
     if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data,hdr=d.header||{};
     var docDate=(hdr.DocDate||'').trim();if(docDate.length===8) docDate=docDate.slice(0,4)+'-'+docDate.slice(4,6)+'-'+docDate.slice(6,8);
@@ -7845,7 +7851,8 @@ async function saveManualJournal() {
   var totalCr=lines.reduce(function(s,l){return s+l.credit;},0);
   if(Math.abs(totalDr-totalCr)>=1){alert('차변합계와 대변합계가 일치하지 않습니다');return;}
   try {
-    var r=await authFetch('/api/acct/journal-entry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entry_date:entryDate,description:description,lines:lines})});
+    var res=await authFetch('/api/acct/journal-entry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entry_date:entryDate,description:description,lines:lines})});
+    var r=await res.json();
     if(!r.ok){alert(r.error||'저장 실패');return;}
     alert('수동 분개가 저장되었습니다. ('+r.data.entry_no+')');
     closeManualJournalModal();
@@ -7855,7 +7862,8 @@ async function saveManualJournal() {
 async function deleteManualJournal(id) {
   if(!confirm('이 수동 분개를 삭제하시겠습니까?'))return;
   try {
-    var r=await authFetch('/api/acct/journal-entries/'+id,{method:'DELETE'});
+    var res=await authFetch('/api/acct/journal-entries/'+id,{method:'DELETE'});
+    var r=await res.json();
     if(!r.ok){alert(r.error||'삭제 실패');return;}
     loadJournalData();
   } catch(e){alert('삭제 실패: '+e.message);}
@@ -7867,7 +7875,8 @@ async function loadManualJournalDetail(id) {
   try {
     var si=document.getElementById('jnlStart'),ei=document.getElementById('jnlEnd');
     var fromDash=(si?si.value:''),toDash=(ei?ei.value:'');
-    var r=await authFetch('/api/acct/journal-entries?from='+encodeURIComponent(fromDash)+'&to='+encodeURIComponent(toDash));
+    var res=await authFetch('/api/acct/journal-entries?from='+encodeURIComponent(fromDash)+'&to='+encodeURIComponent(toDash));
+    var r=await res.json();
     if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var entry=null;
     (r.data.entries||[]).forEach(function(e){if(e.id===id)entry=e;});
@@ -7906,7 +7915,8 @@ async function loadGeneralLedgerPage() {
   var sel=document.getElementById('glAccSelect');
   if(sel&&sel.options.length<=1){
     try {
-      var r=await authFetch('/api/acct/accounts');
+      var res=await authFetch('/api/acct/accounts');
+      var r=await res.json();
       if(r.ok){
         r.data.accounts.forEach(function(a){
           var opt=document.createElement('option');opt.value=a.acc_code;opt.textContent=a.acc_code+' '+a.acc_name;sel.appendChild(opt);
@@ -7930,7 +7940,8 @@ async function loadGLData() {
   try {
     var url='/api/acct/gl?acc='+acc+'&from='+from+'&to='+to;
     if(cs) url+='&cs='+encodeURIComponent(cs);
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     document.getElementById('glSourceBar').innerHTML=acctSourceBadge(d.sources);
@@ -7990,7 +8001,8 @@ async function loadTrialBalance(refresh) {
   try {
     var url='/api/acct/trial-balance?year='+year+'&month='+month;
     if(refresh) url+='&refresh=1';
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     document.getElementById('tbSourceBar').innerHTML=acctSourceBadge(d.sources);
@@ -8056,7 +8068,8 @@ async function loadFinancialStatements() {
   try {
     var url='/api/acct/financial-statements?year='+year+'&month='+month;
     if(compare) url+='&compare='+compare;
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     _fsData=r.data;
     document.getElementById('fsSourceBar').innerHTML=acctSourceBadge(r.data.sources);
@@ -8164,7 +8177,8 @@ async function loadArapData() {
   var to=((document.getElementById('arapEnd')||{}).value||'').replace(/-/g,'');
   var type=_arapTab==='ap'?'AP':'AR';
   try {
-    var r=await authFetch('/api/acct/ar-summary?from='+from+'&to='+to+'&type='+type);
+    var res=await authFetch('/api/acct/ar-summary?from='+from+'&to='+to+'&type='+type);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
@@ -8194,7 +8208,8 @@ async function loadArapData() {
 async function loadAgingData() {
   var el=document.getElementById('arapContent');
   try {
-    var r=await authFetch('/api/acct/aging');
+    var res=await authFetch('/api/acct/aging');
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
@@ -8244,7 +8259,8 @@ async function loadArapDetail() {
   var from=((document.getElementById('arapStart')||{}).value||'').replace(/-/g,'');
   var to=((document.getElementById('arapEnd')||{}).value||'').replace(/-/g,'');
   try {
-    var r=await authFetch('/api/acct/ar-detail?cs='+encodeURIComponent(cs)+'&from='+from+'&to='+to);
+    var res=await authFetch('/api/acct/ar-detail?cs='+encodeURIComponent(cs)+'&from='+from+'&to='+to);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     document.getElementById('arapSourceBar').innerHTML=acctSourceBadge(d.sources);
@@ -8328,7 +8344,8 @@ async function loadTaxInvoiceData() {
     var url='/api/tax-invoice/list?from='+from+'&to='+to+'&offset='+_taxOffset+'&limit=100';
     if(type) url+='&type='+type;
     if(search) url+='&search='+encodeURIComponent(search);
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     _taxData=r.data.invoices||[];_taxTotal=r.data.totalCount||0;
     document.getElementById('taxSourceBar').innerHTML=acctSourceBadge(r.data.sources);
@@ -8372,7 +8389,8 @@ async function loadTaxDetail(invoiceNo) {
   var el=document.getElementById('taxDetail');if(!el)return;
   el.style.display='block';el.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">상세 로딩 중...</div>';
   try {
-    var r=await authFetch('/api/tax-invoice/detail/'+encodeURIComponent(invoiceNo));
+    var res=await authFetch('/api/tax-invoice/detail/'+encodeURIComponent(invoiceNo));
+    var r=await res.json();
     if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var hdr=r.data.header||{}, items=r.data.items||[];
     var dt=(hdr.InvoiceDate||'').trim();if(dt.length>=8) dt=dt.slice(0,4)+'-'+dt.slice(4,6)+'-'+dt.slice(6,8);
@@ -8404,7 +8422,8 @@ async function loadTaxMonthlySummary() {
   var el=document.getElementById('taxContent');if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">월별 집계 로딩 중...</div>';
   try {
     var year=new Date().getFullYear();
-    var r=await authFetch('/api/tax-invoice/summary?year='+year);
+    var res=await authFetch('/api/tax-invoice/summary?year='+year);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     document.getElementById('taxSourceBar').innerHTML=acctSourceBadge(r.data.sources);
     var monthly=r.data.monthly||[];
@@ -9081,7 +9100,8 @@ async function loadWorkOrders() {
     var url='/api/work-orders?';
     if(status) url+='status='+status+'&';
     if(search) url+='search='+encodeURIComponent(search);
-    var r=await authFetch(url);
+    var res=await authFetch(url);
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     _woData=r.data.orders||[];
     var sm=r.data.summary||{};
@@ -9135,7 +9155,8 @@ async function createWorkOrder() {
   if(!body.product_name){alert('품명을 입력하세요.');return;}
   if(!body.ordered_qty){alert('지시수량을 입력하세요.');return;}
   try {
-    var r=await authFetch('/api/work-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var res=await authFetch('/api/work-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r=await res.json();
     if(r.ok){alert('작업지시 '+r.data.wo_number+' 등록 완료');switchWoTab('list');}
     else alert('실패: '+(r.error||''));
   } catch(e){alert('오류: '+e.message);}
@@ -9144,7 +9165,8 @@ async function loadWoDetail(id) {
   var el=document.getElementById('woDetail');if(!el)return;
   el.style.display='block';el.innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">상세 로딩 중...</div>';
   try {
-    var r=await authFetch('/api/work-orders/'+id);
+    var res=await authFetch('/api/work-orders/'+id);
+    var r=await res.json();
     if(!r.ok){el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var wo=r.data.order,logs=r.data.logs||[];
     var st=wo.status||'planned',color=WO_STATUS_COLORS[st]||'#94a3b8',label=WO_STATUS_LABELS[st]||st;
@@ -9179,7 +9201,8 @@ async function updateWoStatus(id, status) {
   var label=WO_STATUS_LABELS[status]||status;
   if(!confirm('상태를 ['+label+']로 변경하시겠습니까?')) return;
   try {
-    var r=await authFetch('/api/work-orders/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})});
+    var res=await authFetch('/api/work-orders/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})});
+    var r=await res.json();
     if(r.ok){loadWoDetail(id);loadWorkOrders();}
     else alert('실패: '+(r.error||''));
   } catch(e){alert('오류: '+e.message);}
@@ -9199,7 +9222,8 @@ function showWoReport(id) {
 async function submitWoReport(id) {
   var body={produced_qty:parseInt((document.getElementById('woRptQty')||{}).value||'0',10),defect_qty:parseInt((document.getElementById('woRptDefect')||{}).value||'0',10),cost_material:parseFloat((document.getElementById('woRptMat')||{}).value||'0'),cost_labor:parseFloat((document.getElementById('woRptLabor')||{}).value||'0'),cost_overhead:parseFloat((document.getElementById('woRptOh')||{}).value||'0')};
   try {
-    var r=await authFetch('/api/work-orders/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var res=await authFetch('/api/work-orders/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r=await res.json();
     if(r.ok){alert('실적 등록 완료');loadWoDetail(id);}
     else alert('실패: '+(r.error||''));
   } catch(e){alert('오류: '+e.message);}
@@ -9207,7 +9231,8 @@ async function submitWoReport(id) {
 async function loadWoStats() {
   var el=document.getElementById('woContent');if(el)el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">통계 로딩 중...</div>';
   try {
-    var r=await authFetch('/api/work-orders/stats');
+    var res=await authFetch('/api/work-orders/stats');
+    var r=await res.json();
     if(!r.ok){if(el)el.innerHTML='<div style="color:#ef4444">'+esc(r.error||'실패')+'</div>';return;}
     var d=r.data;
     var h='<h3 style="font-size:16px;margin:0 0 16px">생산 현황 통계</h3>';
@@ -25552,6 +25577,7 @@ function onRbTypeChange() {
     if (f === 'vendor') filtersEl.innerHTML += '<input type="text" id="rbF_vendor" placeholder="거래처명" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:120px">';
     if (f === 'origin') filtersEl.innerHTML += '<select id="rbF_origin" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"><option value="">전체 Origin</option><option value="한국">한국</option><option value="중국">중국</option><option value="더기프트">더기프트</option></select>';
     if (f === 'brand') filtersEl.innerHTML += '<select id="rbF_brand" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"><option value="">전체 브랜드</option><option value="barunson">바른손</option><option value="dd">DD</option></select>';
+    if (f === 'customer') filtersEl.innerHTML += '<input type="text" id="rbF_customer" placeholder="고객/거래처명" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:120px">';
     if (f === 'warehouse') filtersEl.innerHTML += '<input type="text" id="rbF_warehouse" placeholder="창고" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:100px">';
     if (f === 'status') filtersEl.innerHTML += '<select id="rbF_status" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px"><option value="">전체 상태</option><option value="in_progress">진행중</option><option value="completed">완료</option></select>';
   });
@@ -25570,7 +25596,7 @@ async function runReportBuilder() {
   var filterText = document.getElementById('rbFilter').value.trim();
   if (filterText) filters.vendor = filterText;
   // 추가 필터 수집
-  ['vendor','origin','brand','warehouse','status'].forEach(function(f) {
+  ['vendor','origin','brand','customer','warehouse','status'].forEach(function(f) {
     var el = document.getElementById('rbF_'+f);
     if (el && el.value) filters[f] = el.value;
   });
@@ -25691,7 +25717,7 @@ async function saveReportTemplate() {
     dateTo: document.getElementById('rbDateTo').value,
     filterText: document.getElementById('rbFilter').value.trim()
   };
-  ['vendor','origin','brand','warehouse','status'].forEach(function(f) {
+  ['vendor','origin','brand','customer','warehouse','status'].forEach(function(f) {
     var el = document.getElementById('rbF_'+f);
     if (el && el.value) filters[f] = el.value;
   });
@@ -25765,7 +25791,7 @@ async function loadTemplate(id) {
     if (filters.filterText) document.getElementById('rbFilter').value = filters.filterText;
     // 추가 필터 복원 (DOM이 onRbTypeChange로 생성된 후)
     setTimeout(function() {
-      ['vendor','origin','brand','warehouse','status'].forEach(function(f) {
+      ['vendor','origin','brand','customer','warehouse','status'].forEach(function(f) {
         var el = document.getElementById('rbF_'+f);
         if (el && filters[f]) el.value = filters[f];
       });

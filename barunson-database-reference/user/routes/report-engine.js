@@ -71,7 +71,7 @@ const REPORT_TYPES = [
   {
     type: 'vendor_comparison', name: '거래처 비교', description: '거래처별 거래 비교',
     filters: ['dateRange', 'vendors'],
-    columns: ['vendor_name', 'total_orders', 'total_amount', 'avg_lead_time'],
+    columns: ['vendor_name', 'total_orders', 'total_qty', 'avg_lead_time'],
     chartTypes: ['bar', 'radar'],
   },
   {
@@ -107,6 +107,7 @@ const COLUMN_META = {
   status:         { label: '상태', type: 'string' },
   total_orders:   { label: '총주문수', type: 'number' },
   total_amount:   { label: '총금액', type: 'number' },
+  total_qty:      { label: '총수량', type: 'number' },
   avg_lead_time:  { label: '평균리드타임(일)', type: 'number' },
   work_order_no:  { label: '작업지시번호', type: 'string' },
   planned_qty:    { label: '계획수량', type: 'number' },
@@ -118,6 +119,54 @@ const COLUMN_META = {
   balance:        { label: '잔액', type: 'number' },
   tx_count:       { label: '건수', type: 'number' },
 };
+
+/* ────────────────────────────────────────────
+   SQL 인젝션 방지: 허용 컬럼 화이트리스트
+   ──────────────────────────────────────────── */
+const ALLOWED_COLUMNS = new Set([
+  // 원시 컬럼
+  'h.vendor_name', 'h.po_date', 'h.po_id', 'h.status', 'h.expected_date',
+  'i.product_code', 'i.ordered_qty', 'i.received_qty',
+  'p.product_name',
+  'order_date', 'customer_name', 'order_type', 'status', 'total_amount', 'total_qty',
+  'wi.product_code', 'wi.product_name', 'wi.quantity',
+  'w.name', 'w.start_date', 'w.wo_number', 'w.product_name', 'w.ordered_qty', 'w.status',
+  'j.created_at', 'j.debit_account', 'j.credit_account', 'j.amount',
+  // 앨리어스 / 집계 결과
+  'vendor_name', 'product_code', 'product_name', 'qty', 'unit_price', 'amount', 'date',
+  'avg_price', 'warehouse_name', 'quantity',
+  'total_orders', 'total_qty', 'avg_lead_time',
+  'work_order_no', 'planned_qty', 'actual_qty', 'yield_rate',
+  'account', 'debit', 'credit', 'balance', 'tx_count',
+]);
+
+const ALLOWED_DIRECTIONS = new Set(['ASC', 'DESC']);
+
+/**
+ * sortBy/groupBy 문자열을 화이트리스트에 대해 검증한다.
+ * 유효하지 않은 토큰이 있으면 null을 반환 → 호출부에서 기본값 사용.
+ */
+function sanitizeSqlColumns(input, allowDirection) {
+  if (!input || typeof input !== 'string') return null;
+
+  const parts = input.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  for (const part of parts) {
+    const tokens = part.split(/\s+/);
+    const col = tokens[0];
+    if (!ALLOWED_COLUMNS.has(col)) return null;
+
+    if (allowDirection && tokens.length > 1) {
+      const dir = tokens[1].toUpperCase();
+      if (!ALLOWED_DIRECTIONS.has(dir)) return null;
+      if (tokens.length > 2) return null; // 추가 토큰 불허
+    } else if (!allowDirection && tokens.length > 1) {
+      return null;
+    }
+  }
+  return input;
+}
 
 /* ────────────────────────────────────────────
    동적 쿼리 빌더
@@ -132,8 +181,8 @@ function buildPurchaseSummary(filters, groupBy, sortBy, limit) {
   if (filters.vendor) { where += ' AND h.vendor_name LIKE ?'; params.push('%' + filters.vendor + '%'); }
   if (filters.origin) { where += ' AND h.origin = ?'; params.push(filters.origin); }
 
-  const groupCol = groupBy || 'h.vendor_name, i.product_code';
-  const orderCol = sortBy || 'qty DESC';
+  const groupCol = sanitizeSqlColumns(groupBy, false) || 'h.vendor_name, i.product_code';
+  const orderCol = sanitizeSqlColumns(sortBy, true) || 'qty DESC';
   const lim = Math.min(limit || 100, 5000);
 
   const sql = `
@@ -158,11 +207,11 @@ function buildSalesAnalysis(filters, groupBy, sortBy, limit) {
 
   if (filters.dateFrom) { where += ' AND order_date >= ?'; params.push(filters.dateFrom); }
   if (filters.dateTo) { where += ' AND order_date <= ?'; params.push(filters.dateTo); }
-  if (filters.brand) { where += ' AND customer_name LIKE ?'; params.push('%' + filters.brand + '%'); }
+  if (filters.customer) { where += ' AND customer_name LIKE ?'; params.push('%' + filters.customer + '%'); }
   if (filters.status) { where += ' AND status = ?'; params.push(filters.status); }
 
-  const groupCol = groupBy || 'order_date, customer_name';
-  const orderCol = sortBy || 'amount DESC';
+  const groupCol = sanitizeSqlColumns(groupBy, false) || 'order_date, customer_name';
+  const orderCol = sanitizeSqlColumns(sortBy, true) || 'amount DESC';
   const lim = Math.min(limit || 100, 5000);
 
   const sql = `
@@ -186,7 +235,7 @@ function buildInventoryStatus(filters, groupBy, sortBy, limit) {
   if (filters.warehouse) { where += ' AND w.name LIKE ?'; params.push('%' + filters.warehouse + '%'); }
   if (filters.product) { where += ' AND (wi.product_code LIKE ? OR wi.product_name LIKE ?)'; params.push('%' + filters.product + '%', '%' + filters.product + '%'); }
 
-  const orderCol = sortBy || 'wi.product_code ASC';
+  const orderCol = sanitizeSqlColumns(sortBy, true) || 'wi.product_code ASC';
   const lim = Math.min(limit || 100, 5000);
 
   const sql = `
@@ -221,14 +270,14 @@ function buildVendorComparison(filters, groupBy, sortBy, limit) {
     }
   }
 
-  const orderCol = sortBy || 'total_orders DESC';
+  const orderCol = sanitizeSqlColumns(sortBy, true) || 'total_orders DESC';
   const lim = Math.min(limit || 100, 5000);
 
   const sql = `
     SELECT h.vendor_name,
            COUNT(DISTINCT h.po_id) AS total_orders,
-           SUM(i.ordered_qty) AS total_amount,
-           ROUND(AVG(JULIANDAY(COALESCE(h.expected_date, h.po_date)) - JULIANDAY(h.po_date)), 1) AS avg_lead_time
+           SUM(i.ordered_qty) AS total_qty,
+           ROUND(AVG(CASE WHEN h.expected_date IS NOT NULL THEN JULIANDAY(h.expected_date) - JULIANDAY(h.po_date) ELSE NULL END), 1) AS avg_lead_time
     FROM po_header h LEFT JOIN po_items i ON h.po_id = i.po_id
     WHERE ${where}
     GROUP BY h.vendor_name
@@ -247,7 +296,7 @@ function buildProductionSummary(filters, groupBy, sortBy, limit) {
   if (filters.dateTo) { where += ' AND w.start_date <= ?'; params.push(filters.dateTo); }
   if (filters.status) { where += ' AND w.status = ?'; params.push(filters.status); }
 
-  const orderCol = sortBy || 'w.start_date DESC';
+  const orderCol = sanitizeSqlColumns(sortBy, true) || 'w.start_date DESC';
   const lim = Math.min(limit || 100, 5000);
 
   const sql = `
@@ -296,7 +345,7 @@ function buildFinancialOverview(filters, groupBy, sortBy, limit) {
       FROM journal_auto_log j WHERE ${where}
     )
     GROUP BY account
-    ORDER BY ${sortBy || 'balance DESC'}
+    ORDER BY ${sanitizeSqlColumns(sortBy, true) || 'balance DESC'}
     LIMIT ?
   `;
   const params = [...whereParams, ...whereParams, lim];

@@ -2203,6 +2203,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS sales_order_items (
   product_code TEXT DEFAULT '', product_name TEXT DEFAULT '', spec TEXT DEFAULT '',
   unit_price REAL DEFAULT 0, qty INTEGER DEFAULT 0, amount REAL DEFAULT 0, notes TEXT DEFAULT ''
 )`);
+db.exec("CREATE INDEX IF NOT EXISTS idx_sales_order_items_order_id ON sales_order_items(order_id)");
 
 // ── Phase 4: 예산관리 ──
 db.exec(`CREATE TABLE IF NOT EXISTS budgets (
@@ -8194,6 +8195,8 @@ async function handleRequest(req, res) {
   // ════════════════════════════════════════════════════════════════════
 
   if (pathname === '/api/mrp/run' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const b = await readJSON(req);
     const month = b.plan_month;
     if (!month) { res.writeHead(400); res.end(JSON.stringify({error:'plan_month required'})); return; }
@@ -8258,6 +8261,8 @@ async function handleRequest(req, res) {
   }
 
   if (pathname === '/api/mrp/results' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const month = parsed.searchParams.get('month') || '';
     let q = 'SELECT * FROM mrp_result';
     const params = [];
@@ -8269,6 +8274,8 @@ async function handleRequest(req, res) {
 
   // DELETE /api/mrp/results?month=YYYY-MM — MRP 결과 초기화
   if (pathname === '/api/mrp/results' && method === 'DELETE') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const month = parsed.searchParams.get('month');
     if (month) {
       const r = db.prepare('DELETE FROM mrp_result WHERE plan_month=?').run(month);
@@ -8282,6 +8289,8 @@ async function handleRequest(req, res) {
 
   // ── MRP Calculate (BOM Explosion from Work Orders + Sales Orders) ──
   if (pathname === '/api/mrp/calculate' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const b = await readJSON(req);
     const roundUnit = b.round_unit || 1;
 
@@ -8377,6 +8386,8 @@ async function handleRequest(req, res) {
 
   // ── MRP Shortage (items with net_req > 0 only) ──
   if (pathname === '/api/mrp/shortage' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const pendingWOs = db.prepare(
       "SELECT wo_id, product_code, product_name, ordered_qty, produced_qty FROM work_orders WHERE status NOT IN ('completed','cancelled')"
     ).all();
@@ -8445,6 +8456,8 @@ async function handleRequest(req, res) {
 
   // Create POs from MRP results
   if (pathname === '/api/mrp/create-po' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const b = await readJSON(req);
     const ids = b.result_ids || [];
     if (!ids.length) { res.writeHead(400); res.end(JSON.stringify({error:'result_ids required'})); return; }
@@ -14309,25 +14322,29 @@ async function handleRequest(req, res) {
         totalCredit += (parseFloat(ln.credit) || 0);
       }
       if (Math.abs(totalDebit - totalCredit) > 0.5) { fail(res, 400, '차변합계와 대변합계가 일치하지 않습니다 (차변: ' + totalDebit + ', 대변: ' + totalCredit + ')'); return; }
-      // entry_no 생성: JE-YYYYMMDD-NNN
+      // entry_no 생성: JE-YYYYMMDD-NNN (트랜잭션으로 보호)
       const dateStr = entry_date.replace(/-/g, '');
       const prefix = 'JE-' + dateStr + '-';
-      const last = db.prepare("SELECT entry_no FROM journal_entries WHERE entry_no LIKE ? ORDER BY entry_no DESC LIMIT 1").get(prefix + '%');
-      let seq = 1;
-      if (last && last.entry_no) {
-        const parts = last.entry_no.split('-');
-        seq = parseInt(parts[parts.length - 1], 10) + 1;
-      }
-      const entry_no = prefix + String(seq).padStart(3, '0');
-      const ins = db.prepare("INSERT INTO journal_entries (entry_no, entry_date, description, total_amount, status, created_by) VALUES (?,?,?,?,?,?)");
-      const result = ins.run(entry_no, entry_date, description || '', totalDebit, 'posted', decoded.name || decoded.username || '');
-      const entryId = result.lastInsertRowid;
-      const insLine = db.prepare("INSERT INTO journal_entry_lines (entry_id, line_no, acc_code, acc_name, debit, credit, description) VALUES (?,?,?,?,?,?,?)");
-      for (let i = 0; i < lines.length; i++) {
-        const ln = lines[i];
-        insLine.run(entryId, i + 1, ln.acc_code, ln.acc_name || '', parseFloat(ln.debit) || 0, parseFloat(ln.credit) || 0, ln.description || '');
-      }
-      ok(res, { id: entryId, entry_no, total_amount: totalDebit }); return;
+      const createEntry = db.transaction(() => {
+        const last = db.prepare("SELECT entry_no FROM journal_entries WHERE entry_no LIKE ? ORDER BY entry_no DESC LIMIT 1").get(prefix + '%');
+        let seq = 1;
+        if (last && last.entry_no) {
+          const parts = last.entry_no.split('-');
+          seq = parseInt(parts[parts.length - 1], 10) + 1;
+        }
+        const entry_no = prefix + String(seq).padStart(3, '0');
+        const ins = db.prepare("INSERT INTO journal_entries (entry_no, entry_date, description, total_amount, status, created_by) VALUES (?,?,?,?,?,?)");
+        const result = ins.run(entry_no, entry_date, description || '', totalDebit, 'posted', decoded.name || decoded.username || '');
+        const entryId = result.lastInsertRowid;
+        const insLine = db.prepare("INSERT INTO journal_entry_lines (entry_id, line_no, acc_code, acc_name, debit, credit, description) VALUES (?,?,?,?,?,?,?)");
+        for (let i = 0; i < lines.length; i++) {
+          const ln = lines[i];
+          insLine.run(entryId, i + 1, ln.acc_code, ln.acc_name || '', parseFloat(ln.debit) || 0, parseFloat(ln.credit) || 0, ln.description || '');
+        }
+        return { id: entryId, entry_no, total_amount: totalDebit };
+      });
+      const entryResult = createEntry();
+      ok(res, entryResult); return;
     } catch (e) { fail(res, 500, '수동 분개 생성 실패: ' + e.message); return; }
   }
 
@@ -14345,9 +14362,20 @@ async function handleRequest(req, res) {
       if (to) { sql += " AND e.entry_date <= ?"; params.push(to); }
       sql += " ORDER BY e.entry_date DESC, e.id DESC";
       const entries = db.prepare(sql).all(...params);
-      // 각 entry에 lines 포함
-      const stmtLines = db.prepare("SELECT * FROM journal_entry_lines WHERE entry_id=? ORDER BY line_no");
-      for (const e of entries) { e.lines = stmtLines.all(e.id); }
+      // 각 entry에 lines 포함 (N+1 방지: 한 번에 모든 lines 조회 후 그룹핑)
+      if (entries.length > 0) {
+        const entryIds = entries.map(e => e.id);
+        const placeholders = entryIds.map(() => '?').join(',');
+        const allLines = db.prepare("SELECT * FROM journal_entry_lines WHERE entry_id IN (" + placeholders + ") ORDER BY entry_id, line_no").all(...entryIds);
+        const linesMap = {};
+        for (const ln of allLines) {
+          if (!linesMap[ln.entry_id]) linesMap[ln.entry_id] = [];
+          linesMap[ln.entry_id].push(ln);
+        }
+        for (const e of entries) { e.lines = linesMap[e.id] || []; }
+      } else {
+        for (const e of entries) { e.lines = []; }
+      }
       ok(res, { entries }); return;
     } catch (e) { fail(res, 500, '수동 분개 조회 실패: ' + e.message); return; }
   }
