@@ -1324,9 +1324,14 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
 
 <!-- ===== SIDEBAR (Notion 스타일) ===== -->
 <nav class="sidebar-nav" id="sidebarNav">
-  <div class="sb-header" onclick="showPage('dashboard')" style="cursor:pointer" title="홈으로">
-    <div class="sb-logo">B</div>
-    <span class="sb-logo-text sb-hide">바른컴퍼니</span>
+  <div class="sb-header" style="cursor:pointer">
+    <div class="sb-logo" id="sbCompanyLogo" onclick="showPage('dashboard')" title="홈으로">B</div>
+    <select id="companySelector" class="sb-logo-text sb-hide"
+      onchange="switchCompany(this.value)"
+      style="font-size:14px;font-weight:700;border:none;background:transparent;cursor:pointer;outline:none;color:var(--text-primary);padding:0;-webkit-appearance:auto;appearance:auto;max-width:130px">
+      <option value="barunson">바른컴퍼니</option>
+      <option value="dd">디얼디어</option>
+    </select>
     <div class="sb-toggle sb-hide" onclick="event.stopPropagation();toggleSidebarCollapse()" title="사이드바 접기">&#9776;</div>
   </div>
   <div class="sb-user sb-hide" id="userInfoBar" style="display:none">
@@ -1374,7 +1379,7 @@ var _megaData = {
       {icon:'📝',bg:'#eff6ff',fg:'#2563eb',name:'발주생성',desc:'수동 발주 + 엑셀',page:'create-po',origins:['한국','중국','더기프트']},
       {icon:'📋',bg:'#f0fdf4',fg:'#16a34a',name:'발주현황',desc:'PO 상태 관리',page:'po-list',origins:['한국','중국','더기프트'],badgeId:'qmPOList'},
       {icon:'📄',bg:'#f5f3ff',fg:'#7c3aed',name:'발주서 관리',desc:'발주서 출력 + 이력',page:'po-mgmt',badgeId:'qmPOMgmt'},
-      {icon:'🚢',bg:'#fef2f2',fg:'#dc2626',name:'중국선적',desc:'交期表 + BL추적',page:'china-shipment',clickOrigin:'중국'},
+      {icon:'🚢',bg:'#fef2f2',fg:'#dc2626',name:'중국선적',desc:'交期表 + BL추적',page:'china-shipment',clickOrigin:'중국',companies:['barunson']},
       {icon:'📅',bg:'#ecfdf5',fg:'#0d9488',name:'입고일정',desc:'입고 예정 일정',page:'delivery-schedule',origins:['한국','중국','더기프트']},
       {icon:'📥',bg:'#f0fdf4',fg:'#059669',name:'입고관리',desc:'수령 처리 + 불량 기록',page:'receipts',origins:['한국','중국','더기프트']},
       {icon:'🏷',bg:'#f5f3ff',fg:'#8b5cf6',name:'OS등록',desc:'외주 생산 등록',page:'os-register'},
@@ -1385,9 +1390,9 @@ var _megaData = {
     title: '판매관리',
     items: [
       {icon:'💰',bg:'#fef3c7',fg:'#d97706',name:'통합매출',desc:'전체 매출 통합 현황',page:'sales'},
-      {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출',page:'sales-barun'},
-      {icon:'💳',bg:'#fce7f3',fg:'#db2777',name:'DD매출',desc:'디얼디어 매출',page:'sales-dd'},
-      {icon:'🎁',bg:'#ecfdf5',fg:'#059669',name:'더기프트매출',desc:'답례품 매출',page:'sales-gift'},
+      {icon:'🏢',bg:'#dbeafe',fg:'#2563eb',name:'바른손매출',desc:'바른손(XERP) 매출',page:'sales-barun',companies:['barunson']},
+      {icon:'💳',bg:'#fce7f3',fg:'#db2777',name:'DD매출',desc:'디얼디어 매출',page:'sales-dd',companies:['dd']},
+      {icon:'🎁',bg:'#ecfdf5',fg:'#059669',name:'더기프트매출',desc:'답례품 매출',page:'sales-gift',companies:['barunson']},
       {icon:'🛒',bg:'#f5f3ff',fg:'#7c3aed',name:'고객주문',desc:'주문 조회/현황',page:'customer-orders'},
       {icon:'🚛',bg:'#fff7ed',fg:'#ea580c',name:'배송추적',desc:'배송 현황/추적',page:'shipping'},
       {icon:'📝',bg:'#f0fdf4',fg:'#16a34a',name:'수주관리',desc:'견적→수주→출하',page:'sales-order'}
@@ -1409,7 +1414,7 @@ var _megaData = {
     title: '생산관리',
     items: [
       {icon:'🎬',bg:'#fef3c7',fg:'#d97706',name:'생산요청',desc:'생산 워크플로우',page:'production-req'},
-      {icon:'🎁',bg:'#fce7f3',fg:'#db2777',name:'생산재고',desc:'더기프트 세트 재고',page:'production-stock'},
+      {icon:'🎁',bg:'#fce7f3',fg:'#db2777',name:'생산재고',desc:'더기프트 세트 재고',page:'production-stock',companies:['barunson']},
       {icon:'🏭',bg:'#e0e7ff',fg:'#4338ca',name:'MRP',desc:'자재소요 + 생산계획',page:'mrp'},
       {icon:'📋',bg:'#fef9c3',fg:'#a16207',name:'작업지시',desc:'생산 작업지시/실적',page:'work-order'},
       {icon:'🔀',bg:'#e0e7ff',fg:'#4338ca',name:'공정라우팅',desc:'공정순서/설비배정',page:'process-routing'},
@@ -1488,6 +1493,7 @@ function renderSidebar() {
     var cat = _megaData[catKey]; if (!cat) return;
     // 메뉴 활성화 + 권한 체크: 카테고리 내 접근 가능 항목이 하나도 없으면 숨김
     var hasAccess = cat.items.some(function(it) {
+      if (it.companies && it.companies.indexOf(_currentCompany) < 0) return false;
       if (!isMenuEnabled(it.page)) return false;
       if (typeof canAccess !== 'function') return true;
       if (it.page === 'user-mgmt') return currentAuthUser && currentAuthUser.role === 'admin';
@@ -1502,6 +1508,8 @@ function renderSidebar() {
     h += '</div>';
     h += '<div class="sb-cat-items'+(isOpen?'':' collapsed')+'" id="sbCat_'+catKey+'" style="max-height:'+(isOpen?'500px':'0')+'">';
     cat.items.forEach(function(it) {
+      // 법인 필터링 — 다른 법인 전용 메뉴 숨김
+      if (it.companies && it.companies.indexOf(_currentCompany) < 0) return;
       // 메뉴 비활성화 체크
       if (!isMenuEnabled(it.page)) return;
       // 권한 체크
@@ -5972,6 +5980,66 @@ if (_BASE_PATH) {
   console.log('📡 API Base Path:', _BASE_PATH);
 }
 
+// ===== 법인 분리 (Company Separation) =====
+const COMPANY_CONFIG = {
+  barunson: {
+    key: 'barunson', name: '바른컴퍼니', short: '바른손', logo: 'B',
+    logoGradient: 'linear-gradient(135deg,#2F81F7,#1A6DE0)',
+    color: '#2F81F7',
+    origins: ['한국', '중국', '더기프트'],
+    title: '바른컴퍼니 재고운영시스템'
+  },
+  dd: {
+    key: 'dd', name: '디얼디어', short: 'DD', logo: 'D',
+    logoGradient: 'linear-gradient(135deg,#EC4899,#DB2777)',
+    color: '#EC4899',
+    origins: ['DD'],
+    title: '디얼디어 재고운영시스템'
+  }
+};
+let _currentCompany = localStorage.getItem('erp_company') || 'barunson';
+
+function switchCompany(companyKey) {
+  if (!COMPANY_CONFIG[companyKey]) return;
+  _currentCompany = companyKey;
+  localStorage.setItem('erp_company', companyKey);
+  const cfg = COMPANY_CONFIG[companyKey];
+
+  // 1. 사이드바 로고 + 텍스트
+  const logo = document.getElementById('sbCompanyLogo');
+  if (logo) { logo.textContent = cfg.logo; logo.style.background = cfg.logoGradient; }
+  const sel = document.getElementById('companySelector');
+  if (sel) sel.value = companyKey;
+
+  // 2. 타이틀
+  document.title = cfg.title;
+
+  // 3. 사이드바 메뉴 재렌더
+  if (typeof renderSidebar === 'function') renderSidebar();
+
+  // 4. 현재 페이지 새로고침
+  if (typeof _currentPage !== 'undefined' && typeof showPage === 'function') {
+    showPage(_currentPage);
+  }
+}
+
+function getCompanyCfg() { return COMPANY_CONFIG[_currentCompany] || COMPANY_CONFIG.barunson; }
+
+// 홈 대시보드 메가메뉴 법인 필터링
+function filterHomeMegaByCompany() {
+  // _megaData에서 companies 필드가 있는 아이템의 page를 수집
+  const hiddenPages = new Set();
+  Object.values(_megaData || {}).forEach(cat => {
+    (cat.items || []).forEach(it => {
+      if (it.companies && !it.companies.includes(_currentCompany)) hiddenPages.add(it.page);
+    });
+  });
+  // 홈 메가메뉴의 hm-item 요소들 필터링
+  document.querySelectorAll('.hm-item[data-page]').forEach(el => {
+    el.style.display = hiddenPages.has(el.dataset.page) ? 'none' : '';
+  });
+}
+
 // ===== AUTH STATE =====
 let authToken = localStorage.getItem('authToken') || '';
 let currentAuthUser = null;
@@ -6194,6 +6262,13 @@ function showApp() {
     }
     // 즐겨찾기 로드 (로그인 후 올바른 user_id로)
     loadFavorites();
+    // 법인 선택기 초기화
+    const _sel = document.getElementById('companySelector');
+    if (_sel) _sel.value = _currentCompany;
+    const _logo = document.getElementById('sbCompanyLogo');
+    const _cfg = getCompanyCfg();
+    if (_logo) { _logo.textContent = _cfg.logo; _logo.style.background = _cfg.logoGradient; }
+    document.title = _cfg.title;
     // 사이드바 렌더링
     renderSidebar();
     renderFavorites();
@@ -6580,9 +6655,11 @@ async function processData(products){
 
   await Promise.allSettled(promises);
 
+  // 법인별 필터링: 바른컴퍼니=한국/중국/더기프트, 디얼디어=DD
+  const _companyOrigins = getCompanyCfg().origins;
   RAW=products.filter(p=>{
-    const b=p['브랜드']||'';
-    return !b.includes('D_')&&!b.includes('(D');
+    const origin = p['생산지'] || originMap[p['제품코드']] || '한국';
+    return _companyOrigins.includes(origin);
   });
   RAW.forEach(p=>{p._origin=p['생산지']||originMap[p['제품코드']]||'한국';});
   RAW.forEach(classifyItem);
@@ -7311,7 +7388,9 @@ async function loadXerpInventory(forceRefresh) {
   if(btn) btn.disabled = true;
 
   try {
-    const r = await fetch('/api/xerp-inventory' + (forceRefresh ? '?refresh=1' : ''));
+    const _invParams = new URLSearchParams({company: _currentCompany});
+    if (forceRefresh) _invParams.set('refresh', '1');
+    const r = await fetch('/api/xerp-inventory?' + _invParams.toString());
     const d = await r.json();
     const data = d.data || d;
 
@@ -7463,7 +7542,7 @@ function showPage(page, opts){
   // Page-specific loading
   if(page==='vendors') renderVendors();
   if(page==='settings'){loadGuideUI();renderWeightTable();loadMenuSettings();}
-  if(page==='dashboard') { renderDashFavorites(); }
+  if(page==='dashboard') { renderDashFavorites(); filterHomeMegaByCompany(); }
   if(page==='analytics') loadDashboard();
   if(page==='inventory') loadInventoryPage();
   if(page==='create-po') loadCreatePO();

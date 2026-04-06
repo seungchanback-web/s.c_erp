@@ -18,6 +18,7 @@ let xerpUsageCache = null;
 let xerpUsageCacheTime = 0;
 let xerpInventoryCache = null;
 let xerpInventoryCacheTime = 0;
+let xerpInventoryCaches = {};     // { barunson: {data, time}, dd: {data, time} }
 let giftSetShipmentCache = {};    // { xerp_code: total_qty }
 let giftSetShipmentCacheTime = 0;
 // ── 매출관리 캐시 ──
@@ -3586,17 +3587,25 @@ async function handleRequest(req, res) {
   if (pathname === '/api/xerp-inventory' && method === 'GET') {
     if (!await ensureXerpPool()) { fail(res, 503, 'XERP 데이터베이스 미연결 (재연결 시도 중)'); return; }
 
-    // 10분 캐시 (refresh=1 파라미터로 강제 갱신)
+    // 법인 파라미터 (barunson/dd)
+    const company = parsed.searchParams.get('company') || 'barunson';
+    const originFilter = company === 'dd' ? "origin = 'DD'" : "origin != 'DD'";
+
+    // 10분 캐시 — 법인별 분리
     const now = Date.now();
     const forceRefresh = parsed.searchParams.get('refresh') === '1';
-    if (!forceRefresh && xerpInventoryCache && now - xerpInventoryCacheTime < 600000) {
-      ok(res, xerpInventoryCache);
+    if (!xerpInventoryCaches) xerpInventoryCaches = {};
+    const cacheEntry = xerpInventoryCaches[company];
+    if (!forceRefresh && cacheEntry && now - cacheEntry.time < 600000) {
+      ok(res, cacheEntry.data);
       return;
     }
 
     try {
-      // 품목관리 DB에서 등록된 제품코드 리스트 로드
-      const registeredProducts = db.prepare("SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE status = 'active'").all();
+      // 품목관리 DB에서 등록된 제품코드 리스트 로드 (법인별 필터)
+      // DD는 inactive 품목도 포함 (DD 동기화 시 is_display='F'인 제품은 inactive로 등록됨)
+      const statusFilter = company === 'dd' ? "status IN ('active','inactive')" : "status = 'active'";
+      const registeredProducts = db.prepare(`SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${statusFilter} AND ${originFilter}`).all();
       if (!registeredProducts.length) {
         ok(res, { products: [], updated: new Date().toISOString(), count: 0, message: '품목관리에 등록된 제품이 없습니다. 먼저 품목을 등록해주세요.' });
         return;
@@ -3681,10 +3690,12 @@ async function handleRequest(req, res) {
         });
       }
 
-      xerpInventoryCache = { products, updated: new Date().toISOString(), count: products.length };
-      xerpInventoryCacheTime = now;
-      console.log(`XERP 제품 재고 로드: ${products.length}개 제품`);
-      ok(res, xerpInventoryCache);
+      const cacheData = { products, updated: new Date().toISOString(), count: products.length };
+      xerpInventoryCaches[company] = { data: cacheData, time: now };
+      // 기존 캐시 호환 (다른 모듈에서 참조)
+      if (company === 'barunson') { xerpInventoryCache = cacheData; xerpInventoryCacheTime = now; }
+      console.log(`${company === 'dd' ? 'DD' : 'XERP'} 제품 재고 로드: ${products.length}개 제품`);
+      ok(res, cacheData);
     } catch (e) {
       console.error('XERP 재고 조회 오류:', e.message);
       // 타임아웃/연결 끊김 시 자동 재연결
