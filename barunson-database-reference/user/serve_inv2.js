@@ -1770,8 +1770,8 @@ await db.exec("CREATE INDEX IF NOT EXISTS idx_gss_status ON gift_shipment_schedu
 
 // ── 더기프트 품목 자동 등록 (gift_sets + BOM → products) ──
 try {
-  const giftSets = db.prepare("SELECT set_code, set_name FROM gift_sets").all();
-  const bomItems = db.prepare("SELECT DISTINCT item_code, item_name FROM gift_set_bom").all();
+  const giftSets = await db.prepare("SELECT set_code, set_name FROM gift_sets").all();
+  const bomItems = await db.prepare("SELECT DISTINCT item_code, item_name FROM gift_set_bom").all();
   const allGiftCodes = new Map();
   giftSets.forEach(s => allGiftCodes.set(s.set_code, s.set_name));
   bomItems.forEach(b => { if (!allGiftCodes.has(b.item_code)) allGiftCodes.set(b.item_code, b.item_name); });
@@ -3372,18 +3372,10 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/vendors' && method === 'POST') {
     const body = await readJSON(req);
-    const stmt = db.prepare(`INSERT INTO vendors (vendor_code, name, type, contact, phone, email, email_cc, kakao, memo) VALUES (@vendor_code, @name, @type, @contact, @phone, @email, @email_cc, @kakao, @memo)`);
-    const info = await stmt.run({
-      vendor_code: body.vendor_code || '',
-      name: body.name || '',
-      type: body.type || '',
-      contact: body.contact || '',
-      phone: body.phone || '',
-      email: body.email || '',
-      email_cc: body.email_cc || '',
-      kakao: body.kakao || '',
-      memo: body.memo || '',
-    });
+    const info = await db.prepare(`INSERT INTO vendors (vendor_code, name, type, contact, phone, email, email_cc, kakao, memo) VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      body.vendor_code || '', body.name || '', body.type || '', body.contact || '',
+      body.phone || '', body.email || '', body.email_cc || '', body.kakao || '', body.memo || ''
+    );
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'vendor_create', 'vendors', info.lastInsertRowid, `거래처 등록: ${body.name}`, clientIP);
     ok(res, { vendor_id: info.lastInsertRowid });
     return;
@@ -3392,19 +3384,12 @@ async function handleRequest(req, res) {
   if (pathname === '/api/vendors/migrate' && method === 'POST') {
     const vendors = await readJSON(req);
     if (!Array.isArray(vendors)) { fail(res, 400, 'Expected array'); return; }
-    const stmt = db.prepare(`INSERT OR IGNORE INTO vendors (name, type, contact, phone, email, kakao, memo) VALUES (@name, @type, @contact, @phone, @email, @kakao, @memo)`);
     const tx = db.transaction(async (list) => {
       let count = 0;
       for (const v of list) {
-        const info = await stmt.run({
-          name: v.name || '',
-          type: v.type || '',
-          contact: v.contact || '',
-          phone: v.phone || '',
-          email: v.email || '',
-          kakao: v.kakao || '',
-          memo: v.memo || '',
-        });
+        const info = await db.prepare(`INSERT INTO vendors (name, type, contact, phone, email, kakao, memo) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`).run(
+          v.name || '', v.type || '', v.contact || '', v.phone || '', v.email || '', v.kakao || '', v.memo || ''
+        );
         if (info.changes > 0) count++;
       }
       return count;

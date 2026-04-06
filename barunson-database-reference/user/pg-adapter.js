@@ -64,7 +64,45 @@ function convertSqliteFunctions(sql) {
   // GROUP_CONCAT → STRING_AGG
   s = s.replace(/\bGROUP_CONCAT\s*\(\s*([^,)]+)\s*,\s*('[^']*')\s*\)/gi, 'STRING_AGG($1::TEXT, $2)');
   s = s.replace(/\bGROUP_CONCAT\s*\(\s*([^)]+)\s*\)/gi, "STRING_AGG($1::TEXT, ',')");
-  // REPLACE INTO → INSERT ... ON CONFLICT DO UPDATE (handled per-case)
+  // INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+  s = s.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, 'INSERT INTO');
+  // INSERT OR REPLACE → INSERT ... ON CONFLICT DO UPDATE (단순 upsert)
+  s = s.replace(/\bINSERT\s+OR\s+REPLACE\s+INTO\b/gi, 'INSERT INTO');
+  // REPLACE INTO → INSERT INTO
+  s = s.replace(/\bREPLACE\s+INTO\b/gi, 'INSERT INTO');
+
+  // ON CONFLICT 자동 추가: INSERT INTO ... VALUES (...) 뒤에 ON CONFLICT DO NOTHING 추가
+  // INSERT OR IGNORE 였던 것만 (원래 sql에 OR IGNORE가 있었는지 체크)
+  if (/\bINSERT\s+OR\s+IGNORE\b/i.test(sql)) {
+    // VALUES(...) 뒤에 ON CONFLICT DO NOTHING 추가 (이미 ON CONFLICT가 없을 때)
+    if (!/ON\s+CONFLICT/i.test(s)) {
+      s = s.replace(/(\)\s*)$/, ') ON CONFLICT DO NOTHING');
+      // run/get/all 전에 세미콜론 없으므로 VALUES 다음에 추가
+      if (!/ON\s+CONFLICT/i.test(s)) {
+        s = s.replace(/(VALUES\s*\([^)]*\))(?!\s*ON)/i, '$1 ON CONFLICT DO NOTHING');
+      }
+    }
+  }
+
+  // INSERT OR REPLACE → ON CONFLICT DO UPDATE SET (모든 컬럼)
+  if (/\bINSERT\s+OR\s+REPLACE\b/i.test(sql) || /\bREPLACE\s+INTO\b/i.test(sql)) {
+    if (!/ON\s+CONFLICT/i.test(s)) {
+      // 컬럼 추출
+      const colMatch = s.match(/INSERT\s+INTO\s+\S+\s*\(([^)]+)\)/i);
+      if (colMatch) {
+        const cols = colMatch[1].split(',').map(c => c.trim().replace(/[@"]/g, ''));
+        const firstCol = cols[0];
+        const updateCols = cols.slice(1).map(c => `"${c}"=EXCLUDED."${c}"`).join(', ');
+        if (updateCols) {
+          s = s.replace(/(VALUES\s*\([^)]*\))(?!\s*ON)/i, `$1 ON CONFLICT ("${firstCol}") DO UPDATE SET ${updateCols}`);
+        }
+      }
+    }
+  }
+
+  // Named parameters (@name) → positional (pg doesn't support named)
+  // This is handled separately if needed
+
   // GLOB → LIKE (rare)
   return s;
 }
@@ -111,11 +149,21 @@ function prepare(sql) {
 
 // exec — DDL 실행
 async function exec(sql) {
-  const converted = convertSqliteFunctions(sql);
+  let s = convertSqliteFunctions(sql);
   // AUTOINCREMENT 변환
-  let s = converted.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+  s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
   // REAL → DOUBLE PRECISION
   s = s.replace(/\bREAL\b/g, 'DOUBLE PRECISION');
+  // INSERT OR IGNORE/REPLACE
+  s = s.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, 'INSERT INTO');
+  s = s.replace(/\bINSERT\s+OR\s+REPLACE\s+INTO\b/gi, 'INSERT INTO');
+  // DEFAULT (expr) → DEFAULT expr
+  s = s.replace(/DEFAULT\s+\(NOW\(\)\)/gi, 'DEFAULT NOW()');
+  s = s.replace(/DEFAULT\s+\(CURRENT_DATE\)/gi, 'DEFAULT CURRENT_DATE');
+  // ON CONFLICT DO NOTHING for INSERT (from OR IGNORE)
+  if (/\bINSERT\s+OR\s+IGNORE\b/i.test(sql) && !/ON\s+CONFLICT/i.test(s)) {
+    s = s.replace(/(VALUES\s*\([^)]*\))(?!\s*ON)/i, '$1 ON CONFLICT DO NOTHING');
+  }
   // 여러 문장 분리하여 실행
   const statements = s.split(';').map(st => st.trim()).filter(st => st.length > 0);
   for (const stmt of statements) {
