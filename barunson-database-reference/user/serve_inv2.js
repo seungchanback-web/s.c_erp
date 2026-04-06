@@ -2487,17 +2487,19 @@ if (!masterUser) {
   console.log('✅ 마스터 계정: seungchan.back@barunn.net / 1234');
 } else {
   // 이미 존재하면 admin 역할 보장 + username 통일
-  db.prepare("UPDATE users SET role = 'admin', username = 'seungchan.back' WHERE user_id = ?").run(masterUser.user_id);
+  await db.prepare("UPDATE users SET role = 'admin', username = 'seungchan.back' WHERE user_id = ?").run(masterUser.user_id);
 }
 // 마스터 계정 비밀번호 보장 (seed.db에서 복원 시 비밀번호가 다를 수 있으므로)
-const masterCheck = db.prepare("SELECT user_id, password_hash FROM users WHERE email = ?").get(masterEmail);
-if (masterCheck) {
+const masterCheck = await db.prepare("SELECT user_id, password_hash FROM users WHERE email = ?").get(masterEmail);
+if (masterCheck && masterCheck.password_hash) {
   const defaultPw = '1234';
-  if (!bcrypt.compareSync(defaultPw, masterCheck.password_hash)) {
-    // 비밀번호가 기본값이 아니면 유지 (사용자가 변경했을 수 있음)
-  }
+  try {
+    if (!bcrypt.compareSync(defaultPw, masterCheck.password_hash)) {
+      // 비밀번호가 기본값이 아니면 유지 (사용자가 변경했을 수 있음)
+    }
+  } catch(e) { console.warn('bcrypt 비교 실패 (무시):', e.message); }
   // username이 admin이면 seungchan.back으로 통일
-  db.prepare("UPDATE users SET username = 'seungchan.back' WHERE user_id = ? AND username = 'admin'").run(masterCheck.user_id);
+  await db.prepare("UPDATE users SET username = 'seungchan.back' WHERE user_id = ? AND username = 'admin'").run(masterCheck.user_id);
 }
 
 // JWT 유틸
@@ -12938,7 +12940,7 @@ async function handleRequest(req, res) {
     const held = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE quality_status='HOLD'").get()).cnt;
     const totalQty = (await db.prepare("SELECT COALESCE(SUM(current_qty),0) AS qty FROM batch_master").get()).qty;
     const expiring = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE exp_date IS NOT NULL AND exp_date != '' AND exp_date <= date('now','+30 days','localtime') AND current_qty > 0").get()).cnt;
-    ok(res, { total, active, held, totalQty, expiring }); return;
+    ok(res, { total, active, held, totalQty, expiring, active_lots: active, total_qty: totalQty, held_lots: held, expiring_soon: expiring }); return;
   }
   if (pathname === '/api/lots' && method === 'GET') {
     const qs = new URL(req.url, 'http://localhost').searchParams;
@@ -12951,7 +12953,7 @@ async function handleRequest(req, res) {
     if (warehouse) where += " AND warehouse='" + warehouse.replace(/'/g,'') + "'";
     if (status) where += " AND quality_status='" + status.replace(/'/g,'') + "'";
     if (search) where += " AND (batch_number LIKE '%" + search.replace(/'/g,'') + "%' OR product_name LIKE '%" + search.replace(/'/g,'') + "%')";
-    const rows = await db.prepare('SELECT * FROM batch_master WHERE '+where+' ORDER BY created_at DESC LIMIT 300').all();
+    const rows = await db.prepare('SELECT *, batch_id AS id, quality_status AS status, exp_date AS expiry_date FROM batch_master WHERE '+where+' ORDER BY created_at DESC LIMIT 300').all();
     ok(res, rows); return;
   }
   if (pathname === '/api/lots' && method === 'POST') {
@@ -13015,6 +13017,83 @@ async function handleRequest(req, res) {
     const txns = await db.prepare("SELECT * FROM batch_transactions WHERE batch_number=? ORDER BY created_at").all(bn);
     const insps = await db.prepare("SELECT * FROM batch_inspections WHERE batch_number=? ORDER BY insp_date").all(bn);
     ok(res, { lot, transactions: txns, inspections: insps }); return;
+  }
+
+  // ── 선입선출(FIFO) + 소비기한 API ──
+  if (pathname === '/api/lots/fifo' && method === 'GET') {
+    try {
+      // 더기프트/답례품 Lot만 (current_qty > 0, exp_date 있는 것 우선)
+      const rows = await db.prepare(`
+        SELECT b.*, p.origin
+        FROM batch_master b
+        LEFT JOIN products p ON b.product_code = p.product_code
+        WHERE b.current_qty > 0
+        ORDER BY
+          CASE WHEN b.exp_date IS NOT NULL AND b.exp_date != '' THEN 0 ELSE 1 END,
+          b.exp_date ASC,
+          b.received_date ASC,
+          b.batch_id ASC
+      `).all();
+
+      // 품목별 FIFO 순서 + 소비기한 요약
+      const byProduct = {};
+      const today = new Date().toISOString().slice(0,10);
+      let totalExpiring = 0, totalExpired = 0, totalActive = 0;
+      rows.forEach(r => {
+        const code = r.product_code || '';
+        if (!byProduct[code]) byProduct[code] = { product_code: code, product_name: r.product_name || '', lots: [], total_qty: 0, origin: r.origin || '' };
+        const daysToExpiry = r.exp_date ? Math.ceil((new Date(r.exp_date) - new Date(today)) / 86400000) : null;
+        byProduct[code].lots.push({ ...r, days_to_expiry: daysToExpiry });
+        byProduct[code].total_qty += (r.current_qty || 0);
+        if (daysToExpiry !== null && daysToExpiry <= 0) totalExpired++;
+        else if (daysToExpiry !== null && daysToExpiry <= 30) totalExpiring++;
+        totalActive++;
+      });
+
+      ok(res, {
+        products: Object.values(byProduct),
+        summary: { total_lots: totalActive, expiring_30d: totalExpiring, expired: totalExpired, products: Object.keys(byProduct).length }
+      });
+    } catch (e) { fail(res, 500, e.message); }
+    return;
+  }
+
+  // FIFO 출고 처리 (가장 오래된 Lot부터 차감)
+  if (pathname === '/api/lots/fifo-consume' && method === 'POST') {
+    try {
+      const body = await readJSON(req);
+      const { product_code, qty, reference, notes } = body;
+      if (!product_code || !qty) { fail(res, 400, 'product_code, qty 필수'); return; }
+      const uname = currentUser ? currentUser.username : 'system';
+
+      // FIFO 순서: 유효기한 빠른 것 → 입고일 빠른 것
+      const lots = await db.prepare(`
+        SELECT * FROM batch_master
+        WHERE product_code = ? AND current_qty > 0 AND quality_status = 'GOOD'
+        ORDER BY
+          CASE WHEN exp_date IS NOT NULL AND exp_date != '' THEN 0 ELSE 1 END,
+          exp_date ASC, received_date ASC, batch_id ASC
+      `).all(product_code);
+
+      let remaining = qty;
+      const consumed = [];
+      const txn = db.transaction(async () => {
+        for (const lot of lots) {
+          if (remaining <= 0) break;
+          const use = Math.min(lot.current_qty, remaining);
+          const after = lot.current_qty - use;
+          await db.prepare("UPDATE batch_master SET current_qty=?, updated_at=datetime('now','localtime') WHERE batch_id=?").run(after, lot.batch_id);
+          await db.prepare("INSERT INTO batch_transactions (batch_id,batch_number,txn_type,product_code,qty,qty_before,qty_after,reference_no,actor,notes) VALUES (?,?,'usage',?,?,?,?,?,?,?)").run(
+            lot.batch_id, lot.batch_number, product_code, use, lot.current_qty, after, reference || '', uname, notes || 'FIFO 출고');
+          consumed.push({ batch_number: lot.batch_number, exp_date: lot.exp_date, used: use, remaining: after });
+          remaining -= use;
+        }
+      });
+      await txn();
+
+      ok(res, { consumed, total_used: qty - remaining, unfulfilled: remaining > 0 ? remaining : 0 });
+    } catch (e) { fail(res, 500, e.message); }
+    return;
   }
 
   // ── Lot 추적: XERP 입출고 자동 동기화 ──

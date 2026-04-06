@@ -5776,6 +5776,7 @@ function closeMegaMenu() { /* no-op */ }
     <div class="tab" data-lottab="create" onclick="switchLotTab('create')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">입고등록</div>
     <div class="tab" data-lottab="trace" onclick="switchLotTab('trace')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">이력추적</div>
     <div class="tab" data-lottab="inspect" onclick="switchLotTab('inspect')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">품질검사</div>
+    <div class="tab" data-lottab="fifo" onclick="switchLotTab('fifo')" style="padding:10px 20px;cursor:pointer;font-size:13px;color:#64748b">🍱 선입선출</div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:6px;padding-right:8px">
       <button class="btn btn-sm" onclick="manualSyncLots()" style="background:#0369a1;color:#fff;font-size:11px">XERP 동기화</button>
       <span id="lotSyncTime" style="font-size:10px;color:#94a3b8"></span>
@@ -25227,6 +25228,7 @@ function switchLotTab(t){
   else if(t==='create') renderLotCreateForm();
   else if(t==='trace') renderLotTraceForm();
   else if(t==='inspect') loadLotInspections();
+  else if(t==='fifo') loadFifoPage();
 }
 function loadLotTrackingPage(){autoSyncLots();loadLotSummary();loadLotList();}
 async function autoSyncLots(){
@@ -25446,6 +25448,145 @@ async function submitLotAction(id){
     if(d.ok){alert('처리 완료');document.getElementById('lotActionModal').remove();loadLotList();loadLotSummary();}
     else alert('실패: '+(d.error||''));
   }catch(e){alert('오류');}
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  선입선출(FIFO) + 소비기한 관리
+// ═══════════════════════════════════════════════════════════════
+async function loadFifoPage(){
+  var el=document.getElementById('lotContent');if(!el)return;
+  el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">로딩 중...</div>';
+  try{
+    var r=await authFetch('/api/lots/fifo');var d=await r.json();
+    if(!d.ok){el.innerHTML='<div style="padding:40px;text-align:center;color:#ef4444">로드 실패</div>';return;}
+    var products=d.data.products||[];
+    var summary=d.data.summary||{};
+    var today=new Date().toISOString().slice(0,10);
+
+    // KPI 업데이트
+    var kpiEl=document.getElementById('lotKpi');
+    if(kpiEl) kpiEl.innerHTML=[
+      {l:'활성 Lot',v:summary.total_lots||0,c:'#2563eb'},
+      {l:'품목 수',v:summary.products||0,c:'#10b981'},
+      {l:'만기임박 30일',v:summary.expiring_30d||0,c:'#f59e0b'},
+      {l:'소비기한 초과',v:summary.expired||0,c:'#ef4444'}
+    ].map(function(k){return '<div style="background:#f8fafc;border-radius:10px;padding:14px 16px;text-align:center"><div style="font-size:12px;color:#64748b">'+k.l+'</div><div style="font-size:22px;font-weight:700;color:'+k.c+';margin-top:4px">'+k.v+'</div></div>';}).join('');
+
+    if(!products.length){el.innerHTML='<div style="padding:60px;text-align:center;color:#94a3b8"><div style="font-size:40px;margin-bottom:8px">🍱</div>등록된 Lot이 없습니다.<br>입고등록 탭에서 답례품 Lot을 등록하세요.</div>';return;}
+
+    // 소비기한 알림 배너
+    var expiredLots=[], expiringLots=[];
+    products.forEach(function(p){
+      p.lots.forEach(function(l){
+        if(l.days_to_expiry!==null&&l.days_to_expiry<=0) expiredLots.push(l);
+        else if(l.days_to_expiry!==null&&l.days_to_expiry<=30) expiringLots.push(l);
+      });
+    });
+
+    var h='';
+    if(expiredLots.length>0){
+      h+='<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;margin-bottom:12px">';
+      h+='<div style="font-weight:700;color:#dc2626;margin-bottom:6px">🚫 소비기한 초과 '+expiredLots.length+'건 — 즉시 폐기 필요!</div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:6px">';
+      expiredLots.forEach(function(l){
+        h+='<span style="background:#fee2e2;color:#991b1b;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500">'+esc(l.batch_number)+' ('+esc(l.product_name)+') '+esc(l.exp_date)+'</span>';
+      });
+      h+='</div></div>';
+    }
+    if(expiringLots.length>0){
+      h+='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;margin-bottom:12px">';
+      h+='<div style="font-weight:700;color:#d97706;margin-bottom:6px">⚠️ 소비기한 임박 '+expiringLots.length+'건 — 우선 출고 필요</div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:6px">';
+      expiringLots.slice(0,10).forEach(function(l){
+        h+='<span style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500">'+esc(l.batch_number)+' D-'+(l.days_to_expiry||0)+'</span>';
+      });
+      if(expiringLots.length>10) h+='<span style="color:#92400e;font-size:12px;padding:4px">외 '+(expiringLots.length-10)+'건</span>';
+      h+='</div></div>';
+    }
+
+    // FIFO 출고 폼
+    h+='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px 16px;margin-bottom:16px">';
+    h+='<div style="font-weight:700;color:#0369a1;margin-bottom:10px">📦 선입선출 출고</div>';
+    h+='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">';
+    h+='<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">품목코드</label>';
+    h+='<input id="fifoCode" list="fifoProductList" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;width:160px" placeholder="품목코드"></div>';
+    h+='<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">출고수량</label>';
+    h+='<input id="fifoQty" type="number" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;width:100px" placeholder="수량"></div>';
+    h+='<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">참조번호</label>';
+    h+='<input id="fifoRef" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;width:140px" placeholder="주문번호 등"></div>';
+    h+='<button onclick="submitFifoConsume()" style="padding:7px 16px;background:#0369a1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">FIFO 출고</button>';
+    h+='</div>';
+    // datalist
+    h+='<datalist id="fifoProductList">';
+    products.forEach(function(p){h+='<option value="'+esc(p.product_code)+'" label="'+esc(p.product_name)+'">';});
+    h+='</datalist></div>';
+
+    // 품목별 FIFO 목록
+    h+='<div style="font-weight:700;font-size:14px;margin-bottom:10px;color:#1e293b">품목별 Lot 현황 (선입선출 순서)</div>';
+    products.forEach(function(p){
+      var hasExpiry = p.lots.some(function(l){return l.days_to_expiry!==null&&l.days_to_expiry<=30;});
+      h+='<div style="border:1px solid '+(hasExpiry?'#fecaca':'#e2e8f0')+';border-radius:10px;padding:12px 16px;margin-bottom:10px;background:'+(hasExpiry?'#fffbfb':'#fff')+'">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      h+='<div><span style="font-weight:700;color:#1e293b;font-size:14px">'+esc(p.product_code)+'</span> <span style="color:#64748b;font-size:13px">'+esc(p.product_name)+'</span>';
+      if(p.origin) h+=' <span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:4px;font-size:10px">'+esc(p.origin)+'</span>';
+      h+='</div>';
+      h+='<div style="font-weight:700;color:#2563eb;font-size:15px">총 '+p.total_qty.toLocaleString()+' EA</div></div>';
+
+      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc">';
+      h+='<th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600">출고순서</th>';
+      h+='<th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600">Lot번호</th>';
+      h+='<th style="padding:6px 8px;text-align:right;color:#64748b;font-weight:600">수량</th>';
+      h+='<th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600">입고일</th>';
+      h+='<th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600">제조일</th>';
+      h+='<th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600">소비기한</th>';
+      h+='<th style="padding:6px 8px;text-align:center;color:#64748b;font-weight:600">D-Day</th>';
+      h+='<th style="padding:6px 8px;text-align:center;color:#64748b;font-weight:600">상태</th>';
+      h+='</tr></thead><tbody>';
+      p.lots.forEach(function(l,i){
+        var dd = l.days_to_expiry;
+        var rowBg = dd!==null&&dd<=0?'#fef2f2':dd!==null&&dd<=7?'#fff7ed':dd!==null&&dd<=30?'#fffbeb':'#fff';
+        var ddText = dd===null?'-':dd<=0?'<span style="color:#dc2626;font-weight:700">만료!</span>':'<span style="color:'+(dd<=7?'#dc2626':dd<=30?'#d97706':'#10b981')+'">D-'+dd+'</span>';
+        var statusBadge = dd!==null&&dd<=0?'<span style="background:#fecaca;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600">기한초과</span>'
+          :dd!==null&&dd<=7?'<span style="background:#fed7aa;color:#9a3412;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600">긴급출고</span>'
+          :dd!==null&&dd<=30?'<span style="background:#fde68a;color:#92400e;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600">임박</span>'
+          :'<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600">정상</span>';
+        h+='<tr style="border-bottom:1px solid #f1f5f9;background:'+rowBg+'">';
+        h+='<td style="padding:6px 8px"><span style="background:#e0e7ff;color:#4338ca;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">'+(i+1)+'순위</span></td>';
+        h+='<td style="padding:6px 8px;font-weight:500;color:#7c3aed;cursor:pointer" onclick="showLotDetail('+l.batch_id+')">'+esc(l.batch_number||'')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:right;font-weight:600">'+(l.current_qty||0).toLocaleString()+'</td>';
+        h+='<td style="padding:6px 8px">'+esc(l.received_date||'')+'</td>';
+        h+='<td style="padding:6px 8px">'+esc(l.mfg_date||'')+'</td>';
+        h+='<td style="padding:6px 8px;font-weight:500">'+esc(l.exp_date||'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center">'+ddText+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center">'+statusBadge+'</td>';
+        h+='</tr>';
+      });
+      h+='</tbody></table></div>';
+    });
+
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="padding:40px;text-align:center;color:#ef4444">오류: '+e.message+'</div>';}
+}
+
+async function submitFifoConsume(){
+  var code=(document.getElementById('fifoCode')||{}).value||'';
+  var qty=parseInt((document.getElementById('fifoQty')||{}).value)||0;
+  var ref=(document.getElementById('fifoRef')||{}).value||'';
+  if(!code||qty<=0){alert('품목코드와 수량을 입력하세요');return;}
+  if(!confirm(code+' '+qty+'개를 선입선출 출고합니다.\n(유효기한 임박 Lot부터 차감됩니다)')) return;
+  try{
+    var r=await authFetch('/api/lots/fifo-consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      product_code:code, qty:qty, reference:ref, notes:'FIFO 출고'
+    })});
+    var d=await r.json();
+    if(!d.ok){alert('출고 실패: '+(d.error||''));return;}
+    var result=d.data;
+    var msg='FIFO 출고 완료!\n';
+    (result.consumed||[]).forEach(function(c){msg+='  '+c.batch_number+': '+c.used+'개 차감 (잔여: '+c.remaining+') 기한: '+(c.exp_date||'없음')+'\n';});
+    if(result.unfulfilled>0) msg+='\n⚠️ 부족 수량: '+result.unfulfilled+'개 (재고 부족)';
+    alert(msg);
+    loadFifoPage();
+  }catch(e){alert('오류: '+e.message);}
 }
 
 // ═══════════════════════════════════════════════════════════════
