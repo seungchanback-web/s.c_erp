@@ -1759,6 +1759,24 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_gss_set ON gift_shipment_schedule(set_id
 db.exec("CREATE INDEX IF NOT EXISTS idx_gss_date ON gift_shipment_schedule(ship_date)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_gss_status ON gift_shipment_schedule(status)");
 
+// ── 더기프트 품목 자동 등록 (gift_sets + BOM → products) ──
+try {
+  const giftSets = db.prepare("SELECT set_code, set_name FROM gift_sets").all();
+  const bomItems = db.prepare("SELECT DISTINCT item_code, item_name FROM gift_set_bom").all();
+  const allGiftCodes = new Map();
+  giftSets.forEach(s => allGiftCodes.set(s.set_code, s.set_name));
+  bomItems.forEach(b => { if (!allGiftCodes.has(b.item_code)) allGiftCodes.set(b.item_code, b.item_name); });
+  if (allGiftCodes.size > 0) {
+    const upsert = db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, status)
+      VALUES (?, ?, '바른손카드', '더기프트', 'active')
+      ON CONFLICT(product_code) DO UPDATE SET origin='더기프트', status='active', updated_at=datetime('now','localtime')
+      WHERE origin != '더기프트'`);
+    const tx = db.transaction(() => { for (const [code, name] of allGiftCodes) upsert.run(code, name || ''); });
+    tx();
+    console.log(`더기프트 품목 자동 등록/업데이트: ${allGiftCodes.size}건`);
+  }
+} catch(e) { console.warn('더기프트 품목 자동등록 실패:', e.message); }
+
 // ── 매출관리 캐시 테이블 ──
 db.exec(`CREATE TABLE IF NOT EXISTS sales_daily_cache (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
