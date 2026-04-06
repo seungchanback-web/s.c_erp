@@ -110,11 +110,13 @@ async function ensureXerpPool() {
   return null;
 }
 
-// 초기 연결
-(async function initXERP() {
-  const ok = await connectXERP();
-  if (!ok) scheduleXerpReconnect();
-})();
+// 초기 연결 (서버 기동 후 백그라운드에서 실행 — Docker 헬스체크 타임아웃 방지)
+function initXERP() {
+  setTimeout(async () => {
+    const ok = await connectXERP();
+    if (!ok) scheduleXerpReconnect();
+  }, 1000);
+}
 
 // ── DD (디얼디어) MySQL 연결 ─────────────────────────────────────────
 let ddPool = null;
@@ -147,11 +149,13 @@ async function ensureDdPool() {
   }
 }
 
-// DD 초기 연결 시도
-(async function initDD() {
-  if (ddConfig.host) await ensureDdPool();
-  else console.log('ℹ DD_DB_SERVER 미설정 → DD 동기화 비활성');
-})();
+// DD 초기 연결 (서버 기동 후 백그라운드에서 실행)
+function initDD() {
+  setTimeout(async () => {
+    if (ddConfig.host) await ensureDdPool();
+    else console.log('ℹ DD_DB_SERVER 미설정 → DD 동기화 비활성');
+  }, 2000);
+}
 
 // ── Google Sheet 동기화 (Apps Script 웹앱 방식) ─────────────────────
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwwhOP9gtC-8l6BFSRRJFwv2UrnYCtXxvaD9_NBHcWTsKuGl3Hlk5qqdCxnla-gxHMa/exec';
@@ -2806,6 +2810,9 @@ http.createServer(async (req, res) => {
 }).listen(PORT, '0.0.0.0', () => {
   console.log(`스마트재고현황: http://localhost:${PORT}  (startup: ${((Date.now() - _startTime)/1000).toFixed(1)}s)`);
   console.log(`헬스체크: http://localhost:${PORT}/api/health`);
+  // 외부 DB 연결은 서버 기동 후 백그라운드에서 (Docker 헬스체크 타임아웃 방지)
+  initXERP();
+  initDD();
   scheduleAutoOrder();
   scheduleXerpSync();
 });
