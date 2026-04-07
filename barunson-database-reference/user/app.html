@@ -2533,6 +2533,15 @@ function closeMegaMenu() { /* no-op */ }
           <option value="운영품목">운영품목</option>
           <option value="소진후단종">소진 후 단종 제외</option>
         </select>
+        <input type="text" id="poItemSearchFilter" placeholder="품목코드/품목명 필터" oninput="refreshVendorCards()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;width:160px">
+        <select id="poSortFilter" onchange="refreshVendorCards()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px">
+          <option value="qty-desc">발주수량 많은순</option>
+          <option value="qty-asc">발주수량 적은순</option>
+          <option value="stock-asc">가용재고 적은순</option>
+          <option value="stock-desc">가용재고 많은순</option>
+          <option value="code-asc">제품코드순</option>
+          <option value="name-asc">품목명순</option>
+        </select>
         <span id="poSummaryBadge" style="font-size:12px;color:var(--text-muted)"></span>
         <button class="btn btn-urgent btn-sm" onclick="removeAllOrderItems()">전체삭제</button>
         <button class="btn" onclick="showPage('inventory')">재고현황으로</button>
@@ -2601,15 +2610,18 @@ function closeMegaMenu() { /* no-op */ }
 <!-- PAGE: 발주현황 (PO List) -->
 <!-- ============================================================ -->
 <div class="page" id="page-po-list">
-  <div class="status-tabs" id="poStatusTabs">
-    <div class="status-tab active" data-status="all" onclick="filterPO('all')">전체</div>
-    <div class="status-tab" data-status="대기" onclick="filterPO('대기')">대기</div>
-    <div class="status-tab" data-status="발송" onclick="filterPO('발송')">발송</div>
-    <div class="status-tab" data-status="확인" onclick="filterPO('확인')">확인</div>
-    <div class="status-tab" data-status="수령중" onclick="filterPO('수령중')">수령중</div>
-    <div class="status-tab" data-status="OS등록대기" onclick="filterPO('OS등록대기')">OS등록대기</div>
-    <div class="status-tab" data-status="완료" onclick="filterPO('완료')">완료</div>
-    <div class="status-tab" data-status="취소" onclick="filterPO('취소')">취소</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <div class="status-tabs" id="poStatusTabs" style="margin-bottom:0">
+      <div class="status-tab active" data-status="all" onclick="filterPO('all')">전체</div>
+      <div class="status-tab" data-status="대기" onclick="filterPO('대기')">대기</div>
+      <div class="status-tab" data-status="발송" onclick="filterPO('발송')">발송</div>
+      <div class="status-tab" data-status="확인" onclick="filterPO('확인')">확인</div>
+      <div class="status-tab" data-status="수령중" onclick="filterPO('수령중')">수령중</div>
+      <div class="status-tab" data-status="OS등록대기" onclick="filterPO('OS등록대기')">OS등록대기</div>
+      <div class="status-tab" data-status="완료" onclick="filterPO('완료')">완료</div>
+      <div class="status-tab" data-status="취소" onclick="filterPO('취소')">취소</div>
+    </div>
+    <button class="btn btn-sm" onclick="downloadPOExcel()" style="white-space:nowrap">엑셀 다운로드</button>
   </div>
 
   <div id="poCardContainer" class="po-card-container">
@@ -2866,29 +2878,99 @@ function closeMegaMenu() { /* no-op */ }
 <!-- PAGE: 입고관리 (Receipts) -->
 <!-- ============================================================ -->
 <div class="page" id="page-receipts">
-  <div class="receipt-form">
-    <div class="section-title">수령 등록</div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>발주서 선택 (완료/취소 제외)</label>
-        <select id="receiptPO"><option value="">발주서를 선택하세요</option></select>
-      </div>
-    </div>
-    <div class="table-wrap" style="max-height:250px;margin-bottom:12px">
-      <table>
-        <thead><tr><th>제품코드</th><th>브랜드</th><th>발주수량</th><th>수령수량</th></tr></thead>
-        <tbody id="receiptItemsTable"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하세요</td></tr></tbody>
-      </table>
-    </div>
-    <button class="btn btn-primary" onclick="saveReceipt()">수령 저장</button>
+  <!-- 한국/중국 탭 -->
+  <div class="tab-bar" style="margin-bottom:12px">
+    <div class="tab active" data-rcpt-tab="korea" onclick="switchReceiptTab('korea')">한국 입고</div>
+    <div class="tab" data-rcpt-tab="china" onclick="switchReceiptTab('china')">중국 입고</div>
+    <div class="tab" data-rcpt-tab="history" onclick="switchReceiptTab('history')">입고 이력</div>
   </div>
 
-  <div class="card-box">
-    <div class="section-title">수령 이력</div>
-    <table>
-      <thead><tr><th>수령일</th><th>PO번호</th><th>제품코드</th><th>수령수량</th></tr></thead>
-      <tbody id="receiptHistoryTable"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px">수령 이력 없음</td></tr></tbody>
-    </table>
+  <!-- 한국 입고 -->
+  <div id="rcptKoreaTab">
+    <div class="card-box" style="margin-bottom:16px;padding:16px 20px">
+      <div class="section-title">한국 입고 등록</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>발주서 선택 (한국, 완료/취소 제외)</label>
+          <select id="receiptPO" onchange="onReceiptPOSelect('korea')"><option value="">발주서를 선택하세요</option></select>
+        </div>
+      </div>
+      <div class="table-wrap" style="max-height:300px;margin-bottom:12px">
+        <table>
+          <thead><tr><th>제품코드</th><th>브랜드</th><th>발주수량</th><th>기입고</th><th>미입고</th><th style="color:var(--primary)">수령수량</th></tr></thead>
+          <tbody id="receiptItemsTable"><tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하세요</td></tr></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="receiptNotes" placeholder="비고 (선택)" style="width:200px">
+        <button class="btn btn-primary" onclick="saveReceipt('korea')">입고 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 중국 입고 (입고차수 관리) -->
+  <div id="rcptChinaTab" style="display:none">
+    <div class="card-box" style="margin-bottom:16px;padding:16px 20px">
+      <div class="section-title">중국 입고 등록 <span style="font-size:12px;color:var(--text-muted)">(PO 기준 분할 입고)</span></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>발주서 선택 (중국, 완료/취소 제외)</label>
+          <select id="receiptPOChina" onchange="onReceiptPOSelect('china')"><option value="">발주서를 선택하세요</option></select>
+        </div>
+        <div class="form-group">
+          <label>입고차수</label>
+          <span id="chinaBatchNo" style="font-size:16px;font-weight:700;color:var(--primary);padding:6px 0;display:inline-block">-</span>
+        </div>
+      </div>
+
+      <!-- 선택된 PO의 입고 현황 요약 -->
+      <div id="chinaPOSummary" style="display:none;margin-bottom:12px;padding:10px 16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px">
+          <span>총 발주: <b id="chinaTotalOrdered">0</b></span>
+          <span>총 입고: <b id="chinaTotalReceived" style="color:#16a34a">0</b></span>
+          <span>미입고: <b id="chinaTotalRemaining" style="color:#dc2626">0</b></span>
+          <span>입고율: <b id="chinaReceiveRate">0%</b></span>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="max-height:300px;margin-bottom:12px">
+        <table>
+          <thead><tr><th>제품코드</th><th>브랜드</th><th>발주수량</th><th>기입고</th><th>미입고</th><th style="color:var(--primary)">이번 입고수량</th></tr></thead>
+          <tbody id="receiptChinaItemsTable"><tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하세요</td></tr></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="receiptChinaNotes" placeholder="비고 (선택)" style="width:200px">
+        <button class="btn btn-primary" onclick="saveReceipt('china')">입고 저장 (차수 등록)</button>
+      </div>
+    </div>
+
+    <!-- 해당 PO의 입고차수 이력 -->
+    <div class="card-box" style="padding:16px 20px">
+      <div class="section-title">입고차수 이력 <span style="font-size:12px;color:var(--text-muted)" id="chinaBatchPOLabel"></span></div>
+      <table>
+        <thead><tr><th>차수</th><th>입고일</th><th>제품코드</th><th>입고수량</th><th>비고</th></tr></thead>
+        <tbody id="chinaBatchHistory"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하면 입고차수 이력이 표시됩니다</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 입고 이력 (전체) -->
+  <div id="rcptHistoryTab" style="display:none">
+    <div class="card-box" style="padding:16px 20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin:0">전체 입고 이력</div>
+        <select id="rcptHistoryOriginFilter" onchange="loadReceiptHistory()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px">
+          <option value="">전체</option>
+          <option value="한국">한국</option>
+          <option value="중국">중국</option>
+        </select>
+      </div>
+      <table>
+        <thead><tr><th>입고일</th><th>PO번호</th><th>거래처</th><th>차수</th><th>제품코드</th><th>입고수량</th><th>불량</th><th>비고</th></tr></thead>
+        <tbody id="receiptHistoryTable"><tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:16px">입고 이력 없음</td></tr></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -7654,6 +7736,12 @@ function refreshData(){
 
 // ===== XERP 재고 자동 로드 =====
 async function loadXerpInventory(forceRefresh) {
+  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵
+  if (!forceRefresh && RAW && RAW.length > 0) {
+    console.log('XERP 재고: 캐시 사용 (' + RAW.length + '개)');
+    return;
+  }
+
   const bar = document.getElementById('erpStatusBar');
   const icon = document.getElementById('erpStatusIcon');
   const title = document.getElementById('erpStatusTitle');
@@ -7662,6 +7750,12 @@ async function loadXerpInventory(forceRefresh) {
 
   const badge = document.getElementById('erpSyncBadge');
   const refreshBtn = document.getElementById('refreshBtn');
+
+  // 강제 갱신 시 기존 데이터 초기화
+  if (forceRefresh) {
+    RAW = [];
+    classified = {urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
+  }
 
   // 로딩 상태 — 헤더 뱃지
   if(badge){ badge.style.display='inline-block'; badge.textContent='동기화 중...'; badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#dbeafe;color:#1e40af'; }
@@ -7720,8 +7814,29 @@ async function loadXerpInventory(forceRefresh) {
 
 // ===== 재고현황 페이지 진입 =====
 function loadInventoryPage(){
-  // 이전 데이터 초기화 → 로딩 상태로 표시
-  RAW=[];
+  // 캐시된 데이터가 있으면 재로드 없이 바로 렌더링
+  if (RAW && RAW.length > 0) {
+    updateOriginCounts();
+    updateStatusCounts();
+    updatePendingCount();
+    buildHeader();
+    render();
+    // 상태바도 복원
+    const bar=document.getElementById('erpStatusBar');
+    const icon=document.getElementById('erpStatusIcon');
+    const title=document.getElementById('erpStatusTitle');
+    const detail=document.getElementById('erpStatusDetail');
+    const btn=document.getElementById('erpRefreshBtn');
+    const badge=document.getElementById('erpSyncBadge');
+    if(bar) bar.style.cssText='margin-bottom:8px;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1px solid #bbf7d0';
+    if(icon) icon.textContent='✅';
+    if(title){title.textContent=`ERP 연동 완료 — ${RAW.length.toLocaleString()}개 제품`;title.style.color='#16a34a';}
+    if(detail) detail.textContent=`마지막 동기화: ${loadTime||'캐시됨'}`;
+    if(btn) btn.disabled=false;
+    if(badge){badge.textContent=`✅ ${RAW.length}개 연동`;badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#dcfce7;color:#16a34a';}
+    return;
+  }
+  // 최초 로드 — 데이터 초기화 후 XERP에서 가져오기
   classified={urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
   // orderQty, orderChecked는 보존 (발주생성 중 데이터 유지)
   // KPI 초기화
@@ -7733,7 +7848,7 @@ function loadInventoryPage(){
   });
   document.getElementById('tb').innerHTML='<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">ERP 데이터를 불러오는 중...</td></tr>';
   document.getElementById('orderCount').textContent='0';
-  // XERP 재고 로드 (캐시 사용)
+  // XERP 재고 로드 (최초 1회만, 이후 ERP 동기화 버튼으로만 갱신)
   loadXerpInventory();
 }
 
@@ -12458,6 +12573,30 @@ function groupByVendor(){
       return cat === poOpCat; // 운영품목 등 정확히 일치
     });
   }
+  // 품목 텍스트 검색 필터
+  const poSearchTxt = (document.getElementById('poItemSearchFilter')?.value || '').trim().toLowerCase();
+  if (poSearchTxt) {
+    items = items.filter(p => {
+      const code = (p['제품코드']||p['품목코드']||'').toLowerCase();
+      const name = (p['품목명']||'').toLowerCase();
+      const brand = (p['브랜드']||'').toLowerCase();
+      return code.includes(poSearchTxt) || name.includes(poSearchTxt) || brand.includes(poSearchTxt);
+    });
+  }
+  // 정렬
+  const poSort = document.getElementById('poSortFilter')?.value || 'qty-desc';
+  const _gc = p => p['제품코드']||p['품목코드']||'';
+  items.sort((a,b) => {
+    switch(poSort){
+      case 'qty-desc': return (orderQty[_gc(b)]||0) - (orderQty[_gc(a)]||0);
+      case 'qty-asc': return (orderQty[_gc(a)]||0) - (orderQty[_gc(b)]||0);
+      case 'stock-asc': return (a['가용재고']||0) - (b['가용재고']||0);
+      case 'stock-desc': return (b['가용재고']||0) - (a['가용재고']||0);
+      case 'code-asc': return _gc(a).localeCompare(_gc(b));
+      case 'name-asc': return (a['품목명']||'').localeCompare(b['품목명']||'');
+      default: return 0;
+    }
+  });
   const postCols=['재단','인쇄','박/형압','톰슨','봉투가공','레이져','실크'];
   // 제지사 약칭→전체이름 매핑
   const vendorFullName={'대한':'대한통상','삼원':'삼원특수지상사','두성':'두성종이','한솔PNS':'한솔PNS','한솔':'한솔PNS','서경':'주식회사 서경','파주':'파주'};
@@ -12986,10 +13125,19 @@ async function saveAllPOs(){
       alert(`${okCount}개 거래처 발주서 저장 완료! 나머지 ${remaining}개 품목 발주 계속...`);
       refreshVendorCards();
     } else {
-      alert(`${okCount}개 거래처 발주서 모두 저장 완료!`);
       orderQty={};
       render();
       showPage('po-list');
+      if(currentOriginContext==='중국'){
+        // 중국 발주 → 자동으로 엑셀 다운로드 제안
+        setTimeout(()=>{
+          if(confirm(`${okCount}개 거래처 발주서 저장 완료!\n중국 발주서 엑셀을 다운로드하시겠습니까?`)){
+            downloadPOExcel();
+          }
+        }, 500);
+      } else {
+        alert(`${okCount}개 거래처 발주서 모두 저장 완료!`);
+      }
     }
   } else {
     alert(`${okCount}개 성공, ${failCount}개 실패.\n실패: ${results.filter(r=>!r.ok).map(r=>r.vendor).join(', ')}`);
@@ -13750,6 +13898,64 @@ function renderPOList(){
   container.innerHTML = html;
 }
 
+function downloadPOExcel(){
+  let data=poList||[];
+  if(poStatusFilter!=='all') data=data.filter(po=>po.status===poStatusFilter);
+  if(!data.length){alert('다운로드할 발주 내역이 없습니다.');return;}
+
+  const isChinaContext = currentOriginContext==='중국';
+  const rows=[];
+
+  data.forEach(po=>{
+    const items=po.items||[];
+    if(!items.length) return;
+    items.forEach(it=>{
+      const info=productInfo[it.product_code]||{};
+      if(isChinaContext){
+        // 중국 발주서 양식
+        rows.push({
+          'PO NO':po.po_number||'',
+          '카드번호':it.product_code||'',
+          '브랜드':it.brand||info['브랜드']||'',
+          '품목명':info['품목명']||info['원재료용지명']||it.spec||'',
+          '발주수량':it.ordered_qty||0,
+          '발주일':po.po_date||po.created_at?.slice(0,10)||'',
+          '납기일':po.expected_date||'',
+          '입고수량':it.received_qty||0,
+          '미생산잔량':Math.max((it.ordered_qty||0)-(it.received_qty||0),0),
+          '완료여부':(it.received_qty||0)>=(it.ordered_qty||0)?'Y':'N',
+          '상태':po.status||'',
+          '비고':po.notes||''
+        });
+      } else {
+        // 한국/일반 발주서 양식
+        rows.push({
+          '발주번호':po.po_number||'','발주일':po.po_date||po.created_at?.slice(0,10)||'',
+          '입고예정일':po.expected_date||'','거래처':po.vendor_name||'','발주유형':po.po_type||'',
+          '상태':po.status||'','생산지':po.origin||'',
+          '제품코드':it.product_code||'','브랜드':it.brand||info['브랜드']||'',
+          '공정':it.process_type||'','원자재코드':info['원자재코드']||'',
+          '원재료용지명':info['원재료용지명']||it.spec||'',
+          '발주수량':it.ordered_qty||0,'발주(R)':toR(it.ordered_qty, it.product_code),
+          'OS번호':it.os_number||'','입고수량':it.received_qty||0,'비고':po.notes||''
+        });
+      }
+    });
+  });
+
+  const ws=XLSX.utils.json_to_sheet(rows);
+  if(isChinaContext){
+    ws['!cols']=[{wch:16},{wch:12},{wch:12},{wch:20},{wch:10},{wch:11},{wch:11},{wch:10},{wch:10},{wch:8},{wch:7},{wch:20}];
+  } else {
+    ws['!cols']=[{wch:14},{wch:11},{wch:11},{wch:14},{wch:8},{wch:7},{wch:6},{wch:10},{wch:10},{wch:8},{wch:12},{wch:18},{wch:10},{wch:8},{wch:12},{wch:10},{wch:20}];
+  }
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,isChinaContext?'중국발주서':'발주현황');
+  const origin=currentOriginContext||'전체';
+  const status=poStatusFilter!=='all'?('_'+poStatusFilter):'';
+  XLSX.writeFile(wb,`발주현황_${origin}${status}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 function renderPOSubCard(po, idx, steps, icon) {
     const typeClass=po.po_type==='원재료'?'sb-safe':po.po_type==='후공정'?'sb-danger':'sb-nosale';
 
@@ -14307,65 +14513,157 @@ async function deletePO(poId, poNumber){
   }catch(e){ alert('서버 연결 실패'); }
 }
 
-// ===== RECEIPTS =====
+// ===== RECEIPTS (한국/중국 분리 + 입고차수) =====
+var _rcptTab = 'korea';
+var _rcptPOData = {}; // {korea: [...], china: [...]}
+
+function switchReceiptTab(tab){
+  _rcptTab = tab;
+  document.querySelectorAll('[data-rcpt-tab]').forEach(t=>t.classList.toggle('active',t.dataset.rcptTab===tab));
+  document.getElementById('rcptKoreaTab').style.display = tab==='korea'?'':'none';
+  document.getElementById('rcptChinaTab').style.display = tab==='china'?'':'none';
+  document.getElementById('rcptHistoryTab').style.display = tab==='history'?'':'none';
+  if(tab==='history') loadReceiptHistory();
+}
+
 function loadReceipts(){
-  // Load POs for dropdown (confirmed/partial)
-  let rcptUrl = '/api/po?include=items';
-  if (currentOriginContext) rcptUrl += '&origin=' + encodeURIComponent(currentOriginContext);
-  fetch(rcptUrl).then(r=>r.json()).then(resp=>{
-    const data=resp.data||resp||[];
-    const sel=document.getElementById('receiptPO');
-    sel.innerHTML='<option value="">발주서를 선택하세요</option>';
-    (data||[]).filter(po=>po.status!=='완료'&&po.status!=='취소').forEach(po=>{
+  // Load POs for both dropdowns (confirmed/partial, split by origin)
+  fetch('/api/po?include=items').then(r=>r.json()).then(resp=>{
+    const data=(resp.data||resp||[]).filter(po=>po.status!=='완료'&&po.status!=='취소'&&po.status!=='received');
+    _rcptPOData.korea = data.filter(po=>(po.origin||'한국')!=='중국');
+    _rcptPOData.china = data.filter(po=>(po.origin||'')==='중국');
+
+    // Korea dropdown
+    const selK=document.getElementById('receiptPO');
+    selK.innerHTML='<option value="">발주서를 선택하세요</option>';
+    _rcptPOData.korea.forEach(po=>{
       const o=document.createElement('option');
       o.value=po.po_id;
       o.textContent=`${po.po_number} - ${po.vendor_name||''} (${po.status})`;
       o.dataset.idx=JSON.stringify(po);
-      sel.appendChild(o);
+      selK.appendChild(o);
     });
-  }).catch(()=>{});
 
-  // Load receipt history
-  fetch('/api/receipts').then(r=>r.json()).then(resp=>{
-    receiptHistory=resp.data||resp||[];
-    renderReceiptHistory();
+    // China dropdown
+    const selC=document.getElementById('receiptPOChina');
+    selC.innerHTML='<option value="">발주서를 선택하세요</option>';
+    _rcptPOData.china.forEach(po=>{
+      const o=document.createElement('option');
+      o.value=po.po_id;
+      const totalOrd=po.items?po.items.reduce((s,it)=>s+(it.ordered_qty||0),0):0;
+      const totalRcv=po.items?po.items.reduce((s,it)=>s+(it.received_qty||0),0):0;
+      o.textContent=`${po.po_number} - ${po.vendor_name||''} [${totalRcv.toLocaleString()}/${totalOrd.toLocaleString()}]`;
+      o.dataset.idx=JSON.stringify(po);
+      selC.appendChild(o);
+    });
+
+    // Origin context → auto switch tab
+    if(currentOriginContext==='중국') switchReceiptTab('china');
   }).catch(()=>{});
 }
 
-document.addEventListener('change',e=>{
-  if(e.target.id==='receiptPO'){
-    const sel=e.target;
-    const opt=sel.selectedOptions[0];
-    const tb=document.getElementById('receiptItemsTable');
-    if(!opt||!opt.dataset.idx){
-      tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하세요</td></tr>';
+function onReceiptPOSelect(origin){
+  const selId = origin==='china'?'receiptPOChina':'receiptPO';
+  const tbId = origin==='china'?'receiptChinaItemsTable':'receiptItemsTable';
+  const sel = document.getElementById(selId);
+  const tb = document.getElementById(tbId);
+  const opt = sel.selectedOptions[0];
+  const emptyMsg = origin==='china'?6:6;
+
+  if(!opt||!opt.dataset.idx){
+    tb.innerHTML=`<tr><td colspan="${emptyMsg}" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하세요</td></tr>`;
+    if(origin==='china'){
+      document.getElementById('chinaPOSummary').style.display='none';
+      document.getElementById('chinaBatchNo').textContent='-';
+      document.getElementById('chinaBatchHistory').innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">발주서를 선택하면 입고차수 이력이 표시됩니다</td></tr>';
+    }
+    return;
+  }
+
+  try{
+    const po=JSON.parse(opt.dataset.idx);
+    const items=po.items||[];
+
+    tb.innerHTML=items.map((it,i)=>{
+      const ordered=it.ordered_qty||0;
+      const received=it.received_qty||0;
+      const remaining=Math.max(0, ordered-received);
+      return `<tr>
+        <td>${esc(it.product_code||'')}</td>
+        <td>${esc(it.brand||'')}</td>
+        <td class="n">${ordered.toLocaleString()}</td>
+        <td class="n" style="color:#16a34a">${received.toLocaleString()}</td>
+        <td class="n" style="color:${remaining>0?'#dc2626':'#16a34a'}">${remaining.toLocaleString()}</td>
+        <td><input type="number" class="qty-input" data-ridx="${i}" value="" min="0" max="${remaining}" placeholder="${remaining}" style="width:90px"></td>
+      </tr>`;
+    }).join('');
+
+    if(origin==='china'){
+      // Show PO summary
+      const totalOrd=items.reduce((s,it)=>s+(it.ordered_qty||0),0);
+      const totalRcv=items.reduce((s,it)=>s+(it.received_qty||0),0);
+      const totalRem=Math.max(0,totalOrd-totalRcv);
+      const rate=totalOrd>0?Math.round(totalRcv/totalOrd*100):0;
+      document.getElementById('chinaPOSummary').style.display='';
+      document.getElementById('chinaTotalOrdered').textContent=totalOrd.toLocaleString();
+      document.getElementById('chinaTotalReceived').textContent=totalRcv.toLocaleString();
+      document.getElementById('chinaTotalRemaining').textContent=totalRem.toLocaleString();
+      document.getElementById('chinaReceiveRate').textContent=rate+'%';
+
+      // Load batch history for this PO and calculate next batch number
+      loadChinaBatchHistory(po.po_id, po.po_number);
+    }
+  }catch(e){
+    tb.innerHTML=`<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">오류</td></tr>`;
+  }
+}
+
+async function loadChinaBatchHistory(poId, poNumber){
+  try{
+    const resp=await fetch('/api/receipts?po_id='+poId);
+    const data=(await resp.json());
+    const receipts=data.data||data||[];
+    const nextBatch = receipts.length + 1;
+    document.getElementById('chinaBatchNo').textContent = nextBatch + '차';
+    document.getElementById('chinaBatchPOLabel').textContent = poNumber ? `(${poNumber})` : '';
+
+    const tb=document.getElementById('chinaBatchHistory');
+    if(!receipts.length){
+      tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px">입고 이력 없음 (1차 입고 예정)</td></tr>';
       return;
     }
-    try{
-      const po=JSON.parse(opt.dataset.idx);
-      const items=po.items||[];
-      tb.innerHTML=items.map((it,i)=>`
-        <tr>
+    let rows='';
+    receipts.forEach(r=>{
+      (r.items||[]).forEach(it=>{
+        rows+=`<tr>
+          <td style="font-weight:600">${r.batch_no||'-'}차</td>
+          <td>${((r.receipt_date||r.created_at)||'').slice(0,10)}</td>
           <td>${esc(it.product_code||'')}</td>
-          <td>${esc(it.brand||'')}</td>
-          <td class="n">${(it.ordered_qty||0).toLocaleString()}</td>
-          <td><input type="number" class="qty-input" data-ridx="${i}" value="" min="0" placeholder="${it.ordered_qty||0}" style="width:80px"></td>
-        </tr>`).join('');
-    }catch(e){
-      tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">오류</td></tr>';
-    }
+          <td class="n">${(it.received_qty||0).toLocaleString()}</td>
+          <td>${esc(r.notes||'')}</td>
+        </tr>`;
+      });
+    });
+    tb.innerHTML=rows;
+  }catch(e){
+    document.getElementById('chinaBatchNo').textContent='1차';
+    document.getElementById('chinaBatchHistory').innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">이력 로드 실패</td></tr>';
   }
-});
+}
 
-function saveReceipt(){
-  const sel=document.getElementById('receiptPO');
+function saveReceipt(origin){
+  const selId = origin==='china'?'receiptPOChina':'receiptPO';
+  const tbId = origin==='china'?'receiptChinaItemsTable':'receiptItemsTable';
+  const notesId = origin==='china'?'receiptChinaNotes':'receiptNotes';
+
+  const sel=document.getElementById(selId);
   if(!sel.value){alert('발주서를 선택하세요.');return;}
 
   const opt=sel.selectedOptions[0];
   let po;
   try{po=JSON.parse(opt.dataset.idx);}catch(e){alert('오류');return;}
 
-  const inputs=document.querySelectorAll('#receiptItemsTable .qty-input');
+  const inputs=document.querySelectorAll('#'+tbId+' .qty-input');
   const receiptItems=[];
   inputs.forEach(inp=>{
     const qty=parseInt(inp.value)||0;
@@ -14382,38 +14680,62 @@ function saveReceipt(){
     }
   });
 
-  if(!receiptItems.length){alert('수령수량을 입력하세요.');return;}
+  if(!receiptItems.length){alert('입고수량을 입력하세요.');return;}
+
+  const batchNo = origin==='china' ? parseInt((document.getElementById('chinaBatchNo').textContent||'1').replace(/[^0-9]/g,''))||1 : 1;
+  const notes = document.getElementById(notesId)?.value || '';
 
   const receipt={
     po_number: po.po_number,
     po_id: po.po_id,
     items: receiptItems,
+    batch_no: batchNo,
+    notes: notes,
     received_at: new Date().toISOString()
   };
 
   fetch('/api/receipts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(receipt)})
     .then(r=>r.json())
     .then(d=>{
-      if(d.ok||d.data||d.receipt_id||d.id){alert('수령이 저장되었습니다.');loadReceipts();}
-      else alert('저장 실패: '+(d.error||''));
+      if(d.ok||d.data||d.receipt_id||d.id){
+        alert(origin==='china'?`${batchNo}차 입고가 저장되었습니다.`:'입고가 저장되었습니다.');
+        loadReceipts();
+        if(origin==='china') setTimeout(()=>onReceiptPOSelect('china'),500);
+      } else alert('저장 실패: '+(d.error||''));
     })
     .catch(()=>alert('서버 연결 실패'));
+}
+
+async function loadReceiptHistory(){
+  try{
+    const originFilter = document.getElementById('rcptHistoryOriginFilter')?.value || '';
+    let url = '/api/receipts';
+    if(originFilter) url += '?origin='+encodeURIComponent(originFilter);
+    const resp = await fetch(url);
+    const data = (await resp.json());
+    receiptHistory = data.data||data||[];
+    renderReceiptHistory();
+  }catch(e){ console.error('입고이력 로드 실패:', e); }
 }
 
 function renderReceiptHistory(){
   const tb=document.getElementById('receiptHistoryTable');
   if(!receiptHistory.length){
-    tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px">수령 이력 없음</td></tr>';
+    tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:16px">입고 이력 없음</td></tr>';
     return;
   }
   let rows='';
   receiptHistory.forEach(r=>{
     (r.items||[{product_code:r.product_code,received_qty:r.received_qty}]).forEach(it=>{
       rows+=`<tr>
-        <td>${esc(r.receipt_date||r.created_at?((r.receipt_date||r.created_at)||'').slice(0,10):'')}</td>
+        <td>${esc(((r.receipt_date||r.created_at)||'').slice(0,10))}</td>
         <td>${esc(r.po_number||'')}</td>
+        <td>${esc(r.vendor_name||'')}</td>
+        <td>${r.batch_no?r.batch_no+'차':'-'}</td>
         <td>${esc(it.product_code||'')}</td>
         <td class="n">${(it.received_qty||0).toLocaleString()}</td>
+        <td class="n">${(it.defect_qty||0)>0?it.defect_qty:'-'}</td>
+        <td>${esc(r.notes||'')}</td>
       </tr>`;
     });
   });

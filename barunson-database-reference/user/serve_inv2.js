@@ -6711,14 +6711,21 @@ async function handleRequest(req, res) {
   // ════════════════════════════════════════════════════════════════════
 
   if (pathname === '/api/receipts' && method === 'GET') {
-    const rows = await db.prepare(`
-      SELECT r.receipt_id, r.po_id, r.receipt_date, r.received_by, r.notes, r.created_at,
-             h.po_number
+    const qs = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+    let sql = `
+      SELECT r.id as receipt_id, r.po_id, r.receipt_date, r.received_by, r.notes, r.created_at,
+             r.batch_no, h.po_number, h.vendor_name, h.origin
       FROM receipts r
       LEFT JOIN po_header h ON r.po_id = h.po_id
-      ORDER BY r.created_at DESC
-    `).all();
-    const itemStmt = db.prepare('SELECT * FROM receipt_items WHERE receipt_id = ?');
+    `;
+    const conditions = [];
+    const params = [];
+    if (qs.po_id) { conditions.push('r.po_id = $' + (params.length+1)); params.push(parseInt(qs.po_id)); }
+    if (qs.origin) { conditions.push('h.origin = $' + (params.length+1)); params.push(qs.origin); }
+    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+    sql += ' ORDER BY r.created_at DESC';
+    const rows = params.length ? await db.prepare(sql).all(...params) : await db.prepare(sql).all();
+    const itemStmt = db.prepare('SELECT * FROM receipt_items WHERE receipt_id = $1');
     for (const r of rows) {
       r.items = await itemStmt.all(r.receipt_id);
     }
@@ -6732,8 +6739,8 @@ async function handleRequest(req, res) {
     const items = body.items || [];
 
     const tx = db.transaction(async () => {
-      const rInfo = await db.prepare(`INSERT INTO receipts (po_id, received_by, notes) VALUES (?, ?, ?)`).run(
-        body.po_id, body.received_by || '', body.notes || ''
+      const rInfo = await db.prepare(`INSERT INTO receipts (po_id, received_by, notes, batch_no) VALUES (?, ?, ?, ?)`).run(
+        body.po_id, body.received_by || '', body.notes || '', body.batch_no || 1
       );
       const receiptId = rInfo.lastInsertRowid;
 
@@ -12279,7 +12286,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    const popups = db.prepare(`SELECT n.* FROM notices n
+    const popups = await db.prepare(`SELECT n.* FROM notices n
       WHERE n.status = 'active' AND n.is_popup = 1
         AND (n.popup_start IS NULL OR n.popup_start <= ?)
         AND (n.popup_end IS NULL OR n.popup_end >= ?)
