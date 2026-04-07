@@ -2258,6 +2258,11 @@ function closeMegaMenu() { /* no-op */ }
       </div>
       <div style="flex:1"></div>
       <!-- 재고운영 카테고리 -->
+      <select id="shipmentFilter" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;color:#0891b2;font-weight:600">
+        <option value="">전체 출고이력</option>
+        <option value="active">출고있음 (활성)</option>
+        <option value="inactive">출고없음 (비활성)</option>
+      </select>
       <select id="opCategoryFilter" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;color:#6d28d9;font-weight:600">
         <option value="">전체 운영구분</option>
         <option value="운영품목">운영품목</option>
@@ -2532,6 +2537,11 @@ function closeMegaMenu() { /* no-op */ }
           <option value="">전체</option>
           <option value="운영품목">운영품목</option>
           <option value="소진후단종">소진 후 단종 제외</option>
+        </select>
+        <select id="poShipmentFilter" onchange="refreshVendorCards()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;color:#0891b2;font-weight:600">
+          <option value="">전체 출고이력</option>
+          <option value="active">출고있음</option>
+          <option value="inactive">출고없음</option>
         </select>
         <input type="text" id="poItemSearchFilter" placeholder="품목코드/품목명 필터" oninput="refreshVendorCards()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;width:160px">
         <select id="poSortFilter" onchange="refreshVendorCards()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px">
@@ -6779,7 +6789,7 @@ fetch('/monthly_sales.json').then(r=>r.json()).then(d=>{monthlySales=d;}).catch(
 const COLS_STOCK=[
   {k:'상태',w:40,special:'statusBadge',label:'상태'},
   {k:'운영구분',w:65,special:'opCategory',label:'운영구분'},
-  {k:'제품코드',w:88,label:'제품코드'},
+  {k:'제품코드',w:88,special:'productCode',label:'제품코드'},
   {k:'품목명',w:110,special:'productName',label:'품목명'},
   {k:'생산지',w:50,special:'originBadge',label:'생산지'},
   {k:'가용재고',w:70,special:'availStock',num:true,label:'가용재고'},
@@ -6794,7 +6804,7 @@ const COLS_STOCK=[
 
 const COLS_ORDER=[
   {k:'상태',w:40,special:'statusBadge',label:'상태'},
-  {k:'제품코드',w:88,label:'제품코드'},
+  {k:'제품코드',w:88,special:'productCode',label:'제품코드'},
   {k:'품목명',w:100,special:'productName',label:'품목명'},
   {k:'가용재고',w:65,special:'availStock',num:true,label:'가용재고'},
   {k:'일평균',w:50,special:'dailyUsage',num:true,label:'일평균'},
@@ -7150,6 +7160,13 @@ function renderCell(c, p){
     const label=cat||'-';
     return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${fg};background:${bg}">${label}</span></td>`;
   }
+  if(c.special==='productCode'){
+    const hasShipment = (p._xerpMonthly||0) > 0;
+    const dot = hasShipment
+      ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;margin-right:3px;vertical-align:middle" title="출고이력 있음"></span>'
+      : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#d1d5db;margin-right:3px;vertical-align:middle" title="출고이력 없음"></span>';
+    return`<td style="font-size:11px;white-space:nowrap">${dot}${esc(code)}</td>`;
+  }
   if(c.special==='productName'){
     const name=p['품목명']||'';
     return`<td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name||'-')}</td>`;
@@ -7269,6 +7286,7 @@ function render(){
   const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
   const brand=document.getElementById('brandFilter')?.value||'';
   const opCat=document.getElementById('opCategoryFilter')?.value||'';
+  const shipFilter=document.getElementById('shipmentFilter')?.value||'';
   let data=classified[currentTab]||[];
 
   let f=data.filter(p=>{
@@ -7283,6 +7301,12 @@ function render(){
       const pnCat=productNotes[p['제품코드']]?.op_category||'';
       if(opCat==='이력없음'){ if(pnCat&&pnCat!=='이력없음')return false; }
       else{ if(pnCat!==opCat)return false; }
+    }
+    // 출고이력 필터
+    if(shipFilter){
+      const hasShipment = (p._xerpMonthly||0) > 0;
+      if(shipFilter==='active' && !hasShipment) return false;
+      if(shipFilter==='inactive' && hasShipment) return false;
     }
     return true;
   });
@@ -7336,6 +7360,7 @@ function renderOrderTab(){
     });
   });
 
+  const shipFilter2=document.getElementById('shipmentFilter')?.value||'';
   let f=data.filter(p=>{
     if(currentOrigin!=='all'&&p._origin!==currentOrigin)return false;
     if(brand&&(p['브랜드']||'')!==brand)return false;
@@ -7343,6 +7368,12 @@ function renderOrderTab(){
       const c=(p['제품코드']||'').toLowerCase();
       const n=(p['품목명']||'').toLowerCase();
       if(!c.includes(q)&&!n.includes(q))return false;
+    }
+    // 출고이력 필터
+    if(shipFilter2){
+      const hasShipment = (p._xerpMonthly||0) > 0;
+      if(shipFilter2==='active' && !hasShipment) return false;
+      if(shipFilter2==='inactive' && hasShipment) return false;
     }
     return true;
   });
@@ -12576,6 +12607,16 @@ function groupByVendor(){
       const cat = (productNotes[p['제품코드']] || {}).op_category || '';
       if (poOpCat === '소진후단종') return cat !== '소진후단종'; // 소진후단종 제외
       return cat === poOpCat; // 운영품목 등 정확히 일치
+    });
+  }
+  // 출고이력 필터
+  const poShipFilter = document.getElementById('poShipmentFilter')?.value || '';
+  if (poShipFilter) {
+    items = items.filter(p => {
+      const hasShipment = (p._xerpMonthly||0) > 0;
+      if (poShipFilter === 'active') return hasShipment;
+      if (poShipFilter === 'inactive') return !hasShipment;
+      return true;
     });
   }
   // 품목 텍스트 검색 필터
