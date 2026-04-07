@@ -6961,6 +6961,10 @@ function classifyItem(p){
 
 let allPOItems = null;
 async function processData(products){
+  // 필드명 정규화: 품목코드 → 제품코드 (XERP 구버전 호환)
+  products.forEach(p => {
+    if (p['품목코드'] && !p['제품코드']) p['제품코드'] = p['품목코드'];
+  });
   // 병렬 로드: 입고이력 + 출고데이터 + 미입고잔량
   const promises = [];
 
@@ -7540,7 +7544,8 @@ function hideOrderPanel(){document.getElementById('orderPanel').classList.remove
 function getOrderItems(){
   const seen={};
   return RAW.filter(p=>{
-    const code=p['제품코드'];
+    const code=p['제품코드']||p['품목코드']||'';
+    if(!code)return false;
     if(!orderQty[code]||orderQty[code]<=0)return false;
     if(orderChecked[code]===false)return false;
     if(seen[code])return false;
@@ -7736,8 +7741,8 @@ function refreshData(){
 
 // ===== XERP 재고 자동 로드 =====
 async function loadXerpInventory(forceRefresh) {
-  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵
-  if (!forceRefresh && RAW && RAW.length > 0) {
+  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵 (정규화된 데이터만)
+  if (!forceRefresh && RAW && RAW.length > 0 && RAW[0]['제품코드']) {
     console.log('XERP 재고: 캐시 사용 (' + RAW.length + '개)');
     return;
   }
@@ -7814,8 +7819,8 @@ async function loadXerpInventory(forceRefresh) {
 
 // ===== 재고현황 페이지 진입 =====
 function loadInventoryPage(){
-  // 캐시된 데이터가 있으면 재로드 없이 바로 렌더링
-  if (RAW && RAW.length > 0) {
+  // 캐시된 데이터가 있으면 재로드 없이 바로 렌더링 (단, 정규화된 데이터만)
+  if (RAW && RAW.length > 0 && RAW[0]['제품코드']) {
     updateOriginCounts();
     updateStatusCounts();
     updatePendingCount();
