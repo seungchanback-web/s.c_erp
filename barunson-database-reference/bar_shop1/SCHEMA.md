@@ -127,9 +127,35 @@
 | 테이블명 | 레코드 수 | 설명 |
 |---------|-----------|------|
 | wedd_biztalk | 221 | 비즈니스 메시징 (대부분 삭제됨) |
-| CallCenterLog | 9.0M | 콜센터 로그 |
+| CallCenterLog | 9.0M | 콜센터 로그 (레거시, CallConnect_Log로 전환 중) |
+| CallConnect_Log | 신규 | 콜센터 인바운드 통화 로그 (2026.04~ 신규) |
 | LOG_MST | 8.5M | 일반 로그 |
 | ata_mmt_log_* | 92개 | 월별 아카이브 (2018-2025) |
+
+### 9. CallConnect_Log (콜센터 인바운드 통화 로그)
+
+> **⚠ 콜 로그 조회 시 주의**: 2026.04부터 신규 인바운드 로그는 이 테이블에 기록됨.
+> 구 데이터(CallCenterLog)는 ~3개월 내 마이그레이션 예정이므로, 마이그레이션 완료 전까지
+> **콜 로그 조회 시 CallCenterLog와 CallConnect_Log 양쪽 모두 참조 필요**.
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|--------|------|------|------|
+| id | int | NO | PK (클러스터드) |
+| YIVR | varchar(20) | NO | IVR 번호 (수신 전화번호) |
+| YCallerID | varchar(20) | NO | 발신자 전화번호 |
+| YMENU | varchar(2) | YES | IVR 메뉴 선택값 |
+| admin_id | varchar(20) | YES | 상담원 ID |
+| call_in_dt | datetime | NO | 인바운드 수신 시각 |
+| call_connect_dt | datetime | YES | 상담원 연결 시각 |
+| call_close_dt | datetime | YES | 통화 종료 시각 |
+| call_type | varchar(1) | NO | 통화 유형 (I=인바운드) |
+
+**인덱스:**
+| 인덱스명 | 컬럼 | 유형 |
+|----------|------|------|
+| PK_CallConnect_Log | id | CLUSTERED |
+| IX_CallConnect_Log_CallerID | YCallerID, call_in_dt | NONCLUSTERED |
+| IX_CallConnect_Log_InDt | call_in_dt (INCLUDE: YCallerID, admin_id) | NONCLUSTERED |
 
 ## 테이블 그룹별 접두어
 

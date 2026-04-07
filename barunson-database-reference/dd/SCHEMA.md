@@ -459,3 +459,148 @@ DD 시스템은 바른손 시스템과 다음과 같이 연동됩니다:
 ### 부울형 패턴
 - char(1): T/F 또는 Y/N
 - tinyint: 0/1
+
+---
+
+## BHC 재고 데이터베이스 (디얼디어 실물 재고)
+
+> DD(뚜비뚜비) 쇼핑몰의 실물 재고는 별도 MSSQL 데이터베이스 **BHC**에서 관리됩니다.
+> XERP MM 모듈과 동일한 테이블 구조를 사용합니다.
+
+### 접속 정보
+
+- **엔진**: MSSQL (DD wedding MySQL과 다름에 주의)
+- **데이터베이스**: `BHC`
+- **접속**: XERP와 동일 서버, `.env`의 DB 접속정보 사용 (database만 `BHC`로 변경)
+- **사이트코드**: `BHC2`
+- **코드페이지**: 949 (EUC-KR), Collation: `Korean_Wansung_CI_AS`
+- **쿼리**: `python3 python/query.py "SELECT * FROM BHC.dbo.테이블명 WITH (NOLOCK)"`
+
+### 주요 테이블
+
+| 테이블 | 용도 | 비고 |
+|--------|------|------|
+| mmInventory | 현재 재고 (실시간) | 약 1,564건 |
+| mminvMonth | 월별 재고 스냅샷 | InvMonth='YYYYMM' |
+| mmInoutHeader | 입출고 전표 헤더 | InoutDate='YYYYMMDD' |
+| mmInoutItem | 입출고 전표 상세 | 품목별 수량/단가 |
+
+> 상세 스키마는 [xerp/INVENTORY.md](../xerp/INVENTORY.md) 동일 적용
+
+### 창고 코드
+
+| 창고코드 | 용도 | 비고 |
+|----------|------|------|
+| DF01 | 본창고 (완제품) | 대량 보관, 카드/봉투/스티커 |
+| DF03 | 부자재/원자재 창고 | 부자재(DDA), 반제품 보관 |
+| DF05 | 샘플/전시/소량 | 샘플세트, QC용 소량 |
+
+### 품목코드 체계
+
+| 접두어 | 분류 | 예시 |
+|--------|------|------|
+| DDC | 카드 (청첩장) | DDC5226, DDC3227, DDC4212 |
+| DDS | 스티커 | DDS008, DDS003, DDS002 |
+| DDA | 부자재 (액세서리) | DDA004_GC_C, DDA003_BKC_C |
+| DDE | 봉투 | DDE001W, DDE002G |
+| DD_ | 기타 (씰/리본 등) | DD_SEAL_D_BL, DD_VB055 |
+| DDM | 모바일 관련 | DDM902, DDM903 |
+| DDT | 티켓/식권 | DDT002 |
+
+### 재고현황 (2025년 12월 31일 기준)
+
+**전체 요약**
+
+| 항목 | 값 |
+|------|------|
+| 품목수 | 355개 |
+| 총 재고수량 | 2,321,700개 |
+| 행 수 (품목×창고) | 511행 |
+
+**창고별**
+
+| 창고 | 품목수 | 총수량 |
+|------|--------|--------|
+| DF01 (본창고) | 133개 | 1,814,928개 |
+| DF03 (부자재) | 86개 | 390,918개 |
+| DF05 (샘플) | 292개 | 115,854개 |
+
+**분류별**
+
+| 분류 | 품목수 | 총수량 |
+|------|--------|--------|
+| DDC (카드) | 285개 | 932,340개 |
+| DDS (스티커) | 8개 | 756,781개 |
+| DDA (부자재) | 14개 | 392,500개 |
+| DDE (봉투) | 19개 | 229,754개 |
+| DD_ (기타) | 26개 | 8,613개 |
+| DDT (티켓) | 1개 | 1,194개 |
+| DDM (모바일) | 2개 | 518개 |
+
+**재고 상위 10개 품목**
+
+| 품목코드 | 분류 | 창고 | 수량 |
+|----------|------|------|------|
+| DDS008 | 스티커 | DF01 | 277,875 |
+| DDS003 | 스티커 | DF01 | 175,060 |
+| DDS002 | 스티커 | DF01 | 154,506 |
+| DDS009 | 스티커 | DF01 | 85,675 |
+| DDA004_GC_C | 부자재 | DF03 | 61,100 |
+| DDA004_BC_C | 부자재 | DF03 | 58,950 |
+| DDE001W | 봉투 | DF01 | 51,207 |
+| DDA004_BKC | 부자재 | DF03 | 43,500 |
+| DDC3227 | 카드 | DF01 | 40,996 |
+| DDC4212 | 카드 | DF01 | 38,463 |
+
+### 재고현황 (2026년 3월 31일 기준)
+
+**전체 요약**
+
+| 항목 | 값 |
+|------|------|
+| 품목수 | 422개 |
+| 총 재고수량 | 2,483,780개 |
+| 행 수 (품목×창고) | 544행 |
+
+**창고별**
+
+| 창고 | 품목수 | 총수량 |
+|------|--------|--------|
+| DF01 (본창고) | 137개 | 2,011,592개 |
+| DF03 (부자재) | 50개 | 327,821개 |
+| DF05 (샘플) | 357개 | 144,367개 |
+
+**12월→3월 변동**: 총 재고 +162,080개(+7.0%), 품목 355→422개(+67개)
+
+### 쿼리 예시
+
+```sql
+-- 특정 월 재고현황 (월말 스냅샷)
+SELECT RTRIM(ItemCode) AS ItemCode, WhCode, CAST(OhQty AS INT) AS OhQty
+FROM BHC.dbo.mminvMonth WITH (NOLOCK)
+WHERE InvMonth = '202512' AND OhQty > 0
+ORDER BY ItemCode
+
+-- 현재 실시간 재고
+SELECT RTRIM(ItemCode) AS ItemCode, WhCode, InvStatus, CAST(OhQty AS INT) AS OhQty
+FROM BHC.dbo.mmInventory WITH (NOLOCK)
+WHERE OhQty > 0
+
+-- 특정 기간 입출고 내역
+SELECT h.InoutNo, h.InoutGubun, h.InoutDate,
+       RTRIM(i.ItemCode) AS ItemCode, i.ItemName, CAST(i.InoutQty AS INT) AS Qty
+FROM BHC.dbo.mmInoutHeader h WITH (NOLOCK)
+JOIN BHC.dbo.mmInoutItem i WITH (NOLOCK)
+  ON h.SiteCode = i.SiteCode AND h.InoutNo = i.InoutNo AND h.InoutGubun = i.InoutGubun
+WHERE h.InoutDate BETWEEN '20260301' AND '20260331'
+ORDER BY h.InoutDate, h.InoutNo
+
+-- 월별 재고 추이 (특정 품목)
+SELECT InvMonth, WhCode, CAST(OhQty AS INT) AS OhQty
+FROM BHC.dbo.mminvMonth WITH (NOLOCK)
+WHERE RTRIM(ItemCode) = 'DDC5226' AND InvMonth >= '202501'
+ORDER BY InvMonth
+```
+
+> **참고**: 단가(OhPrice/OhAmnt)는 0으로 기록되어 금액 정보는 미관리 상태입니다.
+> 가용 월별 데이터: 2019년 1월 ~ 2026년 4월 (현재)

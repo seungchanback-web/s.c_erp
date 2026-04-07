@@ -12,6 +12,69 @@ const sql = require('mssql');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
+// ── 파일 로거 (일별 로테이션, 30일 보관) ────────────────────────────
+const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, 'logs');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+
+function _logDate() { return new Date().toISOString().slice(0,10); }
+function _logTime() { return new Date().toISOString().replace('T',' ').slice(0,19); }
+let _logFileDate = _logDate();
+let _accessStream = fs.createWriteStream(path.join(LOG_DIR, `access-${_logFileDate}.log`), { flags: 'a' });
+let _errorStream  = fs.createWriteStream(path.join(LOG_DIR, `error-${_logFileDate}.log`),  { flags: 'a' });
+let _appStream    = fs.createWriteStream(path.join(LOG_DIR, `app-${_logFileDate}.log`),    { flags: 'a' });
+
+function _rotateIfNeeded() {
+  const today = _logDate();
+  if (today === _logFileDate) return;
+  _logFileDate = today;
+  _accessStream.end(); _errorStream.end(); _appStream.end();
+  _accessStream = fs.createWriteStream(path.join(LOG_DIR, `access-${today}.log`), { flags: 'a' });
+  _errorStream  = fs.createWriteStream(path.join(LOG_DIR, `error-${today}.log`),  { flags: 'a' });
+  _appStream    = fs.createWriteStream(path.join(LOG_DIR, `app-${today}.log`),    { flags: 'a' });
+  // 30일 이전 로그 삭제
+  _cleanOldLogs();
+}
+
+function _cleanOldLogs() {
+  const cutoff = Date.now() - 30 * 86400000;
+  try {
+    for (const f of fs.readdirSync(LOG_DIR)) {
+      const m = f.match(/^(?:access|error|app)-(\d{4}-\d{2}-\d{2})\.log$/);
+      if (m && new Date(m[1]).getTime() < cutoff) {
+        fs.unlinkSync(path.join(LOG_DIR, f));
+      }
+    }
+  } catch (_) {}
+}
+
+const logger = {
+  access(method, url, status, ms, ip) {
+    _rotateIfNeeded();
+    const line = `${_logTime()} ${ip} ${method} ${url} ${status} ${ms}ms\n`;
+    _accessStream.write(line);
+  },
+  info(msg, ...args) {
+    _rotateIfNeeded();
+    const line = `${_logTime()} [INFO] ${msg} ${args.length ? JSON.stringify(args) : ''}\n`;
+    _appStream.write(line);
+    console.log(msg, ...args);
+  },
+  warn(msg, ...args) {
+    _rotateIfNeeded();
+    const line = `${_logTime()} [WARN] ${msg} ${args.length ? JSON.stringify(args) : ''}\n`;
+    _appStream.write(line);
+    console.warn(msg, ...args);
+  },
+  error(msg, ...args) {
+    _rotateIfNeeded();
+    const line = `${_logTime()} [ERROR] ${msg} ${args.length ? JSON.stringify(args) : ''}\n`;
+    _errorStream.write(line);
+    _appStream.write(line);
+    console.error(msg, ...args);
+  }
+};
+_cleanOldLogs(); // 서버 시작 시 1회 정리
+
 // ── XERP MSSQL 연결 ─────────────────────────────────────────────────
 let xerpPool = null;
 let xerpUsageCache = null;
@@ -974,6 +1037,7 @@ try { await db.exec("ALTER TABLE products ADD COLUMN die_cost INTEGER DEFAULT 0"
 try { await db.exec("ALTER TABLE products ADD COLUMN lead_time_days INTEGER DEFAULT 0"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN post_vendor TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'EA'"); } catch(e) {}
+try { await db.exec("ALTER TABLE products ADD COLUMN op_category TEXT DEFAULT ''"); } catch(e) {}
 
 // ── 생산지별 기본 리드타임 (일) ──
 const ORIGIN_LEAD_TIME = { '중국': 50, '한국': 7, '더기프트': 14 };
@@ -2262,16 +2326,16 @@ await db.exec("CREATE INDEX IF NOT EXISTS idx_noti_user ON notifications(user_id
 
 // ── Phase 1: 전자결재 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS approvals (
-  id INTEGER PRIMARY KEY, approval_no TEXT UNIQUE, doc_type TEXT NOT NULL DEFAULT 'general',
+  id SERIAL PRIMARY KEY, approval_no TEXT UNIQUE, doc_type TEXT NOT NULL DEFAULT 'general',
   doc_ref TEXT DEFAULT '', title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
-  amount REAL DEFAULT 0, status TEXT DEFAULT 'draft',
+  amount DOUBLE PRECISION DEFAULT 0, status TEXT DEFAULT 'draft',
   requester_id INTEGER, requester_name TEXT DEFAULT '',
   current_step INTEGER DEFAULT 1, total_steps INTEGER DEFAULT 1,
-  created_at TEXT DEFAULT (datetime('now','localtime')),
-  updated_at TEXT DEFAULT (datetime('now','localtime'))
+  created_at TEXT DEFAULT (NOW()),
+  updated_at TEXT DEFAULT (NOW())
 )`);
 await db.exec(`CREATE TABLE IF NOT EXISTS approval_lines (
-  id INTEGER PRIMARY KEY, approval_id INTEGER NOT NULL, step_order INTEGER NOT NULL,
+  id SERIAL PRIMARY KEY, approval_id INTEGER NOT NULL, step_order INTEGER NOT NULL,
   approver_id INTEGER, approver_name TEXT DEFAULT '',
   role TEXT DEFAULT 'approver', status TEXT DEFAULT 'pending',
   comment TEXT DEFAULT '', acted_at TEXT,
@@ -2566,6 +2630,22 @@ async function logError(level, message, stack, url, method, userId) {
   } catch (e) { console.error('에러 로그 기록 실패:', e.message); }
 }
 
+// 시스템 공지 작성 (릴리스 노트 등 서버 내부에서 자동 게시)
+async function postSystemNotice(title, content, options = {}) {
+  try {
+    const { category = 'update', is_popup = 0, is_pinned = 0 } = options;
+    const admin = await db.prepare("SELECT user_id, username FROM users WHERE role = 'admin' LIMIT 1").get();
+    const authorId = admin ? admin.user_id : 0;
+    const authorName = admin ? admin.username : 'system';
+    const r = await db.prepare(`INSERT INTO notices (title, content, category, is_popup, popup_start, popup_end, is_pinned, author_id, author_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      title, content, category, is_popup ? 1 : 0, null, null, is_pinned ? 1 : 0, authorId, authorName
+    );
+    logger.info(`[시스템 공지] ${title} (id: ${r.lastInsertRowid})`);
+    return r.lastInsertRowid;
+  } catch (e) { logger.error('시스템 공지 작성 실패:', e.message); return null; }
+}
+
 // 전체 페이지 목록 (관리자 권한 UI용)
 const ALL_PAGES = [
   { id: 'dashboard', name: '홈', group: '기본' },
@@ -2711,6 +2791,7 @@ await aoInit.run('BE004', 0, 0);
 await aoInit.run('BE005', 0, 0);
 await aoInit.run('2010wh_n', 0, 0);
 await aoInit.run('BE042', 0, 0);
+
 
 // ── Uploads directory ───────────────────────────────────────────────
 const UPLOAD_ROOT = path.join(UPLOAD_DIR, 'invoices');
@@ -2877,6 +2958,8 @@ console.log(`📦 총 ${moduleRouters.reduce((s,r) => s + r.count, 0)}개 모듈
 
 // ── Server ──────────────────────────────────────────────────────────
 http.createServer(async (req, res) => {
+  const _reqStart = Date.now();
+  const _clientIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   // 헬스체크는 최우선 처리 (Docker/Starlog 배포 안정성)
   const u = req.url;
   if ((u === '/health' || u === '/api/health') && req.method === 'GET') {
@@ -2884,16 +2967,24 @@ http.createServer(async (req, res) => {
     res.end(JSON.stringify({ ok: true, data: { status: 'ok', timestamp: new Date().toISOString() } }));
     return;
   }
+  // 응답 완료 시 액세스 로그
+  res.on('finish', () => {
+    const ms = Date.now() - _reqStart;
+    if (u !== '/health' && u !== '/api/health') {
+      logger.access(req.method, u, res.statusCode, ms, _clientIp);
+    }
+  });
   try {
     await handleRequest(req, res);
   } catch (e) {
-    console.error('Server error:', e);
+    logger.error('Server error:', e.message, e.stack);
     logError('error', e.message, e.stack, req.url, req.method);
     fail(res, 500, e.message || 'Internal Server Error');
   }
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`스마트재고현황: http://localhost:${PORT}  (startup: ${((Date.now() - _startTime)/1000).toFixed(1)}s)`);
-  console.log(`헬스체크: http://localhost:${PORT}/api/health`);
+  logger.info(`스마트재고현황: http://localhost:${PORT}  (startup: ${((Date.now() - _startTime)/1000).toFixed(1)}s)`);
+  logger.info(`헬스체크: http://localhost:${PORT}/api/health`);
+  logger.info(`로그 디렉토리: ${LOG_DIR}`);
   // 외부 DB 연결은 서버 기동 후 백그라운드에서 (Docker 헬스체크 타임아웃 방지)
   initXERP();
   initDD();
@@ -3299,14 +3390,14 @@ async function handleRequest(req, res) {
     const days = parseInt(parsed.searchParams.get('days') || '30');
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
-    const totalLogs = (await db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE created_at >= ?").get(since)).cnt;
-    const byAction = await db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY action ORDER BY cnt DESC").all(since);
-    const byUser = await db.prepare("SELECT username, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY username ORDER BY cnt DESC LIMIT 20").all(since);
-    const byResource = await db.prepare("SELECT resource, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY resource ORDER BY cnt DESC").all(since);
-    const byDay = await db.prepare("SELECT DATE(created_at) as day, COUNT(*) as cnt FROM audit_log WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY day DESC LIMIT ?").all(since, days);
-    const loginFailed = (await db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE action='login_failed' AND created_at >= ?").get(since)).cnt;
-    const uniqueUsers = (await db.prepare("SELECT COUNT(DISTINCT username) as cnt FROM audit_log WHERE created_at >= ? AND action IN ('login','google_login')").get(since)).cnt;
-    const recentActions = await db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at >= datetime('now','-1 hour','localtime') GROUP BY action ORDER BY cnt DESC").all();
+    const totalLogs = (await db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE created_at::text >= ?").get(since)).cnt;
+    const byAction = await db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at::text >= ? GROUP BY action ORDER BY cnt DESC").all(since);
+    const byUser = await db.prepare("SELECT username, COUNT(*) as cnt FROM audit_log WHERE created_at::text >= ? GROUP BY username ORDER BY cnt DESC LIMIT 20").all(since);
+    const byResource = await db.prepare("SELECT resource, COUNT(*) as cnt FROM audit_log WHERE created_at::text >= ? GROUP BY resource ORDER BY cnt DESC").all(since);
+    const byDay = await db.prepare("SELECT created_at::date as day, COUNT(*) as cnt FROM audit_log WHERE created_at::text >= ? GROUP BY created_at::date ORDER BY day DESC LIMIT ?").all(since, days);
+    const loginFailed = (await db.prepare("SELECT COUNT(*) as cnt FROM audit_log WHERE action='login_failed' AND created_at::text >= ?").get(since)).cnt;
+    const uniqueUsers = (await db.prepare("SELECT COUNT(DISTINCT username) as cnt FROM audit_log WHERE created_at::text >= ? AND action IN ('login','google_login')").get(since)).cnt;
+    const recentActions = await db.prepare("SELECT action, COUNT(*) as cnt FROM audit_log WHERE created_at::text >= (NOW() - INTERVAL '1 hour')::text GROUP BY action ORDER BY cnt DESC").all();
 
     ok(res, { total: totalLogs, login_failed: loginFailed, unique_users: uniqueUsers, by_action: byAction, by_user: byUser, by_resource: byResource, by_day: byDay, recent_hour: recentActions, days });
     return;
@@ -3446,7 +3537,7 @@ async function handleRequest(req, res) {
       }
       return count;
     });
-    const count = tx(vendors);
+    const count = await tx(vendors);
     ok(res, { migrated: count, total: vendors.length });
     return;
   }
@@ -3511,10 +3602,16 @@ async function handleRequest(req, res) {
   if (prodPut && method === 'PUT') {
     const id = parseInt(prodPut[1]);
     const b = await readJSON(req);
-    await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+    await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
       b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', id
+      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', id
     );
+    // op_category → product_notes 동기화
+    if (b.op_category) {
+      const prod = await db.prepare('SELECT product_code FROM products WHERE id=?').get(id);
+      if (prod) await db.prepare(`INSERT INTO product_notes (product_code, op_category, updated_at) VALUES (?,?,datetime('now','localtime'))
+        ON CONFLICT(product_code) DO UPDATE SET op_category=excluded.op_category, updated_at=excluded.updated_at`).run(prod.product_code, b.op_category);
+    }
     ok(res, { id });
     return;
   }
@@ -3543,13 +3640,24 @@ async function handleRequest(req, res) {
     const items = body.items || [];
     if (!items.length) { fail(res, 400, 'items required'); return; }
 
-    const upsert = db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+    const upsert = db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(product_code) DO UPDATE SET
-        product_name=excluded.product_name, brand=excluded.brand, origin=excluded.origin,
-        material_code=excluded.material_code, material_name=excluded.material_name,
-        cut_spec=excluded.cut_spec, jopan=excluded.jopan, paper_maker=excluded.paper_maker,
-        memo=excluded.memo, updated_at=datetime('now','localtime')`);
+        product_name=CASE WHEN excluded.product_name='' THEN products.product_name ELSE excluded.product_name END,
+        brand=CASE WHEN excluded.brand='' THEN products.brand ELSE excluded.brand END,
+        origin=CASE WHEN excluded.origin='' THEN products.origin ELSE excluded.origin END,
+        material_code=CASE WHEN excluded.material_code='' THEN products.material_code ELSE excluded.material_code END,
+        material_name=CASE WHEN excluded.material_name='' THEN products.material_name ELSE excluded.material_name END,
+        cut_spec=CASE WHEN excluded.cut_spec='' THEN products.cut_spec ELSE excluded.cut_spec END,
+        jopan=CASE WHEN excluded.jopan='' THEN products.jopan ELSE excluded.jopan END,
+        paper_maker=CASE WHEN excluded.paper_maker='' THEN products.paper_maker ELSE excluded.paper_maker END,
+        memo=CASE WHEN excluded.memo='' THEN products.memo ELSE excluded.memo END,
+        op_category=CASE WHEN excluded.op_category='' THEN products.op_category ELSE excluded.op_category END,
+        updated_at=datetime('now','localtime')`);
+
+    // op_category → product_notes 동기화용
+    const upsertNote = db.prepare(`INSERT INTO product_notes (product_code, op_category, updated_at) VALUES (?,?,datetime('now','localtime'))
+      ON CONFLICT(product_code) DO UPDATE SET op_category=excluded.op_category, updated_at=excluded.updated_at`);
 
     let inserted = 0, updated = 0;
     const tx = db.transaction(async () => {
@@ -3559,8 +3667,10 @@ async function handleRequest(req, res) {
         await upsert.run(
           it.product_code, it.product_name||'', it.brand||'', it.origin||'한국',
           it.material_code||'', it.material_name||'', it.cut_spec||'', it.jopan||'',
-          it.paper_maker||'', it.memo||''
+          it.paper_maker||'', it.memo||'', it.op_category||''
         );
+        // op_category가 있으면 product_notes에도 동기화
+        if (it.op_category) await upsertNote.run(it.product_code, it.op_category);
         if (existing) updated++; else inserted++;
       }
     });
@@ -3770,7 +3880,7 @@ async function handleRequest(req, res) {
   // ════════════════════════════════════════════════════════════════════
   if (pathname === '/api/inventory/pending-orders' && method === 'GET') {
     try {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         SELECT i.product_code,
                SUM(i.ordered_qty - COALESCE(i.received_qty,0)) as pending_qty,
                GROUP_CONCAT(DISTINCT h.os_number) as os_numbers,
@@ -4033,7 +4143,7 @@ async function handleRequest(req, res) {
       }
       return cnt;
     });
-    const count = tx();
+    const count = await tx();
     ok(res, { imported: count });
     return;
   }
@@ -4404,7 +4514,7 @@ async function handleRequest(req, res) {
       }
 
       // PO 생성
-      const poNumber = generatePoNumber();
+      const poNumber = await generatePoNumber();
       // origin 결정
       const _aoOriginProd = await db.prepare('SELECT origin FROM products WHERE product_code=?').get(item.product_code);
       const _aoOrigin = (_aoOriginProd && _aoOriginProd.origin) || '한국';
@@ -4422,7 +4532,7 @@ async function handleRequest(req, res) {
         }
         return { po_id: hdr.lastInsertRowid, po_number: poNumber };
       });
-      const result = tx();
+      const result = await tx();
       if (resolvedVendor) weeklyVendorCount[resolvedVendor] = (weeklyVendorCount[resolvedVendor] || 0) + 1;
 
       // 거래처 이메일이 있으면 자동 발송
@@ -4574,10 +4684,10 @@ async function handleRequest(req, res) {
       const total = await db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=?").get(org);
       const byStatus = await db.prepare("SELECT status, COUNT(*) AS c FROM po_header WHERE origin=? GROUP BY status").all(org);
       const partial = await db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=? AND status='partial'").get(org);
-      const overdue = await db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=? AND status NOT IN ('received','cancelled','completed') AND due_date < date('now','localtime') AND due_date != ''").get(org);
+      const overdue = await db.prepare("SELECT COUNT(*) AS c FROM po_header WHERE origin=? AND status NOT IN ('received','cancelled','completed') AND due_date != '' AND due_date::date < CURRENT_DATE").get(org);
       const recentPo = await db.prepare("SELECT po_id, po_number, vendor_name, status, due_date as expected_date, po_date, total_qty FROM po_header WHERE origin=? ORDER BY created_at DESC LIMIT 5").all(org);
       // 입고율 (전체 아이템 기준)
-      const rcvRate = db.prepare(`
+      const rcvRate = await db.prepare(`
         SELECT COALESCE(SUM(i.received_qty),0) AS received, COALESCE(SUM(i.ordered_qty),0) AS ordered
         FROM po_items i JOIN po_header h ON h.po_id=i.po_id WHERE h.origin=? AND h.status NOT IN ('cancelled','draft')
       `).get(org);
@@ -4689,7 +4799,7 @@ async function handleRequest(req, res) {
       }
       return receiptId;
     });
-    const receiptId = tx();
+    const receiptId = await tx();
     // 알림
     const po = await db.prepare("SELECT po_number, origin, vendor_name FROM po_header WHERE po_id=?").get(body.po_id);
     if (po) createNotification(null, 'po', `입고완료: ${po.po_number}`, `${po.vendor_name} - ${items.length}건 입고`, 'procurement');
@@ -4706,9 +4816,9 @@ async function handleRequest(req, res) {
   if (rcvHistMatch && method === 'GET') {
     const poId = rcvHistMatch[1];
     const receipts = await db.prepare(`
-      SELECT r.receipt_id, r.receipt_date, r.received_by, r.notes AS receipt_notes,
+      SELECT r.id, r.receipt_date, r.received_by, r.notes AS receipt_notes,
              ri.product_code, ri.received_qty, ri.defect_qty, ri.notes AS item_notes
-      FROM receipts r JOIN receipt_items ri ON r.receipt_id = ri.receipt_id
+      FROM receipts r JOIN receipt_items ri ON r.id = ri.receipt_id
       WHERE r.po_id = ? ORDER BY r.receipt_date DESC
     `).all(poId);
     ok(res, receipts); return;
@@ -5286,7 +5396,7 @@ async function handleRequest(req, res) {
 
     // 새 PO 생성
     const totalQty = oldItems.reduce((s, it) => s + (it.ordered_qty || 0), 0);
-    const info = db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, due_date, total_qty, notes, origin, po_date)
+    const info = await db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, due_date, total_qty, notes, origin, po_date)
       VALUES (?, ?, ?, 'sent', ?, ?, ?, ?, date('now','localtime'))`).run(
       poNumber, oldPO.po_type, oldPO.vendor_name, oldPO.due_date || oldPO.expected_date || '', totalQty, `재발주 (원본: ${oldPO.po_number})`, oldPO.origin || ''
 
@@ -5565,7 +5675,7 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const { vendor_name, process_type, default_days, adjusted_days, adjusted_reason } = body;
     if (!vendor_name || !process_type) { fail(res, 400, '필수 항목 누락'); return; }
-    db.prepare(`INSERT INTO process_lead_time (vendor_name, process_type, default_days, adjusted_days, adjusted_reason)
+    await db.prepare(`INSERT INTO process_lead_time (vendor_name, process_type, default_days, adjusted_days, adjusted_reason)
       VALUES (?,?,?,?,?)
       ON CONFLICT(vendor_name, process_type) DO UPDATE SET
         default_days=COALESCE(excluded.default_days, default_days),
@@ -5651,7 +5761,7 @@ async function handleRequest(req, res) {
     const byProcess = await db.prepare(`SELECT process_type, SUM(amount) as total, COUNT(*) as cnt, AVG(unit_price) as avg_price FROM post_process_history WHERE ${whereVendor} AND unit_price>0 GROUP BY process_type ORDER BY total DESC`).all(...vendorParam);
 
     // 단가 변동 감지 (같은 제품+공정인데 단가가 다른 경우)
-    const priceChanges = db.prepare(`
+    const priceChanges = await db.prepare(`
       SELECT product_code, process_type,
         MIN(unit_price) as min_price, MAX(unit_price) as max_price,
         COUNT(DISTINCT unit_price) as price_count,
@@ -5665,7 +5775,7 @@ async function handleRequest(req, res) {
     `).all(...vendorParam);
 
     // 제품별 후공정 원가 TOP 15
-    const topProducts = db.prepare(`
+    const topProducts = await db.prepare(`
       SELECT product_code, SUM(amount) as total, COUNT(DISTINCT process_type) as process_count,
         GROUP_CONCAT(DISTINCT process_type) as processes, GROUP_CONCAT(DISTINCT month) as months
       FROM post_process_history WHERE ${whereVendor}
@@ -5704,7 +5814,7 @@ async function handleRequest(req, res) {
     // 3. 업체 비교 (전체 조회 시)
     let vendorComparison = null;
     if (isAll) {
-      const vendorStats = db.prepare(`
+      const vendorStats = await db.prepare(`
         SELECT vendor_name, SUM(amount) as total, COUNT(DISTINCT month) as months
         FROM post_process_history
         GROUP BY vendor_name
@@ -6304,7 +6414,7 @@ async function handleRequest(req, res) {
     const qs = new URL(req.url, `http://${req.headers.host}`).searchParams;
     const from = qs.get('from') || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const to = qs.get('to') || new Date().toISOString().slice(0, 10);
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT vendor_name,
         COUNT(*) as order_count,
         COALESCE(SUM(total_qty), 0) as total_qty,
@@ -6455,13 +6565,13 @@ async function handleRequest(req, res) {
 
     for (const [vendorName, vendorItems] of Object.entries(vendorGroups)) {
       try {
-        const poNumber = generatePoNumber();
+        const poNumber = await generatePoNumber();
         const totalQty = vendorItems.reduce((s, it) => s + (parseInt(it.qty) || 0), 0);
         // origin: 첫 번째 품목의 products.origin 사용
         const _bulkFirstProd = await db.prepare('SELECT origin FROM products WHERE product_code=?').get(vendorItems[0].product_code || '');
         const _bulkOrigin = (_bulkFirstProd && _bulkFirstProd.origin) || '';
         const tx = db.transaction(async () => {
-          const hdr = db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, total_qty, notes, material_status, process_status, origin, po_date)
+          const hdr = await db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, total_qty, notes, material_status, process_status, origin, po_date)
             VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
             poNumber, '원재료', vendorName, 'draft', totalQty, '엑셀 일괄 발주', 'sent', 'waiting', _bulkOrigin, today
           );
@@ -6472,7 +6582,7 @@ async function handleRequest(req, res) {
           }
           return { po_id: Number(hdr.lastInsertRowid), po_number: poNumber };
         });
-        const result = tx();
+        const result = await tx();
         created.push({ po_number: result.po_number, vendor: vendorName, items_count: vendorItems.length });
       } catch (e) {
         errors.push({ vendor: vendorName, error: e.message });
@@ -6491,7 +6601,7 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/po' && method === 'POST') {
     const body = await readJSON(req);
-    const poNumber = generatePoNumber();
+    const poNumber = await generatePoNumber();
     const items = body.items || [];
     const totalQty = items.reduce((s, it) => s + (it.ordered_qty || 0), 0);
 
@@ -6530,7 +6640,7 @@ async function handleRequest(req, res) {
       }
       return poId;
     });
-    const poId = tx();
+    const poId = await tx();
 
     // 목형비 자동 처리: 신제품 첫 발주 시 notes에 '목형비 포함' 마킹
     for (const item of items) {
@@ -6768,7 +6878,7 @@ async function handleRequest(req, res) {
 
       return receiptId;
     });
-    const receiptId = tx();
+    const receiptId = await tx();
 
     // XERP 캐시 무효화 (다음 조회 시 최신 데이터 로드)
     if (typeof xerpInventoryCacheTime !== 'undefined') xerpInventoryCacheTime = 0;
@@ -6841,7 +6951,7 @@ async function handleRequest(req, res) {
       }
       return invId;
     });
-    const invId = tx();
+    const invId = await tx();
     ok(res, { invoice_id: invId, file_path: filePath });
     return;
   }
@@ -6961,9 +7071,9 @@ async function handleRequest(req, res) {
 
     // 6. 알림 (안전재고 미달 = urgent 품목 수, 납기 초과, 미승인 PO)
     const pendingPO = (await db.prepare(`SELECT COUNT(*) as cnt FROM po_header WHERE status IN ('draft','sent')`).get()).cnt;
-    const overdueCount = (await db.prepare(`SELECT COUNT(*) as cnt FROM po_header WHERE due_date < date('now') AND status NOT IN ('received','cancelled','os_pending')`).get()).cnt;
+    const overdueCount = (await db.prepare(`SELECT COUNT(*) as cnt FROM po_header WHERE due_date != '' AND due_date::date < CURRENT_DATE AND status NOT IN ('received','cancelled','os_pending')`).get()).cnt;
     // 납기 임박 (D-3 이내)
-    const upcomingDeadlineCount = (await db.prepare(`SELECT COUNT(*) as cnt FROM po_header WHERE due_date >= date('now') AND due_date <= date('now','+3 days') AND status NOT IN ('received','cancelled','os_pending')`).get()).cnt;
+    const upcomingDeadlineCount = (await db.prepare(`SELECT COUNT(*) as cnt FROM po_header WHERE due_date != '' AND due_date::date >= CURRENT_DATE AND due_date::date <= CURRENT_DATE + INTERVAL '3 days' AND status NOT IN ('received','cancelled','os_pending')`).get()).cnt;
 
     ok(res, {
       monthlyPO, vendorShare, statusDist, avgLeadTime, vendorLeadTime,
@@ -7504,7 +7614,7 @@ async function handleRequest(req, res) {
     const { po_number, po_date, due_date, vendor_id, vendor_name, vendor_contact, vendor_phone, vendor_email,
             issuer_name, issuer_contact, issuer_phone, issuer_email, payment_terms, remark,
             items, total_supply, total_tax, total_amount } = body;
-    const result = db.prepare(`INSERT INTO po_drafts
+    const result = await db.prepare(`INSERT INTO po_drafts
       (po_number,po_date,due_date,vendor_id,vendor_name,vendor_contact,vendor_phone,vendor_email,
        issuer_name,issuer_contact,issuer_phone,issuer_email,payment_terms,remark,
        items,total_supply,total_tax,total_amount)
@@ -7623,7 +7733,7 @@ async function handleRequest(req, res) {
   // GET /api/purchases?year=2026 — 월별 업체별 품목별 매입 집계
   if (pathname === '/api/purchases' && method === 'GET') {
     const year = parsed.searchParams.get('year') || new Date().getFullYear().toString();
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT i.vendor_name, ii.product_code, ii.product_name,
              substr(i.invoice_date, 6, 2) as month,
              SUM(ii.qty) as total_qty, SUM(ii.amount) as total_amount
@@ -7822,13 +7932,13 @@ async function handleRequest(req, res) {
     const txn = db.transaction(async () => {
       const r = await ins.run(b.product_code, b.product_name||'', b.brand||'', b.notes||'', b.default_order_qty||1000, b.finished_w||0, b.finished_h||0);
       const bomId = r.lastInsertRowid;
-      (b.items||[]).forEach(async (it,i) => {
+      for (let i = 0; i < (b.items||[]).length; i++) { const it = (b.items||[])[i];
         await insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i,
           it.material_type||'IMPOSITION', it.paper_standard||'', it.paper_type||'', it.gsm||0, it.finished_w||0, it.finished_h||0, it.bleed??3, it.grip??10, it.loss_rate??5);
-      });
+      }
       return bomId;
     });
-    const bomId = txn();
+    const bomId = await txn();
     ok(res, { bom_id: bomId });
     return;
   }
@@ -7843,10 +7953,10 @@ async function handleRequest(req, res) {
         await db.prepare('DELETE FROM bom_items WHERE bom_id=?').run(bomId);
         const insItem = db.prepare(`INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, unit, notes, sort_order,
           material_type, paper_standard, paper_type, gsm, finished_w, finished_h, bleed, grip, loss_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)`);
-        b.items.forEach(async (it,i) => {
+        for (let i = 0; i < b.items.length; i++) { const it = b.items[i];
           await insItem.run(bomId, it.item_type||'material', it.material_code||'', it.material_name||'', it.vendor_name||'', it.process_type||'', it.qty_per||1, it.cut_spec||'', it.plate_spec||'', it.unit||'EA', it.notes||'', i,
             it.material_type||'IMPOSITION', it.paper_standard||'', it.paper_type||'', it.gsm||0, it.finished_w||0, it.finished_h||0, it.bleed??3, it.grip??10, it.loss_rate??5);
-        });
+        }
       }
     });
     await txn();
@@ -8493,7 +8603,7 @@ async function handleRequest(req, res) {
     for (const r of invRows) { invMap[r.product_code] = r.total_qty || 0; }
 
     // 5) Get on-order (pending PO) per material
-    const poRows = db.prepare(
+    const poRows = await db.prepare(
       "SELECT pi.product_code, SUM(pi.ordered_qty - pi.received_qty) AS pending FROM po_items pi JOIN po_header ph ON pi.po_id=ph.po_id WHERE ph.status NOT IN ('완료','취소','cancelled','received') AND pi.ordered_qty > pi.received_qty GROUP BY pi.product_code"
     ).all();
     const poMap = {};
@@ -8570,7 +8680,7 @@ async function handleRequest(req, res) {
     const invMap = {};
     for (const r of invRows) { invMap[r.product_code] = r.total_qty || 0; }
 
-    const poRows = db.prepare(
+    const poRows = await db.prepare(
       "SELECT pi.product_code, SUM(pi.ordered_qty - pi.received_qty) AS pending FROM po_items pi JOIN po_header ph ON pi.po_id=ph.po_id WHERE ph.status NOT IN ('완료','취소','cancelled','received') AND pi.ordered_qty > pi.received_qty GROUP BY pi.product_code"
     ).all();
     const poMap = {};
@@ -8733,7 +8843,7 @@ async function handleRequest(req, res) {
       }
       return count;
     });
-    const imported = txn();
+    const imported = await txn();
 
     // Google Sheet 동기화 (비동기, DB 저장 후 실행)
     let sheetResult = null;
@@ -8864,7 +8974,7 @@ async function handleRequest(req, res) {
     const byStatus = await db.prepare(`
       SELECT status, COUNT(*) as count FROM defects GROUP BY status
     `).all();
-    const byVendor = db.prepare(`
+    const byVendor = await db.prepare(`
       SELECT vendor_name, COUNT(*) as defect_count, SUM(defect_qty) as total_defect_qty
       FROM defects GROUP BY vendor_name ORDER BY defect_count DESC
     `).all();
@@ -8874,7 +8984,7 @@ async function handleRequest(req, res) {
     const since30 = new Date();
     since30.setDate(since30.getDate() - 30);
     const since30str = since30.toISOString().slice(0, 10);
-    const recent30 = db.prepare(`
+    const recent30 = await db.prepare(`
       SELECT COUNT(*) as total, SUM(defect_qty) as total_qty,
              SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END) as resolved,
              SUM(CASE WHEN status='registered' THEN 1 ELSE 0 END) as registered,
@@ -8964,7 +9074,7 @@ async function handleRequest(req, res) {
       });
       return info.lastInsertRowid;
     });
-    const newId = tx();
+    const newId = await tx();
     ok(res, { id: newId, defect_number });
     return;
   }
@@ -9038,7 +9148,7 @@ async function handleRequest(req, res) {
     if (!defect) { fail(res, 404, '불량 접수 건 없음'); return; }
     const body = await readJSON(req);
     if (!body.action) { fail(res, 400, 'action 필수'); return; }
-    db.prepare(`INSERT INTO defect_logs (defect_id, defect_number, action, from_status, to_status, actor, details)
+    await db.prepare(`INSERT INTO defect_logs (defect_id, defect_number, action, from_status, to_status, actor, details)
       VALUES (?,?,?,?,?,?,?)`).run(
       defectId, defect.defect_number,
       body.action,
@@ -9059,7 +9169,7 @@ async function handleRequest(req, res) {
     if (!defect) { fail(res, 404, '불량 접수 건 없음'); return; }
     if (!defect.product_code) { fail(res, 400, 'product_code가 없어 발주를 생성할 수 없습니다'); return; }
 
-    const poNumber = generatePoNumber();
+    const poNumber = await generatePoNumber();
     const defectQty = defect.defect_qty || 0;
     const notes = `불량처리 발주 (${defect.defect_number}) - ${defect.description || '불량 재작업'}`;
 
@@ -9069,7 +9179,7 @@ async function handleRequest(req, res) {
 
     const tx = db.transaction(async () => {
       // PO 헤더 생성
-      const hdrInfo = db.prepare(`
+      const hdrInfo = await db.prepare(`
         INSERT INTO po_header (po_number, po_type, vendor_name, status, total_qty, notes, defect_id, defect_number, origin, po_date)
         VALUES (?, 'post_process', ?, '대기', ?, ?, ?, ?, ?, date('now','localtime'))
       `).run(poNumber, defect.vendor_name || '', defectQty, notes, defectId, defect.defect_number || '', _defOrigin);
@@ -9077,7 +9187,7 @@ async function handleRequest(req, res) {
       const poId = hdrInfo.lastInsertRowid;
 
       // PO 품목 추가
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO po_items (po_id, product_code, brand, process_type, ordered_qty, spec, notes)
         VALUES (?, ?, '', ?, ?, '', ?)
       `).run(
@@ -9089,7 +9199,7 @@ async function handleRequest(req, res) {
       );
 
       // 불량 이력 로그 추가
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO defect_logs (defect_id, defect_number, action, from_status, to_status, actor, details)
         VALUES (?, ?, '처리 발주 생성', ?, ?, 'system', ?)
       `).run(
@@ -9103,7 +9213,7 @@ async function handleRequest(req, res) {
       return poId;
     });
 
-    const poId = tx();
+    const poId = await tx();
     ok(res, { po_id: poId, po_number: poNumber, defect_id: defectId, defect_number: defect.defect_number });
     return;
   }
@@ -9124,7 +9234,7 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const passRate = body.total_qty > 0 ? Math.round(body.pass_qty / body.total_qty * 1000) / 10 : 0;
     const result = body.fail_qty > 0 ? (passRate < 90 ? 'rejected' : 'conditional') : 'passed';
-    const info = db.prepare(`INSERT INTO incoming_inspections (po_id, po_number, vendor_name, inspection_date, inspector, result, items_json, total_qty, pass_qty, fail_qty, pass_rate, notes)
+    const info = await db.prepare(`INSERT INTO incoming_inspections (po_id, po_number, vendor_name, inspection_date, inspector, result, items_json, total_qty, pass_qty, fail_qty, pass_rate, notes)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       body.po_id || null, body.po_number || '', body.vendor_name || '',
       body.inspection_date || new Date().toISOString().slice(0, 10),
@@ -9134,7 +9244,7 @@ async function handleRequest(req, res) {
     // 불합격 시 자동 NCR 생성
     if (result === 'rejected' || result === 'conditional') {
       const ncrNum = 'NCR' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + '-' + String(info.lastInsertRowid).padStart(3, '0');
-      db.prepare(`INSERT INTO ncr (ncr_number, inspection_id, po_id, vendor_name, product_code, ncr_type, description, status, severity)
+      await db.prepare(`INSERT INTO ncr (ncr_number, inspection_id, po_id, vendor_name, product_code, ncr_type, description, status, severity)
         VALUES (?,?,?,?,?,?,?,?,?)`).run(
         ncrNum, info.lastInsertRowid, body.po_id || null, body.vendor_name || '',
         body.product_code || '', 'incoming',
@@ -9251,7 +9361,7 @@ async function handleRequest(req, res) {
       const qualityScore = Math.max(0, 100 - defectCount * 10);
       // 종합
       const totalScore = Math.round(deliveryScore * 0.5 + qualityScore * 0.4 + 80 * 0.1); // 가격은 기본 80점
-      db.prepare(`INSERT OR REPLACE INTO vendor_scorecard (vendor_name, eval_month, delivery_score, quality_score, price_score, total_score, total_po, ontime_po, total_defects)
+      await db.prepare(`INSERT OR REPLACE INTO vendor_scorecard (vendor_name, eval_month, delivery_score, quality_score, price_score, total_score, total_po, ontime_po, total_defects)
         VALUES (?,?,?,?,80,?,?,?,?)`).run(vendor_name, month, deliveryScore, qualityScore, totalScore, totalPO, ontimePO, defectCount);
       results.push({ vendor_name, delivery_score: deliveryScore, quality_score: qualityScore, total_score: totalScore });
     }
@@ -9840,7 +9950,7 @@ async function handleRequest(req, res) {
       }
       return newStock;
     });
-    const newStock = txRun();
+    const newStock = await txRun();
     ok(res, { new_stock: newStock });
     return;
   }
@@ -10092,7 +10202,7 @@ async function handleRequest(req, res) {
       }
       return cnt;
     });
-    const count = tx(items);
+    const count = await tx(items);
     ok(res, { message: `${count}건 저장 완료` });
     return;
   }
@@ -10155,7 +10265,7 @@ async function handleRequest(req, res) {
     let where = [];
     let args = [];
     if (from_date) { where.push("t.created_at >= ?"); args.push(from_date + ' 00:00:00'); }
-    else { where.push(`t.created_at >= datetime('now','localtime','-${days} days')`); }
+    else { where.push(`t.created_at >= (NOW() - INTERVAL '${days} days')::text`); }
     if (to_date) { where.push("t.created_at <= ?"); args.push(to_date + ' 23:59:59'); }
     if (from_wh) { where.push("t.from_warehouse = ?"); args.push(parseInt(from_wh)); }
     if (to_wh) { where.push("t.to_warehouse = ?"); args.push(parseInt(to_wh)); }
@@ -10187,22 +10297,22 @@ async function handleRequest(req, res) {
       args.push(from_date + ' 00:00:00');
       if (to_date) { dateFilter += " AND t.created_at <= ?"; args.push(to_date + ' 23:59:59'); }
     } else {
-      dateFilter = `t.created_at >= datetime('now','localtime','-${days} days')`;
+      dateFilter = `t.created_at >= (NOW() - INTERVAL '${days} days')::text`;
     }
 
     // 총 건수/수량
     const total = await db.prepare(`SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as total_qty FROM warehouse_transfers t WHERE ${dateFilter}`).get(...args);
     // 오늘 건수
-    const today = await db.prepare(`SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as total_qty FROM warehouse_transfers t WHERE date(t.created_at)=date('now','localtime')`).get();
+    const today = await db.prepare(`SELECT COUNT(*) as cnt, COALESCE(SUM(quantity),0) as total_qty FROM warehouse_transfers t WHERE t.created_at::date=CURRENT_DATE`).get();
     // 최다 이동 품목
-    const topItem = await db.prepare(`SELECT product_code, product_name, SUM(quantity) as total_qty, COUNT(*) as cnt FROM warehouse_transfers t WHERE ${dateFilter} GROUP BY product_code ORDER BY total_qty DESC LIMIT 1`).get(...args);
+    const topItem = await db.prepare(`SELECT product_code, MAX(product_name) as product_name, SUM(quantity) as total_qty, COUNT(*) as cnt FROM warehouse_transfers t WHERE ${dateFilter} GROUP BY product_code ORDER BY total_qty DESC LIMIT 1`).get(...args);
     // 창고 간 흐름 TOP5
-    const flows = db.prepare(`SELECT fw.name as from_name, tw.name as to_name, COUNT(*) as cnt, SUM(t.quantity) as total_qty
+    const flows = await db.prepare(`SELECT fw.name as from_name, tw.name as to_name, COUNT(*) as cnt, SUM(t.quantity) as total_qty
       FROM warehouse_transfers t
       JOIN warehouses fw ON t.from_warehouse=fw.id
       JOIN warehouses tw ON t.to_warehouse=tw.id
       WHERE ${dateFilter}
-      GROUP BY t.from_warehouse, t.to_warehouse
+      GROUP BY t.from_warehouse, t.to_warehouse, fw.name, tw.name
       ORDER BY total_qty DESC LIMIT 5`).all(...args);
     // 담당자별
     const operators = await db.prepare(`SELECT operator, COUNT(*) as cnt, SUM(quantity) as total_qty FROM warehouse_transfers t WHERE ${dateFilter} AND operator!='' GROUP BY operator ORDER BY cnt DESC LIMIT 5`).all(...args);
@@ -10250,7 +10360,7 @@ async function handleRequest(req, res) {
     let where = [];
     let args = [];
     if (from_date) { where.push("a.created_at >= ?"); args.push(from_date + ' 00:00:00'); }
-    else { where.push(`a.created_at >= datetime('now','localtime','-${days} days')`); }
+    else { where.push(`a.created_at >= (NOW() - INTERVAL '${days} days')::text`); }
     if (to_date) { where.push("a.created_at <= ?"); args.push(to_date + ' 23:59:59'); }
     if (wh) { where.push("a.warehouse_id = ?"); args.push(parseInt(wh)); }
     if (search) { where.push("(a.product_code LIKE ? OR a.product_name LIKE ?)"); args.push(`%${search}%`, `%${search}%`); }
@@ -10292,7 +10402,7 @@ async function handleRequest(req, res) {
         }
         return cnt;
       });
-      const count = tx(result.recordset);
+      const count = await tx(result.recordset);
       ok(res, { message: `XERP → 본사창고 동기화 완료 (${count}건)` });
     } catch (e) {
       fail(res, 500, 'XERP 동기화 실패: ' + e.message);
@@ -11811,7 +11921,7 @@ async function handleRequest(req, res) {
 
     // ── SQLite: 후공정비 합계 ──
     try {
-      const ppRow = db.prepare(`SELECT COALESCE(SUM(amount),0) AS total FROM post_process_history
+      const ppRow = await db.prepare(`SELECT COALESCE(SUM(amount),0) AS total FROM post_process_history
         WHERE date >= ? AND date <= ?`).get(startOfMonth.toISOString().slice(0,10), today.toISOString().slice(0,10));
       result.post_process_total = ppRow ? Number(ppRow.total || 0) : 0;
       result.sources.sqlite = 'connected';
@@ -12304,7 +12414,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const noticeId = parseInt(pathname.match(/\/(\d+)\/dismiss/)[1], 10);
-    db.prepare(`INSERT INTO notice_reads (notice_id, user_id, popup_dismissed) VALUES (?, ?, 1)
+    await db.prepare(`INSERT INTO notice_reads (notice_id, user_id, popup_dismissed) VALUES (?, ?, 1)
       ON CONFLICT(notice_id, user_id) DO UPDATE SET popup_dismissed = 1, read_at = datetime('now','localtime')`)
       .run(noticeId, decoded.userId);
     ok(res, { message: '팝업 닫기 완료' }); return;
@@ -12321,10 +12431,33 @@ async function handleRequest(req, res) {
     await db.prepare("UPDATE notices SET view_count = view_count + 1 WHERE id = ?").run(id);
     notice.view_count += 1;
     // 읽음 처리
-    db.prepare(`INSERT INTO notice_reads (notice_id, user_id) VALUES (?, ?)
+    await db.prepare(`INSERT INTO notice_reads (notice_id, user_id) VALUES (?, ?)
       ON CONFLICT(notice_id, user_id) DO UPDATE SET read_at = datetime('now','localtime')`)
       .run(id, decoded.userId);
     ok(res, notice); return;
+  }
+
+  // ── POST /api/notices/release ── 릴리스 노트 자동 게시 (admin만)
+  if (pathname === '/api/notices/release' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한 필요'); return; }
+    const body = await readJSON(req);
+    const { version, title, content } = body;
+    // content가 없으면 whats-new 디렉토리에서 최신 파일을 읽어서 사용
+    let noteContent = content || '';
+    if (!noteContent) {
+      try {
+        const wnDir = path.join(__dir, 'whats-new');
+        if (fs.existsSync(wnDir)) {
+          const files = fs.readdirSync(wnDir).filter(f => f.startsWith('WHATS-NEW-')).sort().reverse();
+          if (files.length > 0) noteContent = fs.readFileSync(path.join(wnDir, files[0]), 'utf8');
+        }
+      } catch (_) {}
+    }
+    const noteTitle = title || `🔄 시스템 업데이트 ${version || ''}`.trim();
+    const noticeId = await postSystemNotice(noteTitle, noteContent, { category: 'update', is_pinned: 1 });
+    auditLog(decoded.userId, decoded.username, 'release_notice', 'notices', noticeId, `릴리스: ${noteTitle}`, clientIP);
+    ok(res, { id: noticeId, message: '릴리스 공지 등록 완료' }); return;
   }
 
   // ── POST /api/notices ── 공지 작성 (admin만)
@@ -12334,7 +12467,7 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const { title, content, category, is_popup, popup_start, popup_end, is_pinned } = body;
     if (!title) { fail(res, 400, '제목 필수'); return; }
-    const r = db.prepare(`INSERT INTO notices (title, content, category, is_popup, popup_start, popup_end, is_pinned, author_id, author_name)
+    const r = await db.prepare(`INSERT INTO notices (title, content, category, is_popup, popup_start, popup_end, is_pinned, author_id, author_name)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       title, content || '', category || 'notice',
       is_popup ? 1 : 0, popup_start || null, popup_end || null,
@@ -12351,7 +12484,7 @@ async function handleRequest(req, res) {
     const id = parseInt(pathname.match(/\/(\d+)$/)[1], 10);
     const body = await readJSON(req);
     const { title, content, category, is_popup, popup_start, popup_end, is_pinned, status } = body;
-    db.prepare(`UPDATE notices SET title=COALESCE(?,title), content=COALESCE(?,content),
+    await db.prepare(`UPDATE notices SET title=COALESCE(?,title), content=COALESCE(?,content),
       category=COALESCE(?,category), is_popup=?, popup_start=?, popup_end=?,
       is_pinned=?, status=COALESCE(?,status), updated_at=datetime('now','localtime') WHERE id=?`).run(
       title || null, content !== undefined ? content : null, category || null,
@@ -12678,7 +12811,7 @@ async function handleRequest(req, res) {
 
     // SQLite 최신 단가표
     const priceMap = {};
-    const allPrices = db.prepare(`SELECT m.* FROM material_prices m
+    const allPrices = await db.prepare(`SELECT m.* FROM material_prices m
       INNER JOIN (SELECT product_code, vendor_name, MAX(apply_month) AS max_month FROM material_prices GROUP BY product_code, vendor_name) g
       ON m.product_code=g.product_code AND m.vendor_name=g.vendor_name AND m.apply_month=g.max_month`).all();
     for (const p of allPrices) priceMap[p.product_code] = p;
@@ -13193,7 +13326,7 @@ async function handleRequest(req, res) {
     const active = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE current_qty > 0").get()).cnt;
     const held = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE quality_status='HOLD'").get()).cnt;
     const totalQty = (await db.prepare("SELECT COALESCE(SUM(current_qty),0) AS qty FROM batch_master").get()).qty;
-    const expiring = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE exp_date IS NOT NULL AND exp_date != '' AND exp_date <= date('now','+30 days','localtime') AND current_qty > 0").get()).cnt;
+    const expiring = (await db.prepare("SELECT COUNT(*) AS cnt FROM batch_master WHERE exp_date IS NOT NULL AND exp_date != '' AND exp_date <= (CURRENT_DATE + INTERVAL '30 days')::text AND current_qty > 0").get()).cnt;
     ok(res, { total, active, held, totalQty, expiring, active_lots: active, total_qty: totalQty, held_lots: held, expiring_soon: expiring }); return;
   }
   if (pathname === '/api/lots' && method === 'GET') {
@@ -14513,7 +14646,7 @@ async function handleRequest(req, res) {
       const ym = year + String(month).padStart(2, '0');
       for (const r of rows) { await upsertBal.run(r.acc_code, ym, r.opening_dr, r.opening_cr, r.period_dr, r.period_cr, r.closing_dr, r.closing_cr); }
     });
-    try { txBal(); } catch (e) { /* 캐시 저장 실패는 무시 */ }
+    try { await txBal(); } catch (e) { /* 캐시 저장 실패는 무시 */ }
     ok(res, resp); return;
   }
 
@@ -14770,7 +14903,7 @@ async function handleRequest(req, res) {
         }
         return { id: entryId, entry_no, total_amount: totalDebit };
       });
-      const entryResult = createEntry();
+      const entryResult = await createEntry();
       ok(res, entryResult); return;
     } catch (e) { fail(res, 500, '수동 분개 생성 실패: ' + e.message); return; }
   }
@@ -14963,12 +15096,12 @@ async function runAutoOrderScheduler() {
     if (orderQty <= 0) continue;
 
     // PO 생성 (status='sent'로 바로 발송 상태)
-    const poNumber = generatePoNumber();
+    const poNumber = await generatePoNumber();
     // origin 결정
     const _schedOriginProd = await db.prepare('SELECT origin FROM products WHERE product_code=?').get(item.product_code);
     const _schedOrigin = (_schedOriginProd && _schedOriginProd.origin) || '한국';
     const tx = db.transaction(async () => {
-      const hdr = db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, total_qty, notes, material_status, process_status, origin, po_date)
+      const hdr = await db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, total_qty, notes, material_status, process_status, origin, po_date)
         VALUES (?,?,?,?,?,?,?,?,?,date('now','localtime'))`).run(
         poNumber, '자동발주', item.vendor_name || '', 'sent', orderQty, '자동발주 스케줄러', 'sent', 'waiting', _schedOrigin
       );
@@ -14978,7 +15111,7 @@ async function runAutoOrderScheduler() {
       await db.prepare('UPDATE auto_order_items SET last_ordered_at=? WHERE id=?').run(new Date().toISOString(), item.id);
       return { po_id: Number(hdr.lastInsertRowid), po_number: poNumber };
     });
-    const result = tx();
+    const result = await tx();
 
     // 활동 로그
     logPOActivity(result.po_id, 'auto_order', {
@@ -15086,7 +15219,7 @@ async function runDeadlineAlertCheck() {
   console.log(`[납기알림] ${today} 실행`);
 
   // due_date가 오늘~3일 후인 미완료 PO 조회
-  const upcomingPOs = db.prepare(`
+  const upcomingPOs = await db.prepare(`
     SELECT h.po_id, h.po_number, h.vendor_name, h.due_date as expected_date, h.total_qty, h.po_date
     FROM po_header h
     WHERE h.due_date >= date('now') AND h.due_date <= date('now','+3 days')

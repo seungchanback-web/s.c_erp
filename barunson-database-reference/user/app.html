@@ -2307,21 +2307,21 @@ function closeMegaMenu() { /* no-op */ }
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:14px;margin-bottom:12px">상태별 분포</div>
-        <canvas id="invChartStatus" height="220"></canvas>
+        <div style="position:relative;height:220px"><canvas id="invChartStatus"></canvas></div>
       </div>
       <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:14px;margin-bottom:12px">생산지별 현황</div>
-        <canvas id="invChartOrigin" height="220"></canvas>
+        <div style="position:relative;height:220px"><canvas id="invChartOrigin"></canvas></div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:14px;margin-bottom:12px">가용일수 분포</div>
-        <canvas id="invChartDays" height="220"></canvas>
+        <div style="position:relative;height:220px"><canvas id="invChartDays"></canvas></div>
       </div>
       <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:14px;margin-bottom:12px">브랜드별 긴급/위험 품목</div>
-        <canvas id="invChartBrand" height="220"></canvas>
+        <div style="position:relative;height:220px"><canvas id="invChartBrand"></canvas></div>
       </div>
     </div>
     <!-- 주요 지표 요약 테이블 -->
@@ -3914,23 +3914,25 @@ function closeMegaMenu() { /* no-op */ }
         <table id="pmTable" style="table-layout:fixed;width:100%">
           <colgroup>
             <col style="width:8%">
-            <col style="width:12%">
+            <col style="width:11%">
+            <col style="width:6%">
             <col style="width:6%">
             <col style="width:6%">
             <col style="width:4%">
             <col style="width:5%">
-            <col style="width:8%">
-            <col style="width:18%">
+            <col style="width:7%">
+            <col style="width:16%">
             <col style="width:3%">
             <col style="width:4%">
-            <col style="width:6%">
-            <col style="width:8%">
+            <col style="width:5%">
+            <col style="width:7%">
           </colgroup>
           <thead><tr>
             <th>제품코드</th>
             <th>품목명</th>
             <th>브랜드</th>
             <th>카테고리</th>
+            <th>운영구분</th>
             <th>단위</th>
             <th>상태</th>
             <th>원자재코드</th>
@@ -3941,7 +3943,7 @@ function closeMegaMenu() { /* no-op */ }
             <th></th>
           </tr></thead>
           <tbody id="pmTableBody">
-            <tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
+            <tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -4067,6 +4069,11 @@ function closeMegaMenu() { /* no-op */ }
     </div>
     <div class="form-row">
       <div class="form-group"><label>카테고리</label><input type="text" id="pmCategory" placeholder="청첩장, 봉투 등"></div>
+      <div class="form-group"><label style="color:#6d28d9;font-weight:600">운영구분</label>
+        <select id="pmOpCategory" style="border:1px solid #6d28d9;border-radius:4px">
+          <option value="">미분류</option><option value="운영품목">운영품목</option><option value="소진후단종">소진 후 단종</option><option value="이력없음">이력없음</option><option value="기타">기타</option>
+        </select>
+      </div>
       <div class="form-group"><label>단위</label><input type="text" id="pmUnit" placeholder="EA" style="width:80px"></div>
       <div class="form-group"><label>상태</label>
         <select id="pmStatus"><option value="active">운영중</option><option value="inactive">중단</option></select>
@@ -4584,7 +4591,7 @@ function closeMegaMenu() { /* no-op */ }
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:13px;color:#64748b">더기프트 세트 완제품 재고 현황</div>
       <div style="display:flex;gap:8px">
-        <a href="/gift-set" target="_blank" style="font-size:12px;padding:6px 14px;background:#8b5cf6;color:#fff;border-radius:6px;text-decoration:none;font-weight:600">직원용 페이지 열기 ↗</a>
+        <a href="javascript:void(0)" onclick="window.open((_BASE_PATH||'')+'/gift-set','_blank')" style="font-size:12px;padding:6px 14px;background:#8b5cf6;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;cursor:pointer">직원용 페이지 열기 ↗</a>
         <button onclick="loadPsOverview()" style="font-size:12px;padding:6px 14px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">🔄 새로고침</button>
       </div>
     </div>
@@ -6805,6 +6812,7 @@ const COLS_STOCK=[
 
 const COLS_ORDER=[
   {k:'상태',w:40,special:'statusBadge',label:'상태'},
+  {k:'운영구분',w:60,special:'opCategory',label:'운영구분'},
   {k:'제품코드',w:88,special:'productCode',label:'제품코드'},
   {k:'품목명',w:100,special:'productName',label:'품목명'},
   {k:'가용재고',w:65,special:'availStock',num:true,label:'가용재고'},
@@ -7127,7 +7135,8 @@ function switchInvMainTab(tab){
     if(tableArea) tableArea.style.display='none';
     if(analysisArea) analysisArea.style.display='';
     if(filterBar) filterBar.style.display='none';
-    renderAnalysisTab();
+    // Chart.js는 display:none→block 직후 레이아웃 미계산 상태에서 캔버스 크기 폭발 → rAF로 1프레임 지연
+    requestAnimationFrame(()=>renderAnalysisTab());
   }
 }
 
@@ -7454,15 +7463,21 @@ function renderAnalysisTab(){
     </div>`;
 }
 
+function _resetCanvas(canvasId){
+  const c=document.getElementById(canvasId);if(!c)return null;
+  c.style.width='100%';c.style.height='220px';
+  c.width=c.parentElement.offsetWidth-32;c.height=220;
+  return c;
+}
 function renderDonut(canvasId,labels,data,colors){
   if(typeof Chart==='undefined')return;
-  const ctx=document.getElementById(canvasId);if(!ctx)return;
+  const ctx=_resetCanvas(canvasId);if(!ctx)return;
   if(_invCharts[canvasId])_invCharts[canvasId].destroy();
   _invCharts[canvasId]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11}}}}}});
 }
 function renderBar(canvasId,labels,data,colors){
   if(typeof Chart==='undefined')return;
-  const ctx=document.getElementById(canvasId);if(!ctx)return;
+  const ctx=_resetCanvas(canvasId);if(!ctx)return;
   if(_invCharts[canvasId])_invCharts[canvasId].destroy();
   _invCharts[canvasId]=new Chart(ctx,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors.length===1?colors[0]:colors,borderWidth:0,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:canvasId==='invChartBrand'?'y':'x',plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f1f5f9'}}}}});
 }
@@ -12455,6 +12470,7 @@ function renderGauge(rate, ordered, received){
 
 function renderVendorBars(vendors){
   const el=document.getElementById('dashVendorBars');
+  if(!el) return;
   if(!vendors||!vendors.length){el.innerHTML='<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center">발주 데이터 없음</div>';return;}
   const maxCnt=Math.max(...vendors.map(v=>v.count));
   el.innerHTML=vendors.map(v=>{
@@ -12492,9 +12508,10 @@ function loadPurchaseTable(){
   fetch('/api/purchases?year=2026').then(r=>r.json()).then(resp=>{
     const rows=resp.data||resp||[];
     const tb=document.getElementById('purchaseTableBody');
+    if(!tb) return;
     if(!rows||!rows.length){
       tb.innerHTML='<tr><td colspan="16" style="text-align:center;color:var(--text-muted);padding:20px">거래명세서 데이터 없음 — 거래명세 메뉴에서 등록하세요</td></tr>';
-      document.getElementById('purchaseSummaryInfo').textContent='';
+      const si=document.getElementById('purchaseSummaryInfo'); if(si) si.textContent='';
       return;
     }
 
@@ -12552,9 +12569,9 @@ function loadPurchaseTable(){
     });
 
     tb.innerHTML=html;
-    document.getElementById('purchaseSummaryInfo').textContent=`총 매입수량 ${grandTotalQty.toLocaleString()} | 총 매입금액 ${grandTotalAmt.toLocaleString()}원`;
+    const si2=document.getElementById('purchaseSummaryInfo'); if(si2) si2.textContent=`총 매입수량 ${grandTotalQty.toLocaleString()} | 총 매입금액 ${grandTotalAmt.toLocaleString()}원`;
   }).catch(()=>{
-    document.getElementById('purchaseTableBody').innerHTML='<tr><td colspan="16" style="text-align:center;color:var(--text-muted);padding:20px">데이터 로딩 실패</td></tr>';
+    const tb2=document.getElementById('purchaseTableBody'); if(tb2) tb2.innerHTML='<tr><td colspan="16" style="text-align:center;color:var(--text-muted);padding:20px">데이터 로딩 실패</td></tr>';
   });
 }
 
@@ -16079,7 +16096,7 @@ function renderInvoiceList(){
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:600;color:var(--primary)">${(inv.amount||0).toLocaleString()}원</span>
-          ${inv.file_name?`<a href="/api/invoices/${inv.invoice_id}/file" class="btn btn-sm" target="_blank">파일</a>`:''}
+          ${inv.file_name?`<a href="javascript:void(0)" onclick="window.open((_BASE_PATH||'')+'/api/invoices/${inv.invoice_id}/file','_blank')" class="btn btn-sm">파일</a>`:''}
           <button class="btn btn-sm" onclick="deleteInvoice(${inv.invoice_id})" style="color:var(--danger)">삭제</button>
         </div>
       </div>
@@ -17512,11 +17529,11 @@ async function syncDDProducts() {
 }
 
 function downloadProductTemplate() {
-  const headers = ['제품코드','품목명','브랜드','생산지','원재료코드','원재료명','절','조판','제지사','메모'];
-  const example = ['BI202','아뜰란스','바른손카드','한국','BP1360','120레이드 진주','2','12','대한',''];
+  const headers = ['제품코드','품목명','브랜드','생산지','운영구분','원재료코드','원재료명','절','조판','제지사','메모'];
+  const example = ['BI202','아뜰란스','바른손카드','한국','운영품목','BP1360','120레이드 진주','2','12','대한',''];
   const ws = XLSX.utils.aoa_to_sheet([headers, example]);
   // 컬럼 폭 설정
-  ws['!cols'] = [{ wch:12 },{ wch:16 },{ wch:14 },{ wch:8 },{ wch:12 },{ wch:18 },{ wch:5 },{ wch:5 },{ wch:10 },{ wch:16 }];
+  ws['!cols'] = [{ wch:12 },{ wch:16 },{ wch:14 },{ wch:8 },{ wch:10 },{ wch:12 },{ wch:18 },{ wch:5 },{ wch:5 },{ wch:10 },{ wch:16 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '품목등록');
   XLSX.writeFile(wb, '바른컴퍼니_품목등록_양식.xlsx');
@@ -17545,6 +17562,7 @@ async function handlePMExcel(file) {
       '제지사': 'paper_maker', 'paper_maker': 'paper_maker',
       '품목명': 'product_name', 'product_name': 'product_name',
       '메모': 'memo', 'memo': 'memo',
+      '운영구분': 'op_category', 'op_category': 'op_category',
       '신제품': 'is_new_product', 'is_new_product': 'is_new_product', 'new': 'is_new_product'
     };
 
@@ -17605,7 +17623,7 @@ function renderProductMgmt(){
 
   const tbody=document.getElementById('pmTableBody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
     return;
   }
 
@@ -17614,11 +17632,15 @@ function renderProductMgmt(){
     const stLabel=p.status==='active'?'운영중':'중단';
     const newBadge = p.is_new_product ? '<span style="display:inline-block; padding:1px 6px; background:#fef3c7; color:#d97706; border-radius:4px; font-size:11px; margin-left:4px;">신제품</span>' : '';
     const cellStyle = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px';
+    const opCat = p.op_category || '';
+    const opColors = {'운영품목':['#059669','#ecfdf5'],'소진후단종':['#dc2626','#fef2f2'],'이력없음':['#d97706','#fffbeb'],'기타':['#6b7280','#f3f4f6']};
+    const [opFg,opBg] = opColors[opCat] || ['#94a3b8','#f8fafc'];
     return`<tr>
       <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${esc(p.product_code)}</td>
       <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
+      <td style="${cellStyle};text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${opFg};background:${opBg}">${opCat||'-'}</span></td>
       <td style="${cellStyle};text-align:center;color:#475569">${esc(p.unit||'EA')}</td>
       <td style="${cellStyle}"><span class="status-badge ${stCls}" style="font-size:10px">${stLabel}</span></td>
       <td style="${cellStyle}" title="${esc(p.material_code||'')}">${esc(p.material_code||'')}</td>
@@ -17833,6 +17855,7 @@ function showAddProductModal(){
   document.getElementById('pmBrand').value='바른손카드';
   document.getElementById('pmOrigin').value=pmTab;
   document.getElementById('pmCategory').value='';
+  document.getElementById('pmOpCategory').value='';
   document.getElementById('pmStatus').value='active';
   document.getElementById('pmMatCode').value='';
   document.getElementById('pmMatName').value='';
@@ -17858,6 +17881,7 @@ function editProduct(id){
   document.getElementById('pmBrand').value=p.brand||'';
   document.getElementById('pmOrigin').value=p.origin||'한국';
   document.getElementById('pmCategory').value=p.category||'';
+  document.getElementById('pmOpCategory').value=p.op_category||'';
   document.getElementById('pmStatus').value=p.status||'active';
   document.getElementById('pmMatCode').value=p.material_code||'';
   document.getElementById('pmMatName').value=p.material_name||'';
@@ -17880,6 +17904,7 @@ async function saveProduct(){
     brand:document.getElementById('pmBrand').value.trim(),
     origin:document.getElementById('pmOrigin').value,
     category:document.getElementById('pmCategory').value.trim(),
+    op_category:document.getElementById('pmOpCategory').value,
     status:document.getElementById('pmStatus').value,
     material_code:document.getElementById('pmMatCode').value.trim(),
     material_name:document.getElementById('pmMatName').value.trim(),
@@ -21355,7 +21380,7 @@ async function toggleVendorDetail(vendorName, yr, mo) {
 // ===== 전체 검증 기능 — XERP 실데이터 vs 화면 데이터 일괄 비교 =====
 async function runClosingVerifyAll() {
   var yr = document.getElementById('closingYear').value;
-  var mo = document.getElementById('closingMonth').value;
+  var mo = document.getElementById('closingFromMonth').value;
   var btn = document.getElementById('closingVerifyBtn');
   var resultDiv = document.getElementById('closingVerifyResult');
   if (btn) btn.disabled = true;
@@ -23748,6 +23773,7 @@ function renderExecChannels(channels, barData) {
   });
   // 테이블
   var tbl = document.getElementById('execChannelTable');
+  if(!tbl) return;
   var total = values.reduce(function(a,b){return a+b},0);
   var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
   html += '<thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">채널</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">매출</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#64748b">비중</th></tr></thead><tbody>';

@@ -58,7 +58,8 @@
 
 | 테이블명 | 용도 |
 |---------|------|
-| CallCenterLog | 콜센터 시스템 이벤트 로그 (9.0M건, 상담 내용 아님) |
+| CallCenterLog | 콜센터 시스템 이벤트 로그 (9.0M건, 레거시 - CallConnect_Log로 전환 중) |
+| CallConnect_Log | 콜센터 인바운드 통화 로그 (2026.04~ 신규, 구 데이터는 ~3개월 내 마이그레이션 예정) |
 | CS_HappyCall | 해피콜 |
 | S2_CsPoll | CS 설문 |
 | S2_CsPollAns | CS 설문 응답 |

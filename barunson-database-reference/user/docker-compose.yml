@@ -9,11 +9,14 @@ services:
       - PORT=12026
       - DATA_DIR=/app/data
       - UPLOAD_DIR=/app/uploads
+      - LOG_DIR=/app/logs
     volumes:
       - app-data:/app/data
       - app-uploads:/app/uploads
+      - app-logs:/app/logs
     restart: unless-stopped
 
 volumes:
   app-data:
   app-uploads:
+  app-logs:

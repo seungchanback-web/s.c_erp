@@ -29,6 +29,11 @@ AI가 쿼리/애플리케이션 작성 시 이 문서들을 참고합니다.
 - 인덱스 확인 쿼리: `SELECT i.name, COL_NAME(ic.object_id, ic.column_id), i.type_desc FROM sys.indexes i JOIN sys.index_columns ic ON i.object_id=ic.object_id AND i.index_id=ic.index_id WHERE i.object_id=OBJECT_ID('테이블명') ORDER BY i.name, ic.key_ordinal`
 
 
+### 콜센터 로그 (bar_shop1)
+- **2026.04부터** 신규 인바운드 통화 로그는 **CallConnect_Log** 테이블에 기록
+- 구 로그는 **CallCenterLog** (9.0M건, 레거시)
+- 구 데이터 마이그레이션 ~2026.07 완료 예정 → **마이그레이션 완료 전까지 콜 로그 조회 시 양쪽 테이블 모두 참조 필수**
+
 ### 테이블 찾기
 - 목적별 테이블 위치는 **[HELP.md](HELP.md)** 참조 (사용자, CS/문의, 주문, 상품, 배송, XERP 등)
 - **XERP는 활성 상태** (2026년 3월 기준 최신 데이터 확인됨, "2023년 비활성" 아님)

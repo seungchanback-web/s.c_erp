@@ -341,7 +341,8 @@ SELECT * FROM S2_Card WHERE Card_Code LIKE 'BC%'
 |--------|-----------|---------|
 | CUSTOM_SAMPLE_ORDER_ITEM | 23.9M | 반드시 인덱스 컬럼 조건 필요 |
 | S2_UserCardView | 22.7M | TOP 절 사용 권장 |
-| CallCenterLog | 9.0M | 기간 조건 필수 |
+| CallCenterLog | 9.0M | 기간 조건 필수 (레거시, CallConnect_Log로 전환 중) |
+| CallConnect_Log | 신규 | 기간 조건 필수, call_in_dt 기준 조회 |
 | LOG_MST | 8.5M | 기간 조건 필수 |
 | custom_order_history | 8.2M | 날짜 범위 필수 |
 

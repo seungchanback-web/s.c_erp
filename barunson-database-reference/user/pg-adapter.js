@@ -58,6 +58,8 @@ function convertSqliteFunctions(sql) {
   s = s.replace(/date\(\s*'now'\s*\)/gi, 'CURRENT_DATE');
   // AUTOINCREMENT (in rare inline DDL)
   s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+  // SQLite INTEGER PRIMARY KEY auto-increments; in PG needs SERIAL
+  s = s.replace(/\bid\s+INTEGER\s+PRIMARY\s+KEY\b(?!\s+AUTOINCREMENT)/gi, 'id SERIAL PRIMARY KEY');
   // || for string concat is same in PostgreSQL — OK
   // IFNULL → COALESCE
   s = s.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');
@@ -129,10 +131,30 @@ class Statement {
   }
 
   async run(...params) {
-    const result = await pool.query(this._sql, params);
+    // INSERT 문에 RETURNING 자동 추가 (lastInsertRowid 지원)
+    let sql = this._sql;
+    if (/^\s*INSERT\s/i.test(sql) && !/RETURNING/i.test(sql)) {
+      const m = sql.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
+      const table = m ? m[1] : '';
+      const cols = m ? m[2] : '';
+      const pkMap = { po_header:'po_id', po_items:'item_id', users:'user_id', vendors:'vendor_id', products:'id', receipts:'receipt_id', defects:'id', bom_header:'bom_id', bom_items:'id', accessories:'id', work_orders:'wo_id', product_notes:'product_code', product_field_history:'id', gift_sets:'id', gift_set_bom:'id', gift_set_transactions:'id', error_logs:'id', audit_log:'id' };
+      const pk = pkMap[table] || 'id';
+      // If PK column is 'id' and not in the INSERT columns, add auto-generated id
+      if (pk === 'id' && cols && !cols.split(',').map(c=>c.trim()).includes('id')) {
+        const colList = cols.trim();
+        const valMatch = sql.match(/VALUES\s*\(([^)]+)\)/i);
+        if (valMatch) {
+          sql = sql.replace(`(${colList})`, `(id, ${colList})`);
+          sql = sql.replace(`(${valMatch[1]})`, `((SELECT COALESCE(MAX(id),0)+1 FROM ${table}), ${valMatch[1]})`);
+        }
+      }
+      sql = sql.replace(/;?\s*$/, '') + ' RETURNING ' + pk;
+    }
+    const result = await pool.query(sql, params);
+    const firstRow = result.rows && result.rows[0];
     return {
       changes: result.rowCount,
-      lastInsertRowid: result.rows && result.rows[0] ? result.rows[0].id : undefined
+      lastInsertRowid: firstRow ? Number(firstRow[Object.keys(firstRow)[0]]) : undefined
     };
   }
 }
@@ -152,6 +174,8 @@ async function exec(sql) {
   let s = convertSqliteFunctions(sql);
   // AUTOINCREMENT 변환
   s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+  // SQLite INTEGER PRIMARY KEY auto-increments; in PG needs SERIAL
+  s = s.replace(/\bid\s+INTEGER\s+PRIMARY\s+KEY\b(?!\s+AUTOINCREMENT)/gi, 'id SERIAL PRIMARY KEY');
   // REAL → DOUBLE PRECISION
   s = s.replace(/\bREAL\b/g, 'DOUBLE PRECISION');
   // INSERT OR IGNORE/REPLACE
