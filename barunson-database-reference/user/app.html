@@ -2610,6 +2610,7 @@ function closeMegaMenu() { /* no-op */ }
         <input type="text" id="poNotes" placeholder="공통 비고" style="width:200px">
       </div>
       <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="downloadCreatePOExcel()" style="background:#27ae60;color:#fff">📥 엑셀 미리보기</button>
         <button class="btn btn-primary" onclick="saveAllPOs()">선택 발주서 일괄 저장</button>
       </div>
     </div>
@@ -13175,12 +13176,17 @@ async function saveAllPOs(){
       render();
       showPage('po-list');
       if(currentOriginContext==='중국'){
-        // 중국 발주 → 자동으로 엑셀 다운로드 제안
-        setTimeout(()=>{
-          if(confirm(`${okCount}개 거래처 발주서 저장 완료!\n중국 발주서 엑셀을 다운로드하시겠습니까?`)){
-            downloadPOExcel();
+        // 중국 발주 → poList 로드 완료 후 엑셀 다운로드 제안
+        // loadPOList는 showPage('po-list')에서 이미 호출됨 → 콜백으로 처리
+        const waitForPO = setInterval(()=>{
+          if(poList && poList.length > 0){
+            clearInterval(waitForPO);
+            if(confirm(`${okCount}개 거래처 발주서 저장 완료!\n중국 발주서 엑셀을 다운로드하시겠습니까?`)){
+              downloadPOExcel();
+            }
           }
-        }, 500);
+        }, 300);
+        setTimeout(()=>clearInterval(waitForPO), 15000); // 15초 타임아웃
       } else {
         alert(`${okCount}개 거래처 발주서 모두 저장 완료!`);
       }
@@ -13851,7 +13857,7 @@ function renderPOStatusPipeline(po) {
 }
 
 // ===== PO LIST (카드 기반 발주진행 현황) =====
-function loadPOList(){
+function loadPOList(callback){
   let poUrl = '/api/po?include=items';
   if (currentOriginContext) poUrl += '&origin=' + encodeURIComponent(currentOriginContext);
   fetch(poUrl).then(r=>r.json()).then(resp=>{
@@ -13861,6 +13867,7 @@ function loadPOList(){
     RAW.forEach(p=>{if(p._후공정업체)pvMap[p['제품코드']]=p._후공정업체;});
     poList.forEach(po=>{(po.items||[]).forEach(it=>{it._postVendor=pvMap[it.product_code]||'';});});
     renderPOList();
+    if(typeof callback==='function') callback();
   }).catch(()=>{
     document.getElementById('poCardContainer').innerHTML='<div style="text-align:center;color:var(--text-muted);padding:40px">서버 연결 실패</div>';
   });
@@ -13942,6 +13949,73 @@ function renderPOList(){
   });
 
   container.innerHTML = html;
+}
+
+// 발주생성 페이지에서 저장 전 현재 목록 엑셀 다운로드
+function downloadCreatePOExcel(){
+  const {matGroups, postGroups, totalItems} = groupByVendor();
+  if(!totalItems){alert('발주수량이 입력된 품목이 없습니다.');return;}
+
+  const isChinaContext = currentOriginContext==='중국';
+  const deliveryDate = document.getElementById('poDeliveryDate')?.value || '';
+  const notes = document.getElementById('poNotes')?.value || '';
+  const rows=[];
+
+  Object.entries(matGroups).forEach(([vendor,list])=>{
+    list.forEach(p=>{
+      const code = p['제품코드']||p['품목코드']||'';
+      const info = p._info||{};
+      if(isChinaContext){
+        rows.push({
+          '거래처':vendor,
+          '카드번호':code,
+          '브랜드':p['브랜드']||'',
+          '품목명':p['품목명']||info['원재료용지명']||'',
+          '발주수량':p._qty||0,
+          '납기일':deliveryDate,
+          '비고':notes
+        });
+      } else {
+        rows.push({
+          '거래처':vendor,
+          '제품코드':code,
+          '브랜드':p['브랜드']||'',
+          '원자재코드':info['원자재코드']||'',
+          '원재료용지명':info['원재료용지명']||'',
+          '절':info['절']||'',
+          '조판':info['조판']||'',
+          '발주수량':p._qty||0,
+          '발주(R)':toR(p._qty, code),
+          '납기일':deliveryDate,
+          '비고':notes
+        });
+      }
+    });
+  });
+
+  // 후공정
+  Object.entries(postGroups).forEach(([vendor,list])=>{
+    list.forEach(it=>{
+      rows.push({
+        '거래처':vendor,
+        '제품코드':it.code,
+        '브랜드':it.brand||'',
+        '공정':it.process,
+        '발주수량':it.qty||0,
+        '납기일':deliveryDate,
+        '비고':notes,
+        '유형':'후공정'
+      });
+    });
+  });
+
+  if(!rows.length){alert('다운로드할 데이터가 없습니다.');return;}
+
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,isChinaContext?'중국발주':'발주목록');
+  const origin=currentOriginContext||'전체';
+  XLSX.writeFile(wb,`발주생성_${origin}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function downloadPOExcel(){
