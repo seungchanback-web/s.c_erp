@@ -1786,8 +1786,7 @@ function closeMegaMenu() { /* no-op */ }
       </div>
     </div>
     <span id="erpSyncBadge" style="display:none;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap"></span>
-    <button class="btn btn-sm" onclick="syncDDProducts()" id="ddSyncBtn" style="background:#e11d48;color:#fff;border-color:#e11d48">DD 동기화</button>
-    <button class="btn btn-primary btn-sm" onclick="loadXerpInventory(true)" id="refreshBtn">ERP 동기화</button>
+    <button class="btn btn-primary btn-sm" onclick="syncAllDB()" id="refreshBtn">DB 동기화</button>
   </div>
 </div>
 
@@ -8115,7 +8114,7 @@ function refreshData(){
   btn.disabled=true;btn.textContent='갱신 중...';
   st.textContent='ERP 엑셀 파싱 중...';
   fetch('/api/refresh').then(r=>r.json()).then(d=>{
-    btn.disabled=false;btn.textContent='ERP 동기화';
+    btn.disabled=false;btn.textContent='DB 동기화';
     if(d.ok){
       st.textContent=d.message;st.style.color='var(--success)';
       fetch('/data.json').then(r=>r.json()).then(j=>{
@@ -8128,7 +8127,7 @@ function refreshData(){
       st.textContent='오류: '+d.error;st.style.color='var(--urgent)';
     }
   }).catch(e=>{
-    btn.disabled=false;btn.textContent='ERP 동기화';
+    btn.disabled=false;btn.textContent='DB 동기화';
     st.textContent='서버 연결 실패';st.style.color='var(--urgent)';
   });
 }
@@ -17874,6 +17873,34 @@ async function syncProductInfo() {
     loadProductMgmt();
   } catch (e) {
     alert('동기화 오류: ' + e.message);
+  }
+}
+
+// ===== 통합 DB 동기화 (DD 상품 마스터 + XERP 재고/출고) =====
+async function syncAllDB() {
+  const btn = document.getElementById('refreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '동기화 중...'; }
+  try {
+    // 1. 디얼디어 모드면 DD 상품 마스터 동기화 먼저 시도 (실패해도 무시)
+    if (typeof _currentCompany !== 'undefined' && _currentCompany === 'dd') {
+      try {
+        const resp = await fetch('/api/dd/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const j = await resp.json();
+        if (j && j.ok && j.data) {
+          console.log(`[DB 동기화] DD 상품 마스터: 신규 ${j.data.inserted}, 업데이트 ${j.data.updated}`);
+        } else {
+          console.warn('[DB 동기화] DD 상품 마스터 동기화 실패 (무시):', j && j.error);
+        }
+      } catch (e) {
+        console.warn('[DB 동기화] DD 상품 마스터 동기화 오류 (무시):', e.message);
+      }
+    }
+    // 2. XERP 재고/출고 동기화 (핵심)
+    await loadXerpInventory(true);
+  } catch (e) {
+    alert('DB 동기화 오류: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'DB 동기화'; }
   }
 }
 
