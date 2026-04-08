@@ -11,6 +11,21 @@ const http = require('http');
 const BASE = { host: 'localhost', port: 12026 };
 const DELAY_MS = 100;
 
+// ─── SAFETY GUARD: 운영 DB 오염 방지 ────────────────────────────────────────
+// 이 테스트는 XSS/SQL 인젝션/더미 데이터를 POST하므로 반드시 localhost만 허용.
+// 원격/운영 서버에 실행 시 즉시 중단.
+if (BASE.host !== 'localhost' && BASE.host !== '127.0.0.1') {
+  console.error('❌ SAFETY GUARD: 이 테스트는 localhost에서만 실행 가능합니다.');
+  console.error('   원격/운영 DB에 테스트 찌꺼기를 남길 수 있습니다.');
+  process.exit(1);
+}
+// 환경변수로 이중 확인 (실수로 로컬에 연결되어 있지만 DB는 운영일 수 있음)
+if (process.env.ALLOW_TEST === undefined && process.env.NODE_ENV === 'production') {
+  console.error('❌ SAFETY GUARD: NODE_ENV=production 환경에서 테스트 실행 금지');
+  console.error('   강제 실행하려면 ALLOW_TEST=1 환경변수를 설정하세요.');
+  process.exit(1);
+}
+
 // ─── result tracking ─────────────────────────────────────────────────────────
 let total = 0, passed = 0, failed = 0;
 const failures = [];

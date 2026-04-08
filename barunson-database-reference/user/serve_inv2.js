@@ -3507,6 +3507,42 @@ async function handleRequest(req, res) {
   //  NEW API: VENDORS
   // ════════════════════════════════════════════════════════════════════
 
+  // 거래처 입력값 검증: 빈 이름/스크립트/SQL 인젝션/명백한 테스트 패턴 차단
+  // (실제 거래처는 모두 통과시키고, 테스트 찌꺼기 유입만 막는 보호막)
+  function validateVendorInput(body) {
+    const name = (body && body.name || '').trim();
+    if (!name) return '거래처명은 필수입니다 (빈 이름 불가)';
+    if (name.length < 2) return '거래처명은 2자 이상이어야 합니다';
+    if (name.length > 100) return '거래처명은 100자를 초과할 수 없습니다';
+    // XSS 방지
+    if (/<\s*script/i.test(name) || /<\s*\/\s*script/i.test(name)) return '거래처명에 스크립트 태그를 사용할 수 없습니다';
+    if (/on\w+\s*=/i.test(name)) return '거래처명에 이벤트 핸들러를 포함할 수 없습니다';
+    // SQL 인젝션 명시 패턴 (prepared statement라 실제로 뚫리진 않지만 쓰레기 저장 방지)
+    if (/drop\s+table/i.test(name) || /;\s*delete\s+from/i.test(name) || /union\s+select/i.test(name)) {
+      return '거래처명에 SQL 예약어 패턴을 사용할 수 없습니다';
+    }
+    // 명백한 테스트 패턴 차단
+    const testPatterns = [
+      /^test$/i,
+      /^testvendor/i,
+      /^FT[-_]/i,
+      /^FT-?(Customer|Supplier|Cust|Sup)/i,
+      /^NoAuth/i,
+      /^테스트업체[-_]/,
+      /^dummy/i,
+      /^sample[-_]/i,
+      /^placeholder/i
+    ];
+    if (testPatterns.some(re => re.test(name))) {
+      return '테스트용 이름은 사용할 수 없습니다';
+    }
+    // 제어문자 (깨진 인코딩 / null byte 등)
+    if (/[\x00-\x1F\x7F]/.test(name)) return '거래처명에 제어문자를 사용할 수 없습니다';
+    // 대체 문자(�) 포함 시 거부 (인코딩 손상)
+    if (name.includes('\uFFFD')) return '거래처명 인코딩이 손상되었습니다';
+    return null;
+  }
+
   if (pathname === '/api/vendors' && method === 'GET') {
     const rows = await db.prepare('SELECT * FROM vendors ORDER BY name').all();
     ok(res, rows);
@@ -3515,6 +3551,9 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/vendors' && method === 'POST') {
     const body = await readJSON(req);
+    // ── Validation: 빈 이름/스크립트/SQL 인젝션/테스트 패턴 차단 ──
+    const vErr = validateVendorInput(body);
+    if (vErr) { fail(res, 400, vErr); return; }
     const info = await db.prepare(`INSERT INTO vendors (vendor_code, name, type, contact, phone, email, email_cc, kakao, memo) VALUES (?,?,?,?,?,?,?,?,?)`).run(
       body.vendor_code || '', body.name || '', body.type || '', body.contact || '',
       body.phone || '', body.email || '', body.email_cc || '', body.kakao || '', body.memo || ''
@@ -3547,6 +3586,11 @@ async function handleRequest(req, res) {
   if (vendorPut && method === 'PUT') {
     const id = parseInt(vendorPut[1]);
     const body = await readJSON(req);
+    // name 변경 시 validation 적용
+    if (body.name !== undefined) {
+      const vErr = validateVendorInput(body);
+      if (vErr) { fail(res, 400, vErr); return; }
+    }
     const fields = [];
     const params = { id };
     for (const col of ['vendor_code', 'name', 'type', 'contact', 'phone', 'email', 'email_cc', 'kakao', 'memo']) {
