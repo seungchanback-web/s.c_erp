@@ -7783,8 +7783,9 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/notes' && method === 'POST') {
     const body = await readJSON(req);
+    if (!body.vendor_id) { fail(res, 400, 'vendor_id는 필수입니다'); return; }
     const info = await db.prepare(`INSERT INTO vendor_notes (vendor_id, vendor_name, title, content, note_type, note_date) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      body.vendor_id || null,
+      body.vendor_id,
       body.vendor_name || '',
       body.title || '',
       body.content || '',
@@ -7977,7 +7978,7 @@ async function handleRequest(req, res) {
     let pi;
     try { pi = JSON.parse(fs.readFileSync(piPath, 'utf8')); } catch(e) { res.writeHead(500); res.end(JSON.stringify({error:'product_info.json not found'})); return; }
     const processes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
-    const insH = db.prepare('INSERT OR IGNORE INTO bom_header (product_code, product_name, brand) VALUES (?,?,?)');
+    const insH = db.prepare('INSERT INTO bom_header (product_code, product_name, brand) VALUES (?,?,?) ON CONFLICT (product_code) DO NOTHING');
     const insI = db.prepare('INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)');
     let count = 0;
     const txn = db.transaction(async () => {
@@ -9224,8 +9225,13 @@ async function handleRequest(req, res) {
 
   // GET /api/inspections
   if (pathname === '/api/inspections' && method === 'GET') {
-    const rows = await db.prepare('SELECT * FROM incoming_inspections ORDER BY created_at DESC LIMIT 200').all();
-    ok(res, rows);
+    try {
+      const rows = await db.prepare('SELECT * FROM incoming_inspections ORDER BY created_at DESC LIMIT 200').all();
+      ok(res, rows);
+    } catch (e) {
+      if (e.message.includes('does not exist')) ok(res, []);
+      else fail(res, 500, e.message);
+    }
     return;
   }
 
@@ -9234,7 +9240,9 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const passRate = body.total_qty > 0 ? Math.round(body.pass_qty / body.total_qty * 1000) / 10 : 0;
     const result = body.fail_qty > 0 ? (passRate < 90 ? 'rejected' : 'conditional') : 'passed';
-    const info = await db.prepare(`INSERT INTO incoming_inspections (po_id, po_number, vendor_name, inspection_date, inspector, result, items_json, total_qty, pass_qty, fail_qty, pass_rate, notes)
+    let info;
+    try {
+    info = await db.prepare(`INSERT INTO incoming_inspections (po_id, po_number, vendor_name, inspection_date, inspector, result, items_json, total_qty, pass_qty, fail_qty, pass_rate, notes)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       body.po_id || null, body.po_number || '', body.vendor_name || '',
       body.inspection_date || new Date().toISOString().slice(0, 10),
@@ -9254,6 +9262,10 @@ async function handleRequest(req, res) {
     }
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'inspection_create', 'inspections', info.lastInsertRowid, `수입검사: ${body.po_number || ''} → ${result}`, clientIP);
     ok(res, { inspection_id: info.lastInsertRowid, result, pass_rate: passRate });
+    } catch (e) {
+      if (e.message.includes('does not exist')) fail(res, 500, 'incoming_inspections 테이블이 없습니다. DB 관리자에게 테이블 생성을 요청하세요.');
+      else fail(res, 500, e.message);
+    }
     return;
   }
 
@@ -9276,7 +9288,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/ncr' && method === 'POST') {
     const body = await readJSON(req);
     const ncrNum = 'NCR' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + '-' + String(Date.now()).slice(-4);
-    const info = db.prepare(`INSERT INTO ncr (ncr_number, defect_id, inspection_id, po_id, vendor_name, product_code, ncr_type, description, severity, responsible, due_date)
+    const info = await db.prepare(`INSERT INTO ncr (ncr_number, defect_id, inspection_id, po_id, vendor_name, product_code, ncr_type, description, severity, responsible, due_date)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
       ncrNum, body.defect_id || null, body.inspection_id || null, body.po_id || null,
       body.vendor_name || '', body.product_code || '', body.ncr_type || 'process',
@@ -9298,8 +9310,8 @@ async function handleRequest(req, res) {
     ['status','root_cause','corrective_action','preventive_action','responsible','due_date','severity','description'].forEach(f => {
       if (body[f] !== undefined) { sets.push(`${f}=?`); vals.push(body[f]); }
     });
-    if (body.status === 'closed' && !ncr.closed_at) { sets.push("closed_at=datetime('now','localtime')"); }
-    sets.push("updated_at=datetime('now','localtime')");
+    if (body.status === 'closed' && !ncr.closed_at) { sets.push("closed_at=NOW()"); }
+    sets.push("updated_at=NOW()");
     vals.push(ncrId);
     await db.prepare(`UPDATE ncr SET ${sets.join(',')} WHERE ncr_id=?`).run(...vals);
     if (body.status && body.status !== ncr.status) {
@@ -10102,7 +10114,7 @@ async function handleRequest(req, res) {
       await db.prepare("INSERT INTO warehouses (code, name, location, description) VALUES (?, ?, ?, ?)").run(code, name, location || '', description || '');
       ok(res, { message: '창고 등록 완료' });
     } catch (e) {
-      if (e.message.includes('UNIQUE')) fail(res, 409, '이미 존재하는 창고코드입니다');
+      if (e.message.includes('UNIQUE') || e.message.includes('duplicate key') || e.message.includes('unique constraint')) fail(res, 409, '이미 존재하는 창고코드입니다');
       else fail(res, 500, e.message);
     }
     return;
@@ -11374,8 +11386,8 @@ async function handleRequest(req, res) {
     if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
     salesKpiCache = null; salesKpiCacheTime = 0;
     const d1 = await db.prepare("DELETE FROM sales_daily_cache WHERE sale_date >= date('now', '-7 days')").run();
-    const d2 = await db.prepare("DELETE FROM sales_monthly_cache WHERE sale_month >= strftime('%Y-%m', 'now', '-2 months')").run();
-    const d3 = await db.prepare("DELETE FROM sales_product_cache WHERE sale_month >= strftime('%Y-%m', 'now', '-2 months')").run();
+    const d2 = await db.prepare("DELETE FROM sales_monthly_cache WHERE sale_month >= TO_CHAR(CURRENT_DATE - INTERVAL '2 months', 'YYYY-MM')").run();
+    const d3 = await db.prepare("DELETE FROM sales_product_cache WHERE sale_month >= TO_CHAR(CURRENT_DATE - INTERVAL '2 months', 'YYYY-MM')").run();
     ok(res, { message: '매출 캐시 초기화 완료', deleted: { daily: d1.changes, monthly: d2.changes, product: d3.changes } }); return;
   }
 
@@ -13051,7 +13063,7 @@ async function handleRequest(req, res) {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증 필요'); return; }
     const statusSummary = await db.prepare(`SELECT status, COUNT(*) AS cnt, SUM(ordered_qty) AS total_ordered, SUM(produced_qty) AS total_produced, SUM(defect_qty) AS total_defect, SUM(cost_total) AS total_cost FROM work_orders GROUP BY status`).all();
-    const monthlyOrders = await db.prepare(`SELECT strftime('%Y-%m', created_at) AS ym, COUNT(*) AS cnt, SUM(ordered_qty) AS total_qty FROM work_orders GROUP BY strftime('%Y-%m', created_at) ORDER BY ym DESC LIMIT 12`).all();
+    const monthlyOrders = await db.prepare(`SELECT TO_CHAR(created_at::timestamp, 'YYYY-MM') AS ym, COUNT(*) AS cnt, SUM(ordered_qty) AS total_qty FROM work_orders GROUP BY TO_CHAR(created_at::timestamp, 'YYYY-MM') ORDER BY ym DESC LIMIT 12`).all();
     const recentCompleted = await db.prepare(`SELECT * FROM work_orders WHERE status='completed' ORDER BY completed_date DESC LIMIT 10`).all();
     ok(res, { statusSummary, monthlyOrders, recentCompleted }); return;
   }
@@ -13930,7 +13942,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/mfg-cost/rates' && method === 'POST') {
     const body = await readJSON(req);
     const items = body.items || [body];
-    const upsert = db.prepare("INSERT INTO cost_rates (rate_type,rate_key,rate_value,unit,notes) VALUES (?,?,?,?,?) ON CONFLICT(rate_type,rate_key) DO UPDATE SET rate_value=excluded.rate_value, unit=excluded.unit, notes=excluded.notes, updated_at=datetime('now','localtime')");
+    const upsert = db.prepare("INSERT INTO cost_rates (rate_type,rate_key,rate_value,unit,notes) VALUES (?,?,?,?,?) ON CONFLICT(rate_type,rate_key) DO UPDATE SET rate_value=excluded.rate_value, unit=excluded.unit, notes=excluded.notes, updated_at=NOW()");
     for (const it of items) { await upsert.run(it.rate_type, it.rate_key, it.rate_value||0, it.unit||'', it.notes||''); }
     ok(res, { saved: items.length }); return;
   }
@@ -14006,13 +14018,14 @@ async function handleRequest(req, res) {
   }
 
   if (pathname === '/api/mfg-cost/summary' && method === 'GET') {
-    const latest = await db.prepare(`SELECT product_code, product_name, MAX(calc_date) AS calc_date,
-      material_cost, labor_cost, overhead_cost, outsource_cost, total_cost, unit_cost, qty
-      FROM mfg_cost_cards GROUP BY product_code ORDER BY product_name`).all();
-    const totals = db.prepare(`SELECT COALESCE(SUM(material_cost),0) AS material, COALESCE(SUM(labor_cost),0) AS labor,
+    const latest = await db.prepare(`SELECT product_code, MAX(product_name) AS product_name, MAX(calc_date) AS calc_date,
+      MAX(material_cost) AS material_cost, MAX(labor_cost) AS labor_cost, MAX(overhead_cost) AS overhead_cost,
+      MAX(outsource_cost) AS outsource_cost, MAX(total_cost) AS total_cost, MAX(unit_cost) AS unit_cost, MAX(qty) AS qty
+      FROM mfg_cost_cards GROUP BY product_code ORDER BY MAX(product_name)`).all();
+    const totals = await db.prepare(`SELECT COALESCE(SUM(material_cost),0) AS material, COALESCE(SUM(labor_cost),0) AS labor,
       COALESCE(SUM(overhead_cost),0) AS overhead, COALESCE(SUM(outsource_cost),0) AS outsource, COALESCE(SUM(total_cost),0) AS total
-      FROM (SELECT product_code, material_cost, labor_cost, overhead_cost, outsource_cost, total_cost FROM mfg_cost_cards
-      WHERE calc_date = (SELECT MAX(calc_date) FROM mfg_cost_cards c2 WHERE c2.product_code=mfg_cost_cards.product_code) GROUP BY product_code)`).get();
+      FROM (SELECT product_code, MAX(material_cost) AS material_cost, MAX(labor_cost) AS labor_cost, MAX(overhead_cost) AS overhead_cost, MAX(outsource_cost) AS outsource_cost, MAX(total_cost) AS total_cost FROM mfg_cost_cards
+      WHERE calc_date = (SELECT MAX(calc_date) FROM mfg_cost_cards c2 WHERE c2.product_code=mfg_cost_cards.product_code) GROUP BY product_code) sub`).get();
     ok(res, { cards: latest, totals: totals||{} }); return;
   }
 
