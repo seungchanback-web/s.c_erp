@@ -3934,12 +3934,16 @@ function closeMegaMenu() { /* no-op */ }
 <!-- PAGE: 품목관리 (Product Management) -->
 <!-- ============================================================ -->
 <div class="page" id="page-product-mgmt">
+  <!-- 법인 토글 (A안: 상단 토글 + 그 아래 생산지 탭) -->
+  <div style="display:flex;gap:0;margin-bottom:12px;border-bottom:2px solid var(--border)">
+    <button id="pmEntityBarunson" onclick="switchPMEntity('barunson')" style="padding:10px 20px;background:#6366f1;color:#fff;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-weight:700;font-size:13px">🏢 바른컴퍼니</button>
+    <button id="pmEntityDD" onclick="switchPMEntity('dd')" style="padding:10px 20px;background:#f3f4f6;color:#64748b;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-weight:600;font-size:13px;margin-left:4px">🎎 디디</button>
+  </div>
   <div class="tab-bar" style="margin-bottom:16px" id="pmTabBar">
-    <div class="tab active" data-pm-tab="한국" data-pm-company="barunson" onclick="switchPMTab('한국')">한국</div>
-    <div class="tab" data-pm-tab="중국" data-pm-company="barunson" onclick="switchPMTab('중국')">중국</div>
-    <div class="tab" data-pm-tab="더기프트" data-pm-company="barunson" onclick="switchPMTab('더기프트')">더기프트</div>
-    <div class="tab" data-pm-tab="부속품" data-pm-company="barunson" onclick="switchPMTab('부속품')">📦 부속품 관리</div>
-    <div class="tab" data-pm-tab="DD" data-pm-company="dd" onclick="switchPMTab('DD')" style="display:none">🎎 디얼디어</div>
+    <div class="tab active" data-pm-tab="한국" data-pm-origins="한국,중국,더기프트" onclick="switchPMTab('한국')">한국</div>
+    <div class="tab" data-pm-tab="중국" data-pm-origins="한국,중국,더기프트" onclick="switchPMTab('중국')">중국</div>
+    <div class="tab" data-pm-tab="더기프트" data-pm-origins="더기프트" onclick="switchPMTab('더기프트')">더기프트</div>
+    <div class="tab" data-pm-tab="부속품" data-pm-origins="한국,중국,더기프트" onclick="switchPMTab('부속품')">📦 부속품 관리</div>
   </div>
 
   <!-- 제품관리 전용 툴바 (부속품 탭에서는 숨김) -->
@@ -3962,10 +3966,6 @@ function closeMegaMenu() { /* no-op */ }
       <div style="display:flex;align-items:center;gap:8px">
         <input type="text" id="pmSearch" placeholder="제품코드/품목명 검색" oninput="renderProductMgmt()" style="width:200px">
         <span id="pmCountBadge" style="font-size:12px;color:var(--text-muted)"></span>
-      </div>
-      <div style="display:flex;gap:6px" id="pmSyncButtons">
-        <button class="btn btn-sm" data-pm-company="barunson" onclick="syncProductInfo()" style="background:#6366f1;color:#fff;border-color:#6366f1">ERP 동기화</button>
-        <button class="btn btn-sm" data-pm-company="dd" onclick="syncDDProducts()" style="background:#e11d48;color:#fff;border-color:#e11d48;display:none">DD 동기화</button>
       </div>
       <button class="btn btn-primary btn-sm" onclick="showAddProductModal()">+ 품목 등록</button>
     </div>
@@ -4127,9 +4127,19 @@ function closeMegaMenu() { /* no-op */ }
       <div class="form-group"><label>품목명</label><input type="text" id="pmName" placeholder="품목명"></div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label style="color:#7c3aed;font-weight:700">법인 *</label>
+        <select id="pmLegalEntity" onchange="onPmEntityChangeModal()" style="border:1.5px solid #7c3aed;border-radius:4px;font-weight:600">
+          <option value="barunson">🏢 바른컴퍼니</option>
+          <option value="dd">🎎 디디</option>
+        </select>
+      </div>
       <div class="form-group"><label>브랜드</label><input type="text" id="pmBrand" placeholder="바른손카드"></div>
-      <div class="form-group"><label>생산지</label>
-        <select id="pmOrigin"><option value="한국">한국</option><option value="중국">중국</option><option value="더기프트">더기프트</option></select>
+      <div class="form-group"><label>생산지 *</label>
+        <select id="pmOrigin">
+          <option value="한국">한국</option>
+          <option value="중국">중국</option>
+          <option value="더기프트" id="pmOriginGiftOpt">더기프트</option>
+        </select>
       </div>
     </div>
     <div class="form-row">
@@ -6175,10 +6185,15 @@ function closeMegaMenu() { /* no-op */ }
 
 <!-- ========== PROCUREMENT (통합발주관리) PAGE ========== -->
 <div class="page" id="page-procurement" style="background:#fff;color:#111">
+  <!-- 법인 토글 -->
+  <div style="display:flex;gap:0;margin-bottom:12px;border-bottom:2px solid #e5e7eb">
+    <button id="procEntityBarunson" onclick="switchProcEntity('barunson')" style="padding:10px 20px;background:#6366f1;color:#fff;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-weight:700;font-size:13px">🏢 바른컴퍼니</button>
+    <button id="procEntityDD" onclick="switchProcEntity('dd')" style="padding:10px 20px;background:#f3f4f6;color:#64748b;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-weight:600;font-size:13px;margin-left:4px">🎎 디디</button>
+  </div>
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-    <button onclick="switchProcTab('korea')" class="proc-tab active" id="proc-tab-korea" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#2563eb;color:#fff">🇰🇷 한국 (후공정)</button>
-    <button onclick="switchProcTab('china')" class="proc-tab" id="proc-tab-china" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#f3f4f6;color:#333">🇨🇳 중국 (상품)</button>
-    <button onclick="switchProcTab('gift')" class="proc-tab" id="proc-tab-gift" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#f3f4f6;color:#333">🎁 더기프트 (포장출고)</button>
+    <button onclick="switchProcTab('korea')" class="proc-tab active" id="proc-tab-korea" data-proc-tab="korea" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#2563eb;color:#fff">🇰🇷 한국 (후공정)</button>
+    <button onclick="switchProcTab('china')" class="proc-tab" id="proc-tab-china" data-proc-tab="china" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#f3f4f6;color:#333">🇨🇳 중국 (상품)</button>
+    <button onclick="switchProcTab('gift')" class="proc-tab" id="proc-tab-gift" data-proc-tab="thegift" style="padding:8px 16px;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-weight:600;background:#f3f4f6;color:#333">🎁 더기프트 (포장출고)</button>
     <span style="flex:1"></span>
     <button onclick="loadProcurementPage()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;cursor:pointer;background:#f9fafb">🔄 새로고침</button>
   </div>
@@ -14340,6 +14355,8 @@ function renderPOStatusPipeline(po) {
 function loadPOList(callback){
   let poUrl = '/api/po?include=items';
   if (currentOriginContext) poUrl += '&origin=' + encodeURIComponent(currentOriginContext);
+  // 법인 필터 (발주현황 페이지에서 토글한 _procEntity 사용)
+  if (typeof _procEntity !== 'undefined' && _procEntity) poUrl += '&entity=' + encodeURIComponent(_procEntity);
   fetch(poUrl).then(r=>r.json()).then(resp=>{
     poList=resp.data||resp||[];
     // RAW 데이터에서 후공정 업체 매핑
@@ -17762,6 +17779,9 @@ let pmData=[];
 let pmTab='한국';
 let pmEditId=null;
 
+// 현재 선택된 법인 (바른컴퍼니=barunson, 디디=dd)
+let pmEntity = 'barunson';
+
 function switchPMTab(tab){
   pmTab=tab;
   document.querySelectorAll('[data-pm-tab]').forEach(t=>t.classList.toggle('active',t.dataset.pmTab===tab));
@@ -17772,27 +17792,53 @@ function switchPMTab(tab){
   if(isAcc) loadAccList(); else renderProductMgmt();
 }
 
-// 회사 전환 시 품목관리 탭/버튼 가시성 업데이트
-function applyPMCompanyFilter(){
-  const company = (typeof _currentCompany !== 'undefined') ? _currentCompany : 'all';
-  const isAll = company === 'all';
-  // 탭 가시성 — all 모드면 전부 표시
-  document.querySelectorAll('#pmTabBar [data-pm-company]').forEach(el=>{
-    el.style.display = (isAll || el.dataset.pmCompany === company) ? '' : 'none';
-  });
-  // 동기화 버튼 가시성 — all 모드면 전부 표시
-  document.querySelectorAll('#pmSyncButtons [data-pm-company]').forEach(el=>{
-    el.style.display = (isAll || el.dataset.pmCompany === company) ? '' : 'none';
-  });
-  // 현재 활성 탭이 숨겨진 경우만 첫 번째 가시 탭으로 전환
-  const activeTab = document.querySelector('#pmTabBar .tab.active');
-  if(activeTab && activeTab.style.display === 'none'){
-    const firstVisible = Array.from(document.querySelectorAll('#pmTabBar [data-pm-tab]')).find(el=>el.style.display !== 'none');
-    if(firstVisible){
-      switchPMTab(firstVisible.dataset.pmTab);
-    }
+// 품목 등록 모달 — 법인 선택 변경 시 생산지 옵션 조정
+function onPmEntityChangeModal(){
+  const ent = document.getElementById('pmLegalEntity')?.value || 'barunson';
+  const giftOpt = document.getElementById('pmOriginGiftOpt');
+  const originSel = document.getElementById('pmOrigin');
+  if(giftOpt) giftOpt.style.display = (ent === 'dd') ? 'none' : '';
+  // 디디인데 더기프트가 선택된 상태면 한국으로 강제 변경
+  if(ent === 'dd' && originSel && originSel.value === '더기프트'){
+    originSel.value = '한국';
   }
 }
+
+// 품목관리 법인 토글 (A안)
+function switchPMEntity(ent){
+  pmEntity = (ent === 'dd') ? 'dd' : 'barunson';
+  // 토글 버튼 시각 갱신
+  const bBtn = document.getElementById('pmEntityBarunson');
+  const dBtn = document.getElementById('pmEntityDD');
+  if(bBtn && dBtn){
+    if(pmEntity === 'barunson'){
+      bBtn.style.background='#6366f1'; bBtn.style.color='#fff'; bBtn.style.fontWeight='700';
+      dBtn.style.background='#f3f4f6'; dBtn.style.color='#64748b'; dBtn.style.fontWeight='600';
+    } else {
+      dBtn.style.background='#ec4899'; dBtn.style.color='#fff'; dBtn.style.fontWeight='700';
+      bBtn.style.background='#f3f4f6'; bBtn.style.color='#64748b'; bBtn.style.fontWeight='600';
+    }
+  }
+  // 디디는 더기프트가 없음 — 더기프트 탭 숨김
+  document.querySelectorAll('#pmTabBar [data-pm-tab]').forEach(el=>{
+    const t = el.dataset.pmTab;
+    if(pmEntity === 'dd' && t === '더기프트'){
+      el.style.display = 'none';
+    } else {
+      el.style.display = '';
+    }
+  });
+  // 현재 활성 탭이 숨겨졌으면 첫 번째 가시 탭으로 안전 전환
+  const activeTab = document.querySelector('#pmTabBar .tab.active');
+  if(!activeTab || activeTab.style.display === 'none'){
+    const firstVisible = Array.from(document.querySelectorAll('#pmTabBar [data-pm-tab]')).find(el=>el.style.display !== 'none');
+    if(firstVisible) { switchPMTab(firstVisible.dataset.pmTab); return; }
+  }
+  renderProductMgmt();
+}
+
+// 법인 통합 모드 — 호환성 stub (탭은 항상 표시, 법인 토글이 따로 처리)
+function applyPMCompanyFilter(){ /* no-op */ }
 
 // ===== 입출고 현황 (XERP 실시간) =====
 let shipRows = [];
@@ -17973,7 +18019,7 @@ async function loadProductMgmt(){
   const resp=await fetch('/api/products').then(r=>r.json());
   pmData=resp.data||resp||[];
   applyPMCompanyFilter();
-  renderProductMgmt();
+  switchPMEntity(pmEntity || 'barunson');
 
   // 엑셀 업로드 이벤트 바인딩 (1회만)
   if (!pmUploadBound) {
@@ -18151,7 +18197,13 @@ async function handlePMExcel(file) {
 
 function renderProductMgmt(){
   const search=(document.getElementById('pmSearch')?.value||'').toLowerCase();
-  let filtered=pmData.filter(p=>p.origin===pmTab);
+  // 1차: 법인 필터 (pmEntity)
+  let filtered = pmData.filter(p => {
+    const ent = p.legal_entity || 'barunson';
+    return ent === pmEntity;
+  });
+  // 2차: 생산지 탭 필터
+  filtered = filtered.filter(p=>p.origin===pmTab);
   if(search) filtered=filtered.filter(p=>(p.product_code||'').toLowerCase().includes(search)||(p.product_name||'').toLowerCase().includes(search));
 
   document.getElementById('pmCountBadge').textContent=`${filtered.length}개 품목`;
@@ -18170,10 +18222,13 @@ function renderProductMgmt(){
     const opCat = p.op_category || '';
     const opColors = {'운영품목':['#059669','#ecfdf5'],'소진후단종':['#dc2626','#fef2f2'],'이력없음':['#d97706','#fffbeb'],'기타':['#6b7280','#f3f4f6']};
     const [opFg,opBg] = opColors[opCat] || ['#94a3b8','#f8fafc'];
-    const isDD = p.origin === 'DD';
+    const isDD = (p.legal_entity === 'dd');
     const trStyle = isDD ? 'background:#fdf2f8;border-left:3px solid #ec4899' : '';
+    const entityBadge = isDD
+      ? '<span style="display:inline-block;padding:1px 5px;background:#ec4899;color:#fff;border-radius:3px;font-size:9px;font-weight:700;margin-right:4px">디디</span>'
+      : '<span style="display:inline-block;padding:1px 5px;background:#6366f1;color:#fff;border-radius:3px;font-size:9px;font-weight:700;margin-right:4px">바른</span>';
     return`<tr style="${trStyle}">
-      <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${esc(p.product_code)}</td>
+      <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${entityBadge}${esc(p.product_code)}</td>
       <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
@@ -18389,8 +18444,13 @@ function showAddProductModal(){
   document.getElementById('pmModalTitle').textContent='품목 등록';
   document.getElementById('pmCode').value='';
   document.getElementById('pmName').value='';
-  document.getElementById('pmBrand').value='바른손카드';
-  document.getElementById('pmOrigin').value=pmTab;
+  document.getElementById('pmBrand').value = (pmEntity==='dd') ? '디얼디어' : '바른손카드';
+  // 법인은 현재 선택된 토글에 맞춤
+  const leSel = document.getElementById('pmLegalEntity');
+  if(leSel) leSel.value = pmEntity || 'barunson';
+  // 디디는 더기프트 옵션 숨김
+  onPmEntityChangeModal();
+  document.getElementById('pmOrigin').value = (pmTab && pmTab !== '부속품') ? pmTab : '한국';
   document.getElementById('pmCategory').value='';
   document.getElementById('pmOpCategory').value='';
   document.getElementById('pmStatus').value='active';
@@ -18416,6 +18476,9 @@ function editProduct(id){
   document.getElementById('pmCode').disabled=true;
   document.getElementById('pmName').value=p.product_name||'';
   document.getElementById('pmBrand').value=p.brand||'';
+  const leSel = document.getElementById('pmLegalEntity');
+  if(leSel) leSel.value = p.legal_entity || 'barunson';
+  onPmEntityChangeModal();
   document.getElementById('pmOrigin').value=p.origin||'한국';
   document.getElementById('pmCategory').value=p.category||'';
   document.getElementById('pmOpCategory').value=p.op_category||'';
@@ -18440,6 +18503,7 @@ async function saveProduct(){
     product_name:document.getElementById('pmName').value.trim(),
     brand:document.getElementById('pmBrand').value.trim(),
     origin:document.getElementById('pmOrigin').value,
+    legal_entity:document.getElementById('pmLegalEntity')?.value || 'barunson',
     category:document.getElementById('pmCategory').value.trim(),
     op_category:document.getElementById('pmOpCategory').value,
     status:document.getElementById('pmStatus').value,
@@ -24630,10 +24694,33 @@ function switchProcTab(tab) {
   loadProcurementPage();
 }
 
+// 발주현황 법인 토글 (전역)
+let _procEntity = 'barunson';
+function switchProcEntity(ent){
+  _procEntity = (ent === 'dd') ? 'dd' : 'barunson';
+  const bBtn = document.getElementById('procEntityBarunson');
+  const dBtn = document.getElementById('procEntityDD');
+  if(bBtn && dBtn){
+    if(_procEntity === 'barunson'){
+      bBtn.style.background='#6366f1'; bBtn.style.color='#fff';
+      dBtn.style.background='#f3f4f6'; dBtn.style.color='#64748b';
+    } else {
+      dBtn.style.background='#ec4899'; dBtn.style.color='#fff';
+      bBtn.style.background='#f3f4f6'; bBtn.style.color='#64748b';
+    }
+  }
+  // 디디는 더기프트 탭 숨김
+  document.querySelectorAll('.proc-tab[data-proc-tab="thegift"]').forEach(el=>{
+    el.style.display = (_procEntity === 'dd') ? 'none' : '';
+  });
+  if(_procEntity === 'dd' && _procTab === 'thegift') _procTab = 'korea';
+  loadProcurementPage();
+}
+
 async function loadProcurementPage() {
   // Load dashboard data
   try {
-    const r = await authFetch('/api/procurement/dashboard');
+    const r = await authFetch('/api/procurement/dashboard?entity=' + encodeURIComponent(_procEntity || 'barunson'));
     const d = (await r.json()).data;
     // KPI
     const origin = _procOriginMap[_procTab];
