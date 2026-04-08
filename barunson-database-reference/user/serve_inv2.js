@@ -6601,7 +6601,6 @@ async function handleRequest(req, res) {
 
   if (pathname === '/api/po' && method === 'POST') {
     const body = await readJSON(req);
-    const poNumber = await generatePoNumber();
     const items = body.items || [];
     const totalQty = items.reduce((s, it) => s + (it.ordered_qty || 0), 0);
 
@@ -6618,6 +6617,23 @@ async function handleRequest(req, res) {
       const firstProd = await db.prepare('SELECT origin FROM products WHERE product_code=?').get(items[0].product_code || '');
       if (firstProd && firstProd.origin) poOrigin = firstProd.origin;
     }
+
+    // 중복 발주 방지: 같은 날짜+같은 거래처+같은 품목 조합이 이미 있으면 차단
+    if (vendorName && items.length) {
+      const today = new Date().toISOString().slice(0, 10);
+      const productCodes = items.map(it => it.product_code).filter(Boolean).sort().join(',');
+      const dupCheck = await db.prepare(`SELECT po_id, po_number FROM po_header WHERE vendor_name = ? AND po_date::text >= ? AND status != 'cancelled' ORDER BY po_id DESC LIMIT 1`).get(vendorName, today);
+      if (dupCheck) {
+        const dupItems = await db.prepare('SELECT product_code FROM po_items WHERE po_id = ? ORDER BY product_code').all(dupCheck.po_id);
+        const existingCodes = dupItems.map(r => r.product_code).filter(Boolean).sort().join(',');
+        if (existingCodes === productCodes) {
+          fail(res, 409, `중복 발주: 오늘 동일 거래처(${vendorName})에 같은 품목으로 이미 발주(${dupCheck.po_number})가 생성되었습니다.`);
+          return;
+        }
+      }
+    }
+
+    const poNumber = await generatePoNumber();
 
     const tx = db.transaction(async () => {
       const info = await db.prepare(`INSERT INTO po_header (po_number, po_type, vendor_name, status, due_date, total_qty, notes, process_step, parent_po_id, process_chain, origin, po_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, date('now','localtime'))`).run(
