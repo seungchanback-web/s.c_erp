@@ -22,6 +22,10 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+# 캐시 무효화 (빌드마다 변경)
+ARG CACHE_BUST=20260408-legal-entity-v2
+RUN echo "build:$CACHE_BUST" > /app/.buildstamp
+
 # 앱 파일 복사
 COPY . .
 
