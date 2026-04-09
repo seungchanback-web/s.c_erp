@@ -1274,6 +1274,26 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
 </style>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  #page-help #helpContent h1 { font-size: 26px; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; color:#0f172a; }
+  #page-help #helpContent h2 { font-size: 20px; margin: 24px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; color:#1e293b; }
+  #page-help #helpContent h3 { font-size: 16px; margin: 18px 0 8px; color:#334155; }
+  #page-help #helpContent h4 { font-size: 14px; margin: 14px 0 6px; color:#475569; }
+  #page-help #helpContent p { margin: 8px 0; }
+  #page-help #helpContent ul, #page-help #helpContent ol { margin: 8px 0; padding-left: 24px; }
+  #page-help #helpContent li { margin: 4px 0; }
+  #page-help #helpContent code { background:#f1f5f9; padding:2px 6px; border-radius:4px; font-family:ui-monospace,monospace; font-size:13px; color:#db2777; }
+  #page-help #helpContent pre { background:#0f172a; color:#f1f5f9; padding:14px; border-radius:8px; overflow-x:auto; font-size:12.5px; }
+  #page-help #helpContent pre code { background:transparent; padding:0; color:#f1f5f9; }
+  #page-help #helpContent blockquote { border-left: 4px solid #10b981; padding: 8px 16px; background:#f0fdf4; margin: 10px 0; color:#065f46; }
+  #page-help #helpContent table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+  #page-help #helpContent th, #page-help #helpContent td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+  #page-help #helpContent th { background: #f8fafc; font-weight: 600; color:#0f172a; }
+  #page-help #helpContent hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+  #page-help #helpContent a { color: #2563eb; text-decoration: none; }
+  #page-help #helpContent a:hover { text-decoration: underline; }
+</style>
 </head>
 <body>
 
@@ -1501,7 +1521,8 @@ var _megaData = {
       {icon:'👤',bg:'#fef3c7',fg:'#92400e',name:'사용자 관리',desc:'권한 + 계정 관리',page:'user-mgmt'},
       {icon:'🔒',bg:'#f0f9ff',fg:'#0369a1',name:'감사로그',desc:'사용자 활동 추적',page:'audit-log'},
       {icon:'🔔',bg:'#fef2f2',fg:'#ef4444',name:'알림센터',desc:'알림 이력/관리',page:'notification'},
-      {icon:'🔐',bg:'#e0e7ff',fg:'#4338ca',name:'권한관리',desc:'RBAC 역할/권한 설정',page:'rbac'}
+      {icon:'🔐',bg:'#e0e7ff',fg:'#4338ca',name:'권한관리',desc:'RBAC 역할/권한 설정',page:'rbac'},
+      {icon:'📖',bg:'#ecfdf5',fg:'#10b981',name:'사용 설명서',desc:'매뉴얼 + 변경이력',page:'help'}
     ]
   }
 };
@@ -1771,6 +1792,7 @@ function closeMegaMenu() { /* no-op */ }
     </div>
   </div>
   <div class="header-right" style="display:flex;align-items:center;gap:10px">
+    <span id="headerAppVersion" onclick="showPage('help')" title="사용 설명서" style="cursor:pointer;background:#ecfdf5;color:#065f46;border:1px solid #10b981;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;user-select:none">v-.-.-</span>
     <button id="headerApprovalBtn" onclick="showPage('approval')" title="결재 대기" style="position:relative;background:none;border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:15px;display:none">✍️<span id="headerApprovalBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px">0</span></button>
     <button id="headerNotifBtn" onclick="toggleNotifDropdown()" title="알림" style="position:relative;background:none;border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:15px">🔔<span id="headerNotifBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px">0</span></button>
     <div id="notifDropdown" style="display:none;position:absolute;top:48px;right:10px;width:360px;max-height:420px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.12);z-index:9999;overflow:hidden">
@@ -6102,6 +6124,22 @@ function closeMegaMenu() { /* no-op */ }
   <div id="notifPageContent" style="min-height:400px"></div>
 </div>
 
+<!-- ========== HELP (사용 설명서) PAGE ========== -->
+<div class="page" id="page-help" style="background:#fff;color:#111">
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #e2e8f0;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:20px">📖 사용 설명서</h2>
+    <span id="helpVersionBadge" style="background:#10b981;color:#fff;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600">v-.-.-</span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn btn-sm" onclick="loadHelpDoc('manual')" id="helpTabManual" style="background:#2563eb;color:#fff">📘 매뉴얼</button>
+      <button class="btn btn-sm" onclick="loadHelpDoc('changelog')" id="helpTabChangelog" style="background:#f1f5f9;color:#334155">📋 변경이력</button>
+      <button class="btn btn-sm" onclick="window.print()" style="background:#f1f5f9;color:#334155">🖨️ 인쇄</button>
+    </div>
+  </div>
+  <div id="helpContent" style="line-height:1.7;font-size:14px;color:#1f2937;max-width:960px;margin:0 auto;padding:0 8px">
+    <div style="text-align:center;color:#64748b;padding:40px">로딩 중...</div>
+  </div>
+</div>
+
 <!-- ========== APPROVAL (전자결재) PAGE ========== -->
 <div class="page" id="page-approval" style="background:#fff;color:#111">
   <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:12px" id="approvalTabs">
@@ -6732,6 +6770,7 @@ function showLoginScreen() {
 
 function canAccess(pageId) {
   if (!currentAuthUser) return false;
+  if (pageId === 'help') return true; // 사용 설명서는 모두 접근 가능
   if (currentAuthUser.role === 'admin') return true;
   if (userPermissions.includes('*')) return true;
   if (userPermissions.length > 0) return userPermissions.includes(pageId);
@@ -6901,7 +6940,8 @@ var pageTitles={
   'procurement':'통합발주관리',
   'vat-report':'부가세 신고','journal-auto':'자동 분개',
   'barcode':'바코드/QR','report-builder':'보고서 빌더',
-  'china-hub':'중국 종합관리'
+  'china-hub':'중국 종합관리',
+  'help':'사용 설명서','vendor-performance':'업체성과'
 };
 
 // ===== GLOBAL STATE =====
@@ -8175,6 +8215,18 @@ function initUploadZone() {
 }
 document.addEventListener('DOMContentLoaded', initUploadZone);
 
+// 헤더 버전 뱃지 로딩
+(async function loadAppVersionBadge(){
+  try {
+    const r = await fetch('/api/version');
+    const d = await r.json();
+    if (d && d.ok && d.data && d.data.version) {
+      const b = document.getElementById('headerAppVersion');
+      if (b) { b.textContent = 'v' + d.data.version; b.title = '사용 설명서 (v' + d.data.version + ' / ' + (d.data.version_date||'') + ')'; }
+    }
+  } catch(_) {}
+})();
+
 function parseFile(file){
   const reader=new FileReader();
   reader.onload=e=>{
@@ -8525,6 +8577,7 @@ function showPage(page, opts){
   if(page==='vendor-performance') loadVendorPerformancePage();
   if(page==='vat-report') loadVatReportPage();
   if(page==='journal-auto') loadJournalAutoPage();
+  if(page==='help') loadHelpPage();
   if(page==='barcode') loadBarcodePage();
   if(page==='report-builder') loadReportBuilderPage();
 }
@@ -27638,6 +27691,60 @@ async function markAllNotifRead(){
   try{await authFetch('/api/notifications/read-all',{method:'POST'});}catch(e){}
   loadHeaderBadges();loadNotifDropdown();
 }
+// ========== HELP (사용 설명서) ==========
+let _helpCurrentDoc = 'manual';
+async function loadHelpPage(){
+  await loadHelpDoc('manual');
+}
+async function loadHelpDoc(doc){
+  _helpCurrentDoc = doc;
+  // 탭 스타일
+  const tManual = document.getElementById('helpTabManual');
+  const tChangelog = document.getElementById('helpTabChangelog');
+  if (tManual && tChangelog) {
+    if (doc === 'manual') {
+      tManual.style.background = '#2563eb'; tManual.style.color = '#fff';
+      tChangelog.style.background = '#f1f5f9'; tChangelog.style.color = '#334155';
+    } else {
+      tChangelog.style.background = '#2563eb'; tChangelog.style.color = '#fff';
+      tManual.style.background = '#f1f5f9'; tManual.style.color = '#334155';
+    }
+  }
+  const el = document.getElementById('helpContent');
+  if (!el) return;
+  el.innerHTML = '<div style="text-align:center;color:#64748b;padding:40px">로딩 중...</div>';
+  try {
+    const endpoint = doc === 'changelog' ? '/api/changelog' : '/api/manual';
+    const r = await fetch(endpoint);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '로드 실패');
+    const md = (d.data && d.data.content) || '';
+    const version = (d.data && d.data.version) || '-';
+    // 버전 배지 업데이트
+    const badge = document.getElementById('helpVersionBadge');
+    if (badge) badge.textContent = 'v' + version;
+    // Markdown → HTML
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+      el.innerHTML = marked.parse(md);
+    } else {
+      // fallback: <pre>
+      el.innerHTML = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px">' + md.replace(/[<>&]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</pre>';
+    }
+    // 내부 링크(anchor) 스크롤 지원
+    el.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const id = a.getAttribute('href').slice(1);
+        const target = el.querySelector('[id="'+id+'"]') || document.getElementById(id);
+        if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
+      });
+    });
+  } catch (e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#ef4444">로드 실패: ' + esc(e.message||'오류') + '</div>';
+  }
+}
+
 async function loadNotificationPage(){
   var el=document.getElementById('notifPageContent');
   if(!el)return;

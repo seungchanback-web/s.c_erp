@@ -1,4 +1,7 @@
 const _startTime = Date.now();
+// ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
+const APP_VERSION = '1.0.0';
+const APP_VERSION_DATE = '2026-04-09';
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -2734,6 +2737,31 @@ if (!masterUser) {
   // 이미 존재하면 admin 역할 보장 + username 통일
   await db.prepare("UPDATE users SET role = 'admin', username = 'seungchan.back' WHERE user_id = ?").run(masterUser.user_id);
 }
+
+// 공용 관리자 계정 (admin / 1234) — 다수 사용자 공용 접속용
+const adminUsername = 'admin';
+const adminEmail2 = 'admin@barunn.net';
+const adminExisting = await db.prepare("SELECT user_id, password_hash FROM users WHERE username = ? OR email = ?").get(adminUsername, adminEmail2);
+if (!adminExisting) {
+  const hash2 = bcrypt.hashSync('1234', 10);
+  await db.prepare("INSERT INTO users (username, password_hash, display_name, role, email) VALUES (?, ?, ?, ?, ?)")
+    .run(adminUsername, hash2, '관리자(공용)', 'admin', adminEmail2);
+  console.log('✅ 공용 관리자 계정 생성: admin / 1234');
+} else {
+  // 이미 존재하면 admin 역할 + 비밀번호 기본값 보장
+  const hash2 = bcrypt.hashSync('1234', 10);
+  try {
+    const pwOk = adminExisting.password_hash && bcrypt.compareSync('1234', adminExisting.password_hash);
+    if (!pwOk) {
+      await db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE user_id = ?").run(hash2, adminExisting.user_id);
+      console.log('✅ 공용 관리자 계정 비밀번호 초기화: admin / 1234');
+    } else {
+      await db.prepare("UPDATE users SET role = 'admin' WHERE user_id = ?").run(adminExisting.user_id);
+    }
+  } catch(e) {
+    await db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE user_id = ?").run(hash2, adminExisting.user_id);
+  }
+}
 // 마스터 계정 비밀번호 보장 (seed.db에서 복원 시 비밀번호가 다를 수 있으므로)
 const masterCheck = await db.prepare("SELECT user_id, password_hash FROM users WHERE email = ?").get(masterEmail);
 if (masterCheck && masterCheck.password_hash) {
@@ -3173,6 +3201,34 @@ async function handleRequest(req, res) {
   // ── 모듈 라우터 우선 처리 ──
   for (const mr of moduleRouters) {
     if (await mr.handle(req, res, pathname, method, parsed)) return;
+  }
+
+  // GET /api/version — 앱 버전 정보 (공개)
+  if (pathname === '/api/version' && method === 'GET') {
+    ok(res, { version: APP_VERSION, version_date: APP_VERSION_DATE, started_at: new Date(_startTime).toISOString() });
+    return;
+  }
+
+  // GET /api/manual — 사용 설명서 (MANUAL.md 원문)
+  if (pathname === '/api/manual' && method === 'GET') {
+    try {
+      const content = fs.readFileSync(path.join(__dirname, 'MANUAL.md'), 'utf8');
+      ok(res, { version: APP_VERSION, content });
+    } catch (e) {
+      fail(res, 500, 'MANUAL.md 로드 실패: ' + e.message);
+    }
+    return;
+  }
+
+  // GET /api/changelog — 변경 이력 (CHANGELOG.md 원문)
+  if (pathname === '/api/changelog' && method === 'GET') {
+    try {
+      const content = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf8');
+      ok(res, { version: APP_VERSION, content });
+    } catch (e) {
+      fail(res, 500, 'CHANGELOG.md 로드 실패: ' + e.message);
+    }
+    return;
   }
 
   // GET /api/health — 시스템 헬스체크 (최상위 배치 — Docker 배포 안정성)
