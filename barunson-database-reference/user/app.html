@@ -14462,12 +14462,18 @@ function downloadCreatePOExcel(){
     list.forEach(p=>{
       const code = p['제품코드']||p['품목코드']||'';
       const info = p._info||{};
+      const dailyAvg = p._dailyUsage || 0;
+      const monthlyExpected = p._xerpMonthly || p._monthly || 0;
+      const curStock = typeof p['가용재고']==='number' ? p['가용재고'] : 0;
       if(isChinaContext){
         rows.push({
           '거래처':vendor,
           '카드번호':code,
           '브랜드':p['브랜드']||'',
           '품목명':p['품목명']||info['원재료용지명']||'',
+          '일평균 출고량':dailyAvg,
+          '예상한달 출고량':monthlyExpected,
+          '현재고':curStock,
           '발주수량':p._qty||0,
           '납기일':deliveryDate,
           '비고':notes
@@ -14481,6 +14487,9 @@ function downloadCreatePOExcel(){
           '원재료용지명':info['원재료용지명']||'',
           '절':info['절']||'',
           '조판':info['조판']||'',
+          '일평균 출고량':dailyAvg,
+          '예상한달 출고량':monthlyExpected,
+          '현재고':curStock,
           '발주수량':p._qty||0,
           '발주(R)':toR(p._qty, code),
           '납기일':deliveryDate,
