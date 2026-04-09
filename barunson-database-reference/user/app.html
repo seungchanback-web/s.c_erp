@@ -18260,14 +18260,39 @@ async function syncDDProducts() {
 }
 
 function downloadProductTemplate() {
-  const headers = ['제품코드','품목명','브랜드','생산지','운영구분','원재료코드','원재료명','절','조판','제지사','메모'];
-  const example = ['BI202','아뜰란스','바른손카드','한국','운영품목','BP1360','120레이드 진주','2','12','대한',''];
+  // 현재 선택된 법인에 따라 템플릿 이름/예시 변경
+  const isDDMode = (typeof pmEntity !== 'undefined' && pmEntity === 'dd');
+  const headers = ['법인','제품코드','품목명','브랜드','생산지','운영구분','원재료코드','원재료명','절','조판','제지사','메모'];
+  const exBarunson = ['바른손','BI202','아뜰란스','바른손카드','한국','운영품목','BP1360','120레이드 진주','2','12','대한',''];
+  const exDD = ['디디','DD-001','샘플 청첩장','뚜비뚜비','한국','운영품목','','','','','',''];
+  const example = isDDMode ? exDD : exBarunson;
   const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-  // 컬럼 폭 설정
-  ws['!cols'] = [{ wch:12 },{ wch:16 },{ wch:14 },{ wch:8 },{ wch:10 },{ wch:12 },{ wch:18 },{ wch:5 },{ wch:5 },{ wch:10 },{ wch:16 }];
+  ws['!cols'] = [{ wch:8 },{ wch:12 },{ wch:16 },{ wch:14 },{ wch:8 },{ wch:10 },{ wch:12 },{ wch:18 },{ wch:5 },{ wch:5 },{ wch:10 },{ wch:16 }];
+
+  // 안내 시트 (입력 규칙 문서화)
+  const guide = [
+    ['컬럼','필수','허용값','설명'],
+    ['법인','Y','바른손 / 디디','소속 법인. "바른손" 또는 "디디"(dd)로 입력. 생략 시 현재 선택 법인 자동 적용'],
+    ['제품코드','Y','영숫자','고유 제품코드 (기존과 동일한 코드면 업데이트)'],
+    ['품목명','Y','텍스트','표시 이름'],
+    ['브랜드','','텍스트','브랜드명'],
+    ['생산지','Y','한국 / 중국 / 더기프트','⚠️ 이 세 가지 값만 사용. 디디 품목도 "예지가/코리아/마커엘엔피" 등 변형값 대신 "한국"으로 통일해 입력'],
+    ['운영구분','','운영품목 / 소진후단종 / 이력없음 / 기타','운영 상태'],
+    ['원재료코드','','텍스트','연결 원재료 코드'],
+    ['원재료명','','텍스트','원재료명'],
+    ['절','','숫자','종이 절 규격'],
+    ['조판','','숫자','조판 수'],
+    ['제지사','','텍스트','제지사명'],
+    ['메모','','텍스트','비고'],
+  ];
+  const wsGuide = XLSX.utils.aoa_to_sheet(guide);
+  wsGuide['!cols'] = [{wch:10},{wch:6},{wch:30},{wch:50}];
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '품목등록');
-  XLSX.writeFile(wb, '바른컴퍼니_품목등록_양식.xlsx');
+  XLSX.utils.book_append_sheet(wb, wsGuide, '입력규칙');
+  const fileName = isDDMode ? '디디_품목등록_양식.xlsx' : '바른컴퍼니_품목등록_양식.xlsx';
+  XLSX.writeFile(wb, fileName);
 }
 
 async function handlePMExcel(file) {
@@ -18294,7 +18319,29 @@ async function handlePMExcel(file) {
       '품목명': 'product_name', 'product_name': 'product_name',
       '메모': 'memo', 'memo': 'memo',
       '운영구분': 'op_category', 'op_category': 'op_category',
-      '신제품': 'is_new_product', 'is_new_product': 'is_new_product', 'new': 'is_new_product'
+      '신제품': 'is_new_product', 'is_new_product': 'is_new_product', 'new': 'is_new_product',
+      '법인': 'legal_entity', 'legal_entity': 'legal_entity', '소속': 'legal_entity'
+    };
+
+    // 법인 값 정규화 (바른손/디디 한글/영문 → barunson/dd)
+    const normalizeLegalEntity = (v) => {
+      const s = String(v||'').trim().toLowerCase();
+      if (!s) return '';
+      if (s === 'dd' || s === '디디' || s === '뚜비뚜비' || s === '뚜비') return 'dd';
+      if (s === 'barunson' || s === '바른손' || s === '바른' || s === '바른컴퍼니' || s === '바른손카드') return 'barunson';
+      return s;
+    };
+    // 생산지 값 정규화 (DD의 "예지가/코리아/마커엘엔피" 변형값 → "한국")
+    const normalizeOriginVal = (v) => {
+      const s = String(v||'').trim();
+      if (!s) return '한국';
+      if (s === '한국' || s === '중국' || s === '더기프트') return s;
+      if (s === '코리아' || s === '예지가' || s === '마커엘엔피' ||
+          s.startsWith('코리아') || s.startsWith('예지가') || s.startsWith('마커')) return '한국';
+      if (s === 'korea' || s === 'kr' || s === 'KR') return '한국';
+      if (s === 'china' || s === 'cn' || s === 'CN') return '중국';
+      if (s === 'gift' || s.includes('기프트')) return '더기프트';
+      return s;
     };
 
     const items = rows.map(row => {
@@ -18310,6 +18357,10 @@ async function handlePMExcel(file) {
         }
       }
       if (mapped['is_new_product'] === undefined) mapped['is_new_product'] = 0;
+      // 법인: 엑셀에 없으면 현재 선택된 pmEntity 사용
+      mapped['legal_entity'] = normalizeLegalEntity(mapped['legal_entity']) || (pmEntity || 'barunson');
+      // 생산지: 변형값 정규화
+      mapped['origin'] = normalizeOriginVal(mapped['origin']);
       return mapped;
     }).filter(m => m.product_code);
 
@@ -18352,8 +18403,18 @@ function renderProductMgmt(){
     const ent = p.legal_entity || 'barunson';
     return ent === pmEntity;
   });
-  // 2차: 생산지 탭 필터
-  filtered = filtered.filter(p=>p.origin===pmTab);
+  // 2차: 생산지 탭 필터 (DD는 "예지가/코리아/마커엘엔피/코리아-예지가" 등의 변형값도 "한국"으로 취급)
+  const normalizeOrigin = (o, ent) => {
+    const v = (o||'').trim();
+    if (!v) return '';
+    if (v === '중국' || v === '한국' || v === '더기프트') return v;
+    if (ent === 'dd') {
+      // DD 법인의 한국계 생산지 변형값들은 모두 "한국" 탭으로 묶음
+      if (v === '코리아' || v === '예지가' || v === '마커엘엔피' || v.startsWith('코리아') || v.startsWith('예지가') || v.startsWith('마커')) return '한국';
+    }
+    return v;
+  };
+  filtered = filtered.filter(p => normalizeOrigin(p.origin, p.legal_entity||'barunson') === pmTab);
   if(search) filtered=filtered.filter(p=>(p.product_code||'').toLowerCase().includes(search)||(p.product_name||'').toLowerCase().includes(search));
 
   document.getElementById('pmCountBadge').textContent=`${filtered.length}개 품목`;
@@ -18377,9 +18438,14 @@ function renderProductMgmt(){
     const entityBadge = isDD
       ? '<span style="display:inline-block;padding:1px 5px;background:#ec4899;color:#fff;border-radius:3px;font-size:9px;font-weight:700;margin-right:4px">디디</span>'
       : '<span style="display:inline-block;padding:1px 5px;background:#6366f1;color:#fff;border-radius:3px;font-size:9px;font-weight:700;margin-right:4px">바른</span>';
+    // DD 생산지 변형값 원본 표시 (예: "예지가", "코리아" 등)
+    const rawOrigin = (p.origin||'').trim();
+    const originVariantBadge = (isDD && rawOrigin && rawOrigin !== '한국' && rawOrigin !== '중국' && rawOrigin !== '더기프트')
+      ? `<span style="display:inline-block;padding:1px 5px;background:#fce7f3;color:#be185d;border-radius:3px;font-size:9px;font-weight:600;margin-left:4px" title="원본 생산지">${esc(rawOrigin)}</span>`
+      : '';
     return`<tr style="${trStyle}">
       <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${entityBadge}${esc(p.product_code)}</td>
-      <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}</td>
+      <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}${originVariantBadge}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
       <td style="${cellStyle};text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${opFg};background:${opBg}">${opCat||'-'}</span></td>

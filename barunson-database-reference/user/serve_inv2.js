@@ -1,6 +1,6 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const APP_VERSION_DATE = '2026-04-09';
 const http = require('http');
 const https = require('https');
@@ -3849,6 +3849,16 @@ async function handleRequest(req, res) {
     const b = await readJSON(req);
     if (!b.product_code) { fail(res, 400, 'product_code required'); return; }
     const entity = (b.legal_entity === 'dd') ? 'dd' : 'barunson';
+    // 생산지 정규화 (DD의 "예지가/코리아/마커엘엔피" 변형값 → "한국")
+    const _normOrigin = (v) => {
+      const s = String(v||'').trim();
+      if (!s) return '한국';
+      if (s === '한국' || s === '중국' || s === '더기프트') return s;
+      if (s === '코리아' || s === '예지가' || s === '마커엘엔피' ||
+          s.indexOf('코리아') === 0 || s.indexOf('예지가') === 0 || s.indexOf('마커') === 0) return '한국';
+      return s;
+    };
+    b.origin = _normOrigin(b.origin);
     try {
       let info;
       if (_hasEntity.products) {
@@ -3918,6 +3928,16 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const items = body.items || [];
     if (!items.length) { fail(res, 400, 'items required'); return; }
+    // 서버측 방어: 생산지 변형값 정규화
+    const _normOriginBulk = (v) => {
+      const s = String(v||'').trim();
+      if (!s) return '한국';
+      if (s === '한국' || s === '중국' || s === '더기프트') return s;
+      if (s === '코리아' || s === '예지가' || s === '마커엘엔피' ||
+          s.indexOf('코리아') === 0 || s.indexOf('예지가') === 0 || s.indexOf('마커') === 0) return '한국';
+      return s;
+    };
+    for (const it of items) { if (it) it.origin = _normOriginBulk(it.origin); }
 
     const upsert = _hasEntity.products
       ? db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category, legal_entity)
