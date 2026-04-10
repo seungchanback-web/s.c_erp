@@ -8403,6 +8403,26 @@ async function loadXerpInventory(forceRefresh) {
     if(badge){ badge.textContent=`✅ ${data.count}개 연동`; badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#dcfce7;color:#16a34a'; }
     if(refreshBtn) refreshBtn.disabled = false;
 
+    // R(연) 단위 계산을 위해 재고현황 응답의 _절/_조판을 productInfo에 즉시 머지
+    // (/api/products 비동기 fetch가 늦거나 실패해도 R 변환이 동작하도록 보장)
+    try {
+      (data.products||[]).forEach(p=>{
+        const code=p['제품코드']; if(!code) return;
+        const existing=productInfo[code]||{};
+        productInfo[code]={
+          ...existing,
+          '품명': existing['품명'] || p['품목명'] || '',
+          '생산지': existing['생산지'] || p['생산지'] || '',
+          '브랜드': existing['브랜드'] || p['브랜드'] || '',
+          '절': existing['절'] || p['_절'] || '',
+          '조판': existing['조판'] || p['_조판'] || '',
+          '원자재코드': existing['원자재코드'] || p['_원자재코드'] || '',
+          '원재료용지명': existing['원재료용지명'] || p['_원재료용지명'] || '',
+          '제지사': existing['제지사'] || p['_원지사'] || '',
+        };
+      });
+    } catch(e){ console.warn('productInfo 머지 실패:', e); }
+
     // orderQty 보존 (발주 진행 중 데이터 유지)
     await processData(data.products);
   } catch (e) {

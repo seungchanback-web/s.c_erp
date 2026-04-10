@@ -1,6 +1,6 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const APP_VERSION_DATE = '2026-04-10';
 const http = require('http');
 const https = require('https');
