@@ -1,6 +1,6 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
 const APP_VERSION_DATE = '2026-04-09';
 const http = require('http');
 const https = require('https');
@@ -3840,7 +3840,22 @@ async function handleRequest(req, res) {
       params.push(entity);
     }
     sql += ' ORDER BY origin, product_code';
-    const rows = await db.prepare(sql).all(...params);
+    let rows = await db.prepare(sql).all(...params);
+    // legal_entity 컬럼이 없는 환경(운영 PG 권한 부족)에서는
+    // 품목코드 prefix로 가상 매핑 (DD*/DDC*/DDE*/DDT*/DD_seal_* → dd, 나머지 → barunson)
+    const _deriveEntity = (code) => {
+      const c = String(code||'').toUpperCase();
+      if (c.startsWith('DD')) return 'dd';
+      return 'barunson';
+    };
+    rows = rows.map(r => {
+      if (!r.legal_entity) r.legal_entity = _deriveEntity(r.product_code);
+      return r;
+    });
+    // 컬럼이 없어서 DB 필터를 못 건 경우, 메모리에서 한번 더 필터
+    if (entity && entity !== 'all' && !_hasEntity.products) {
+      rows = rows.filter(r => r.legal_entity === entity);
+    }
     ok(res, rows);
     return;
   }

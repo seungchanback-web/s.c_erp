@@ -5,6 +5,18 @@
 
 ---
 
+## [1.0.2] - 2026-04-10
+
+### 🐛 Fixed
+- **디디 품목이 품목관리 디디 탭에서 완전히 비어 보이던 심각한 버그 수정**
+  - 운영 PG에 `products.legal_entity` 컬럼이 DB 권한 부족으로 `ALTER TABLE`이 silent fail한 상태였음 (`_hasEntity.products = false`)
+  - 이 때문에 `GET /api/products` 응답에 `legal_entity` 필드가 아예 없었고, 프론트가 기본값 `'barunson'`으로 처리 → 디디 탭 필터에서 모든 품목이 탈락
+  - 앱 레벨 fallback 추가: 컬럼이 없는 환경에서는 품목코드 prefix로 가상 매핑 (`DD*` → `dd`, 나머지 → `barunson`)
+  - entity 파라미터가 있는데 DB에서 필터를 못 건 경우 메모리에서 한 번 더 필터링
+  - DB 권한 문제가 해결되면 컬럼 기반으로 자동 전환됨
+
+---
+
 ## [1.0.1] - 2026-04-09
 
 ### 🐛 Fixed
