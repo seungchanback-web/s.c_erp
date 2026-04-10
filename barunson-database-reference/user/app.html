@@ -6972,7 +6972,7 @@ let poStatusFilter='all';
 let currentOriginContext = null; // 한국/중국/더기프트 origin 필터 컨텍스트
 
 // 발주 가이드 설정값 (한국/중국 분리)
-let GUIDE_KR={period:3, orderMonths:1, roundUnit:10000, dangerRatio:1, minOrderQty:10000, leadTimeMat:5, leadTimePost:7, safetyMonths:1.5};
+let GUIDE_KR={period:3, orderMonths:1, roundUnit:10000, dangerRatio:1, minOrderQty:10000, leadTimeMat:20, leadTimePost:7, safetyMonths:1.5};
 let GUIDE_CN={period:3, orderMonths:6, roundUnit:10000, dangerRatio:2, minOrderQty:10000, leadTimeMat:50, leadTimePost:7, safetyMonths:2};
 const savedGuideKR=localStorage.getItem('orderGuide_KR')||localStorage.getItem('orderGuide');
 const savedGuideCN=localStorage.getItem('orderGuide_CN');
@@ -7186,11 +7186,12 @@ function classifyItem(p){
     p._depletionDate = depDate.toISOString().slice(0,10);
   } else { p._depletionDate = null; }
 
-  // ── 필요입고일 = 예상소진일 - 5영업일 (주말 건너뛰기) ──
+  // ── 필요입고일 = 예상소진일 - 리드타임(영업일) (주말 건너뛰기) ──
   //    → 이 날까지 입고되어야 소진 방지
+  //    리드타임은 leadDays(GUIDE 설정)를 영업일로 환산
   if(p._depletionDate) {
     let dt = new Date(p._depletionDate);
-    let bizDays = 5;
+    let bizDays = leadDays || 20; // 기본 20영업일
     while(bizDays > 0) {
       dt.setDate(dt.getDate() - 1);
       const dow = dt.getDay(); // 0=일,6=토
@@ -7554,14 +7555,13 @@ function renderCell(c, p){
     const ob=p._orderByDate;
     const diff=p._orderByDiff;
     if(!ob||diff===null)return`<td class="n" style="color:#ddd;font-size:11px;text-align:center">-</td>`;
+    // 항상 날짜로 표시 (색상으로 긴급도 구분)
     if(diff<0){
-      // 이미 지연: D+N 지연 표시 (빨간색 굵게)
-      const overdue=Math.abs(diff);
-      return`<td class="n" style="color:#ef4444;font-weight:700;font-size:11px;text-align:center;white-space:nowrap" title="발주필요일: ${ob}">D+${overdue} 지연</td>`;
+      return`<td class="n" style="color:#fff;background:#dc2626;font-weight:700;font-size:11px;text-align:center;white-space:nowrap" title="D+${Math.abs(diff)}일 지연">${ob.slice(5)}</td>`;
     } else if(diff===0){
-      return`<td class="n" style="color:#ef4444;font-weight:700;font-size:11px;text-align:center;white-space:nowrap;background:#fef2f2">오늘!</td>`;
+      return`<td class="n" style="color:#ef4444;font-weight:700;font-size:11px;text-align:center;white-space:nowrap;background:#fef2f2" title="오늘까지 발주필요">${ob.slice(5)}</td>`;
     } else if(diff<=7){
-      return`<td class="n" style="color:#d97706;font-weight:700;font-size:11px;text-align:center;white-space:nowrap" title="발주필요일: ${ob}">D-${diff}</td>`;
+      return`<td class="n" style="color:#d97706;font-weight:700;font-size:11px;text-align:center;white-space:nowrap" title="D-${diff}일">${ob.slice(5)}</td>`;
     } else {
       return`<td class="n" style="color:#16a34a;font-size:11px;text-align:center;white-space:nowrap">${ob.slice(5)}</td>`;
     }
@@ -12434,8 +12434,8 @@ function vendorTypeColor(type){ return VENDOR_TYPE_COLOR[type] || '#9ca3af'; }
 
 function renderVendors(){
   Promise.all([
-    fetch('/api/vendors').then(r=>r.json()),
-    fetch('/api/notes').then(r=>r.json()).catch(()=>({data:[]}))
+    authFetch('/api/vendors').then(r=>r.json()),
+    authFetch('/api/notes').then(r=>r.json()).catch(()=>({data:[]}))
   ]).then(([vResp, nResp])=>{
     vendorList=vResp.data||vResp||[];
     const notesRaw=nResp.data||nResp||[];
@@ -12545,7 +12545,7 @@ function loadVendorNotes(vendorId){
   const el=document.getElementById('vendorNotesList');
   if(!el) return;
   el.innerHTML='<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px">로딩중...</div>';
-  fetch('/api/notes?vendor_id='+vendorId).then(r=>r.json()).then(resp=>{
+  authFetch('/api/notes?vendor_id='+vendorId).then(r=>r.json()).then(resp=>{
     const notes=resp.data||resp||[];
     window._vendorNotesList=notes;
     renderVendorNotes(notes);
@@ -12592,7 +12592,7 @@ async function openNoteDetailModal(noteId){
       ||(window._allNotesList||[]).find(x=>x.note_id===noteId);
   if(!n){
     try {
-      const r=await fetch(`/api/notes/${noteId}`);
+      const r=await authFetch(`/api/notes/${noteId}`);
       const d=await r.json();
       n=d.data||d;
     } catch(e){ return; }
@@ -12627,7 +12627,7 @@ function closeNoteDetailModal(){
 }
 
 async function loadNdComments(noteId){
-  const r=await fetch(`/api/notes/${noteId}/comments`);
+  const r=await authFetch(`/api/notes/${noteId}/comments`);
   const d=await r.json();
   const comments=d.data||[];
   const el=document.getElementById('ndCommentList');
@@ -12650,14 +12650,14 @@ async function submitNdComment(){
   const inp=document.getElementById('ndComInput');
   const content=(inp?.value||'').trim();
   if(!content) return;
-  await fetch(`/api/notes/${noteId}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
+  await authFetch(`/api/notes/${noteId}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})});
   inp.value='';
   await loadNdComments(noteId);
 }
 
 async function removeNdComment(commentId){
   if(!confirm('댓글을 삭제할까요?')) return;
-  await fetch(`/api/note-comments/${commentId}`,{method:'DELETE'});
+  await authFetch(`/api/note-comments/${commentId}`,{method:'DELETE'});
   await loadNdComments(window._ndNoteId);
 }
 
@@ -12668,7 +12668,7 @@ async function toggleNdStatus(){
          ||(window._allNotesList||[]).find(x=>x.note_id===noteId);
   if(!n) return;
   const newStatus=n.status==='done'?'open':'done';
-  await fetch(`/api/notes/${noteId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
+  await authFetch(`/api/notes/${noteId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})});
   closeNoteDetailModal();
   _ndRefresh();
 }
@@ -12676,7 +12676,7 @@ async function toggleNdStatus(){
 async function deleteNdNote(){
   const noteId=window._ndNoteId;
   if(!noteId||!confirm('이슈를 삭제할까요?')) return;
-  await fetch(`/api/notes/${noteId}`,{method:'DELETE'});
+  await authFetch(`/api/notes/${noteId}`,{method:'DELETE'});
   closeNoteDetailModal();
   _ndRefresh();
 }
@@ -12694,7 +12694,7 @@ function editNdNote(){
 }
 
 async function loadNoteComments(noteId){
-  const r = await fetch(`/api/notes/${noteId}/comments`);
+  const r = await authFetch(`/api/notes/${noteId}/comments`);
   const d = await r.json();
   const comments = d.data || [];
   const el = document.getElementById(`noteComments_${noteId}`);
@@ -12714,7 +12714,7 @@ async function addNoteComment(noteId){
   const inp = document.getElementById(`noteComInput_${noteId}`);
   const content = inp?.value.trim();
   if(!content) return;
-  await fetch(`/api/notes/${noteId}/comments`, {
+  await authFetch(`/api/notes/${noteId}/comments`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({content})
   });
@@ -12723,12 +12723,12 @@ async function addNoteComment(noteId){
 }
 
 async function deleteNoteComment(id, noteId){
-  await fetch(`/api/note-comments/${id}`, {method:'DELETE'});
+  await authFetch(`/api/note-comments/${id}`, {method:'DELETE'});
   loadNoteComments(noteId);
 }
 
 async function toggleNoteStatus(noteId, newStatus){
-  await fetch(`/api/notes/${noteId}`, {
+  await authFetch(`/api/notes/${noteId}`, {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({status: newStatus})
   });
@@ -12751,7 +12751,7 @@ function openVendorNoteModal(noteId){
 function closeVendorNoteModal(){ document.getElementById('vendorNoteModal').style.display='none'; }
 
 async function editVendorNote(noteId){
-  const r=await fetch('/api/notes/'+noteId);
+  const r=await authFetch('/api/notes/'+noteId);
   const resp=await r.json();
   const n=resp.data||resp;
   openVendorNoteModal(noteId);
@@ -12776,14 +12776,14 @@ async function saveVendorNote(){
   };
   const url=editId?'/api/notes/'+editId:'/api/notes';
   const method=editId?'PUT':'POST';
-  await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  await authFetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   closeVendorNoteModal();
   if(window._selectedVendorId) loadVendorNotes(window._selectedVendorId);
 }
 
 async function deleteVendorNote(noteId){
   if(!confirm('이 이슈를 삭제할까요?'))return;
-  await fetch('/api/notes/'+noteId,{method:'DELETE'});
+  await authFetch('/api/notes/'+noteId,{method:'DELETE'});
   if(window._selectedVendorId) loadVendorNotes(window._selectedVendorId);
 }
 
@@ -13367,9 +13367,10 @@ async function savePostVendorAndGroup(){
     rows.forEach((row,idx)=>{
       const sel=row.querySelector('.post-vendor-select');
       const process=sel.dataset.process;
-      const vendor=sel.value;
+      const vendor=getPostVendorValue(sel);
       const step=idx+1;
       if(!vendor){ unselected++; return; }
+      if(vendor==='__SKIP__') return; // 사용안함은 건너뛰기
       mappings.push({product_code:code, process_type:process, vendor_name:vendor, step_order:step});
       productChains[code].push({step, process, vendor});
       postVendorMap[code+'_'+process]=vendor;
@@ -13585,18 +13586,25 @@ async function refreshVendorCards(){
         ch.steps.forEach((s,idx)=>{
           const mapKey=code+'_'+s.process;
           const opts=postVendorNames.map(v=>`<option value="${esc(v)}"${v===s.vendor?' selected':''}>${esc(v)}</option>`).join('');
+          const isSkip = s.vendor === '__SKIP__';
+          const isOther = s.vendor === '__OTHER__' || (s.vendor && !postVendorNames.includes(s.vendor) && s.vendor !== '__SKIP__' && s.vendor !== '');
           const icon = s.isFromDB ? '🔄' : (s.vendor ? '📋' : '');
-          html+=`<div class="post-step-row" data-process="${esc(s.process)}" style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx>0?'border-top:1px dashed var(--border)':''}">
+          const uid = code.replace(/[^a-zA-Z0-9]/g,'_')+'_'+s.process.replace(/[^a-zA-Z0-9가-힣]/g,'_');
+          html+=`<div class="post-step-row" data-process="${esc(s.process)}" style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx>0?'border-top:1px dashed var(--border)':''};${isSkip?'opacity:0.4':''}">
             <div style="display:flex;flex-direction:column;gap:2px;min-width:24px">
               <button onclick="movePostStep('${esc(code)}','${esc(s.process)}',-1)" style="border:none;background:none;cursor:pointer;font-size:10px;padding:0;color:var(--text-muted);line-height:1;${idx===0?'opacity:0.3':'opacity:1'}"${idx===0?' disabled':''}>▲</button>
               <button onclick="movePostStep('${esc(code)}','${esc(s.process)}',1)" style="border:none;background:none;cursor:pointer;font-size:10px;padding:0;color:var(--text-muted);line-height:1;${idx===ch.steps.length-1?'opacity:0.3':'opacity:1'}"${idx===ch.steps.length-1?' disabled':''}>▼</button>
             </div>
-            <span style="background:var(--primary);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${idx+1}</span>
-            <span style="font-size:13px;font-weight:600;min-width:60px${s.process==='재단'&&_isT3?';color:#dc2626':''}}">${esc(s.process)}${s.process==='재단'&&_isT3?' <span style="font-size:10px;background:#dc2626;color:#fff;padding:1px 4px;border-radius:3px;vertical-align:middle">'+esc(_jeolVal)+'</span>':''}</span>
+            <span style="background:${isSkip?'#94a3b8':'var(--primary)'};color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${isSkip?'—':(idx+1)}</span>
+            <span style="font-size:13px;font-weight:600;min-width:60px${s.process==='재단'&&_isT3?';color:#dc2626':''}${isSkip?';text-decoration:line-through;color:#94a3b8':''}}">${esc(s.process)}${s.process==='재단'&&_isT3?' <span style="font-size:10px;background:#dc2626;color:#fff;padding:1px 4px;border-radius:3px;vertical-align:middle">'+esc(_jeolVal)+'</span>':''}</span>
             ${idx>0?'<span style="color:var(--text-muted);font-size:11px">←</span>':''}
-            <select class="post-vendor-select" data-code="${esc(code)}" data-process="${esc(s.process)}" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;max-width:160px">
-              <option value="">업체 선택</option>${opts}
+            <select class="post-vendor-select" data-code="${esc(code)}" data-process="${esc(s.process)}" onchange="onPostVendorChange(this,'${esc(uid)}')" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;max-width:160px">
+              <option value="">업체 선택</option>
+              <option value="__SKIP__" style="color:#94a3b8"${isSkip?' selected':''}>🚫 사용안함 (패스)</option>
+              ${opts}
+              <option value="__OTHER__" style="color:#7c3aed"${isOther?' selected':''}>➕ 기타업체 직접입력</option>
             </select>
+            <input id="postOther_${uid}" class="post-other-input" data-code="${esc(code)}" data-process="${esc(s.process)}" placeholder="업체명 입력" value="${isOther?esc(s.vendor):''}" style="padding:4px 6px;border:1px solid #d8b4fe;border-radius:4px;font-size:12px;width:120px;display:${isOther?'block':'none'}">
             <span style="font-size:12px" title="${s.isFromDB?'이전발주 불러옴':'product_info 기본값'}">${icon}</span>
           </div>`;
           if(idx < ch.steps.length-1) {
@@ -13616,6 +13624,35 @@ async function refreshVendorCards(){
   container.innerHTML=html;
 }
 
+// 후공정 업체 드롭다운 변경 핸들러
+function onPostVendorChange(sel, uid) {
+  const otherInput = document.getElementById('postOther_' + uid);
+  const row = sel.closest('.post-step-row');
+  if (sel.value === '__OTHER__') {
+    if (otherInput) { otherInput.style.display = 'block'; otherInput.focus(); }
+  } else {
+    if (otherInput) { otherInput.style.display = 'none'; otherInput.value = ''; }
+  }
+  // 사용안함 시 시각적 비활성화
+  if (sel.value === '__SKIP__') {
+    row.style.opacity = '0.4';
+    row.querySelector('span:nth-child(3)').style.background = '#94a3b8';
+  } else {
+    row.style.opacity = '1';
+    row.querySelector('span:nth-child(3)').style.background = 'var(--primary)';
+  }
+}
+
+// 후공정 vendor select에서 실제 vendor명 가져오기 (기타/패스 처리)
+function getPostVendorValue(sel) {
+  if (sel.value === '__SKIP__') return '__SKIP__';
+  if (sel.value === '__OTHER__') {
+    const otherInput = sel.parentElement.querySelector('.post-other-input');
+    return otherInput ? otherInput.value.trim() : '';
+  }
+  return sel.value;
+}
+
 async function savePostChainPO(step1Vendor, btn){
   const deliveryDate=document.getElementById('poDeliveryDate').value;
   const notes=document.getElementById('poNotes').value;
@@ -13630,9 +13667,12 @@ async function savePostChainPO(step1Vendor, btn){
     const chain=[];
     rows.forEach((row,idx)=>{
       const sel=row.querySelector('.post-vendor-select');
-      chain.push({step:idx+1, process:sel.dataset.process, vendor:sel.value});
+      const vendor = getPostVendorValue(sel);
+      if(vendor !== '__SKIP__') {
+        chain.push({step:idx+1, process:sel.dataset.process, vendor: vendor});
+      }
     });
-    // 이 품목의 step1 vendor가 일치하면 포함
+    // 이 품목의 step1 vendor가 일치하면 포함 (패스된 공정은 체인에서 제외)
     if(chain.length && chain[0].vendor===step1Vendor){
       const info=productInfo[code]||{};
       allChains.push({code, brand:info['브랜드']||'', qty:orderQty[code]||0, spec:info['제품사양']||'', chain});
@@ -15910,9 +15950,13 @@ function renderPODrafts(drafts){
     return;
   }
 
-  // 거래처별 그룹핑
+  // 미완료/완료 분리
+  const activeDrafts = drafts.filter(d => d.status !== 'completed' && !d.completed_at);
+  const completedDrafts = drafts.filter(d => d.status === 'completed' || !!d.completed_at);
+
+  // 거래처별 그룹핑 (활성 발주만)
   const groups = {};
-  drafts.forEach(d => {
+  activeDrafts.forEach(d => {
     const key = d.vendor_name || '(미지정)';
     if(!groups[key]) groups[key] = [];
     groups[key].push(d);
@@ -15933,9 +15977,15 @@ function renderPODrafts(drafts){
       const itemList = (() => { try{ return JSON.parse(d.items||'[]'); }catch{ return []; } })();
       const itemCount = itemList.filter(x=>x.name).length;
       const dateStr = (d.po_date||'').slice(0,10);
-      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-light);gap:8px;flex-wrap:wrap">
+      const isCompleted = d.status === 'completed' || !!d.completed_at;
+      const isDd = d.legal_entity === 'dd';
+      const entityStyle = isDd ? 'background:#fef2f2;border-left:3px solid #ef4444' : '';
+      const entityBadge = isDd ? '<span style="font-size:10px;background:#fecaca;color:#dc2626;padding:1px 6px;border-radius:4px;font-weight:600">DD</span>' : '';
+      const completedBadge = isCompleted ? '<span style="font-size:10px;background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:4px;font-weight:600">✅ 완료</span>' : '';
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-light);gap:8px;flex-wrap:wrap;${entityStyle};${isCompleted?'opacity:0.7':''}">
         <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
           <div style="font-size:13px;font-weight:700;color:var(--primary);white-space:nowrap">${esc(d.po_number)}</div>
+          ${entityBadge}${completedBadge}
           <div style="font-size:12px;color:var(--text-muted);white-space:nowrap">${dateStr}</div>
           <div style="font-size:12px;color:var(--text-secondary)">${itemCount}품목</div>
           ${d.payment_terms ? `<div style="font-size:11px;background:#eff6ff;color:#1d4ed8;padding:1px 7px;border-radius:10px;border:1px solid #bfdbfe">${esc(d.payment_terms)}</div>` : ''}
@@ -15943,6 +15993,7 @@ function renderPODrafts(drafts){
         <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
           <div style="font-size:15px;font-weight:800;color:#0f172a">${fN(d.total_amount)}원</div>
           <button class="btn btn-sm" onclick="viewPODraft(${d.id})" style="font-size:11px;padding:3px 10px">보기/인쇄</button>
+          ${!isCompleted?`<button class="btn btn-sm" onclick="markPODraftComplete(${d.id})" style="font-size:11px;padding:3px 10px;background:#16a34a;color:#fff;border-color:#16a34a">✅ 완료</button>`:'<button class="btn btn-sm" onclick="markPODraftComplete(${d.id},true)" style="font-size:11px;padding:3px 10px;background:#f59e0b;color:#fff;border-color:#f59e0b">↩ 복원</button>'}
           <button class="btn btn-sm" onclick="quickEmailPO(${d.id},'${(d.vendor_email||'').replace(/'/g,'')}')" style="font-size:11px;padding:3px 10px;background:#059669;color:#fff;border-color:#059669">✉️ 이메일</button>
           <button onclick="deletePODraft(${d.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:18px;padding:0 4px" title="삭제">×</button>
         </div>
@@ -15951,6 +16002,52 @@ function renderPODrafts(drafts){
 
     html += `</div></div>`;
   });
+
+  // 완료된 발주 (PO번호 기준 그룹핑, 접기/펼치기)
+  if(completedDrafts.length){
+    const cGroups = {};
+    completedDrafts.forEach(d => {
+      const key = d.vendor_name || '(미지정)';
+      if(!cGroups[key]) cGroups[key] = [];
+      cGroups[key].push(d);
+    });
+    html += `<div style="margin-top:24px">
+      <div onclick="var sec=document.getElementById('completedDraftsSection');sec.style.display=sec.style.display==='none'?'block':'none';this.querySelector('.cd-arrow').textContent=sec.style.display==='none'?'▶':'▼'" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f1f5f9;border-radius:8px;cursor:pointer;user-select:none;margin-bottom:8px">
+        <span class="cd-arrow" style="font-size:12px;color:#64748b">▶</span>
+        <span style="font-weight:700;font-size:14px;color:#64748b">✅ 완료된 발주서</span>
+        <span style="font-size:12px;color:#94a3b8">${completedDrafts.length}건</span>
+      </div>
+      <div id="completedDraftsSection" style="display:none">`;
+    Object.entries(cGroups).forEach(([vendor, items]) => {
+      const total = items.reduce((s,x)=>s+(x.total_amount||0),0);
+      html += `<div style="margin-bottom:12px;opacity:0.6">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#e2e8f0;border-radius:6px 6px 0 0">
+          <div style="font-size:13px;font-weight:600;color:#475569">🏢 ${esc(vendor)}</div>
+          <div style="font-size:11px;color:#94a3b8">${items.length}건 · ${fN(total)}원</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:0 0 6px 6px;overflow:hidden">`;
+      items.forEach(d => {
+        const itemList = (() => { try{ return JSON.parse(d.items||'[]'); }catch{ return []; } })();
+        const itemCount = itemList.filter(x=>x.name).length;
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid #f1f5f9;font-size:12px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:600;color:#64748b">${esc(d.po_number)}</span>
+            <span style="color:#94a3b8">${(d.po_date||'').slice(0,10)}</span>
+            <span style="color:#94a3b8">${itemCount}품목</span>
+            <span style="font-size:10px;background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:3px">완료</span>
+            ${d.completed_at?`<span style="font-size:10px;color:#94a3b8">${d.completed_at.slice(0,16)}</span>`:''}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:600">${fN(d.total_amount)}원</span>
+            <button class="btn btn-sm" onclick="viewPODraft(${d.id})" style="font-size:10px;padding:2px 8px">보기</button>
+            <button class="btn btn-sm" onclick="markPODraftComplete(${d.id},true)" style="font-size:10px;padding:2px 8px;background:#f59e0b;color:#fff">↩ 복원</button>
+          </div>
+        </div>`;
+      });
+      html += `</div></div>`;
+    });
+    html += `</div></div>`;
+  }
 
   el.innerHTML = html;
 }
@@ -16401,6 +16498,16 @@ async function deletePODraft(id){
   if(!confirm('발주서를 삭제하시겠습니까?')) return;
   await fetch(`/api/po-drafts/${id}`, {method:'DELETE'}).catch(()=>{});
   loadPODrafts();
+}
+
+async function markPODraftComplete(id, restore){
+  const action = restore ? 'restore' : 'complete';
+  try {
+    const r = await fetch(`/api/po-drafts/${id}/status`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action})});
+    const d = await r.json();
+    if(d.ok) loadPODrafts();
+    else alert('실패: '+(d.error||''));
+  } catch(e) { alert('오류'); }
 }
 
 // ── 목록에서 바로 이메일 발송 ──
@@ -16924,7 +17031,7 @@ async function loadNotes(){
   if(to) params.set('to', to);
   if(q) params.set('q', q);
   try {
-    const res = await fetch('/api/notes?'+params);
+    const res = await authFetch('/api/notes?'+params);
     const json = await res.json();
     let notes = json.data || json;
     const empty = document.getElementById('notesEmpty');
@@ -17008,7 +17115,7 @@ async function loadNotes(){
   // 댓글 수 배지 초기화
   document.querySelectorAll('[id^="noteCmtBadge_"]').forEach(async el => {
     const noteId = el.id.replace('noteCmtBadge_','');
-    const r = await fetch(`/api/notes/${noteId}/comments`);
+    const r = await authFetch(`/api/notes/${noteId}/comments`);
     const d = await r.json();
     el.textContent = `💬 ${(d.data||[]).length}`;
   });
@@ -17028,7 +17135,7 @@ async function toggleNoteComments(noteId){
 }
 
 async function fetchNoteComments(noteId){
-  const r = await fetch(`/api/notes/${noteId}/comments`);
+  const r = await authFetch(`/api/notes/${noteId}/comments`);
   const d = await r.json();
   const comments = d.data || [];
   const badge = document.getElementById(`noteCmtBadge_${noteId}`);
@@ -17051,7 +17158,7 @@ async function submitNoteComment(noteId){
   const inp = document.getElementById(`noteCmtInput_${noteId}`);
   const content = inp?.value.trim();
   if(!content) return;
-  await fetch(`/api/notes/${noteId}/comments`, {
+  await authFetch(`/api/notes/${noteId}/comments`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({content})
   });
@@ -17060,7 +17167,7 @@ async function submitNoteComment(noteId){
 }
 
 async function removeNoteComment(id, noteId){
-  await fetch(`/api/note-comments/${id}`, {method:'DELETE'});
+  await authFetch(`/api/note-comments/${id}`, {method:'DELETE'});
   fetchNoteComments(noteId);
 }
 
@@ -17123,7 +17230,7 @@ async function saveNote(){
   try {
     const url = id ? `/api/notes/${id}` : '/api/notes';
     const method = id ? 'PUT' : 'POST';
-    await fetch(url, { method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    await authFetch(url, { method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
     closeNoteModal();
     loadNotes();
   } catch(e){ alert('저장 실패: '+e.message); }
@@ -17131,7 +17238,7 @@ async function saveNote(){
 
 async function viewNote(noteId){
   try {
-    const res = await fetch(`/api/notes/${noteId}`);
+    const res = await authFetch(`/api/notes/${noteId}`);
     const json = await res.json();
     const n = json.data || json;
     openNoteModal(n);
@@ -17145,7 +17252,7 @@ async function editNote(noteId){
 async function deleteNote(noteId){
   if(!confirm('이 노트를 삭제하시겠습니까?')) return;
   try {
-    await fetch(`/api/notes/${noteId}`, {method:'DELETE'});
+    await authFetch(`/api/notes/${noteId}`, {method:'DELETE'});
     loadNotes();
   } catch(e){ alert('삭제 실패'); }
 }
@@ -19443,8 +19550,9 @@ async function loadVendorPortal(){
             actionBtn=`<span style="font-size:11px;color:#94a3b8">${esc(po.status)}</span>`;
           }
 
-          const stBg=po.status==='대기'?'#f0f9ff':po.status==='발송'?'#fff7ed':po.status==='확인'?'#eff6ff':'#f9fafb';
-          const stBorder=po.status==='대기'?'#0ea5e9':po.status==='발송'?'#f97316':po.status==='확인'?'#3b82f6':'#e5e7eb';
+          const isDd = po.legal_entity==='dd';
+          const stBg=isDd?(po.status==='발송'?'#fff1f2':'#fef2f2'):(po.status==='대기'?'#f0f9ff':po.status==='발송'?'#fff7ed':po.status==='확인'?'#eff6ff':'#f9fafb');
+          const stBorder=isDd?'#e11d48':(po.status==='대기'?'#0ea5e9':po.status==='발송'?'#f97316':po.status==='확인'?'#3b82f6':'#e5e7eb');
           const isDone=['OS등록대기','완료'].includes(po.status);
 
           const shipmentScheduleHtml = '';
@@ -19465,6 +19573,7 @@ async function loadVendorPortal(){
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                 <span class="vp-arrow" style="font-size:11px;color:#64748b;width:14px">${defaultOpen?'▼':'▶'}</span>
                 <span style="font-weight:700;font-size:14px">${esc(po.po_number||'')}</span>
+                ${isDd?'<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#fecaca;color:#dc2626;font-weight:700">DD</span>':'<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:#dbeafe;color:#1d4ed8;font-weight:700">바른</span>'}
                 <span style="font-size:11px;padding:2px 6px;border-radius:3px;background:${stBorder}20;color:${stBorder};font-weight:600">${esc(po.status)}</span>
                 <span style="font-size:13px;color:#64748b">${esc(po.po_date||'')} · ${vendor.type==='원재료' ? (()=>{
                   let totalR=0; items.forEach(it=>{const j=parseFloat(it.cut)||0,jp=parseFloat(it.imposition)||0; totalR+=(j&&jp)?(it.ordered_qty||0)/500/j/jp:0;}); return totalR.toFixed(1)+' R';
@@ -19475,13 +19584,14 @@ async function loadVendorPortal(){
             </div>
             <div style="display:${defaultOpen?'block':'none'};padding:0 16px 12px">
             <table style="width:100%;font-size:13px;border-collapse:collapse;table-layout:fixed">
-              ${vendor.type==='원재료' ? `<colgroup><col style="width:12%"><col style="width:10%"><col style="width:18%"><col style="width:5%"><col style="width:8%"><col style="width:17%"><col style="width:13%"><col style="width:17%"></colgroup>
+              ${vendor.type==='원재료' ? `<colgroup><col style="width:11%"><col style="width:9%"><col style="width:16%"><col style="width:4%"><col style="width:7%"><col style="width:6%"><col style="width:16%"><col style="width:13%"><col style="width:18%"></colgroup>
               <thead><tr style="background:#f1f5f9">
                 <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">제품코드</th>
                 <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원자재코드</th>
                 <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원재료용지명</th>
                 <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">절</th>
                 <th style="padding:8px 6px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">수량(R)</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:12px">긴급도</th>
                 <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">입고처(공정)</th>
                 <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">출고일</th>
                 <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">전체공정</th>
@@ -19498,6 +19608,7 @@ async function loadVendorPortal(){
                 <td style="padding:8px 6px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
                 <td style="padding:8px 6px;text-align:center;font-size:13px">${esc(it.cut||'-')}</td>
                 <td style="padding:8px 6px;text-align:right;font-weight:700;color:var(--primary);font-size:15px">${ream}</td>
+                <td style="padding:8px 4px;text-align:center;font-size:11px">${it.is_urgent?'<span style="background:#dc2626;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;animation:pulse 1.5s infinite">🚨 긴급</span>':it.stock_months!==null&&it.stock_months<=2?'<span style="background:#f59e0b;color:#fff;padding:2px 6px;border-radius:3px;font-weight:600">⚠ 부족</span>':'<span style="color:#10b981">안전</span>'}</td>
                 <td style="padding:8px 6px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${it.first_process_vendor ? `<span style="color:#0369a1;font-weight:700">${esc(it.first_process_vendor)}</span><span style="color:#64748b;font-size:12px">(${esc(it.first_process)})</span>` : '<span style="color:#94a3b8">-</span>'}</td>
                 <td style="padding:5px 4px;text-align:center"><input type="date" class="vp-ship-date" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${it.ship_date||today}" style="width:100%;padding:5px 4px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:center"></td>
                 <td style="padding:8px 6px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${esc(it.process_chain_full||'-')}</td>
@@ -20900,7 +21011,7 @@ async function loadDefectDetail(id) {
             <div style="font-size:12px;color:#3B82F6;font-weight:600;margin-bottom:2px">처리 발주 연결됨</div>
             <div style="font-size:14px;font-weight:700;font-family:monospace">${linkedPoNum || '발주 생성됨'}</div>
           </div>
-          ${linkedPoNum ? `<button class="btn btn-sm" style="background:#3B82F6;color:#fff;border:none" onclick="showPage('po');setTimeout(()=>{const po=poList.find(p=>p.po_number==='${linkedPoNum}');if(po)console.log('PO found:',po);},500)">발주 확인 →</button>` : ''}
+          ${linkedPoNum ? `<button class="btn btn-sm" style="background:#3B82F6;color:#fff;border:none" onclick="showPage('po-list');setTimeout(()=>{const inp=document.querySelector('#poSearchInput');if(inp){inp.value='${linkedPoNum}';inp.dispatchEvent(new Event('input'));}},500)">발주 확인 →</button>` : ''}
         </div>`;
     } else if (d.status !== 'resolved' && d.claim_type) {
       createPoContent.innerHTML = `

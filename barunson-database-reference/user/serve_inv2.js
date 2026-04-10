@@ -1,6 +1,6 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 const APP_VERSION_DATE = '2026-04-10';
 const http = require('http');
 const https = require('https');
@@ -1835,9 +1835,26 @@ await db.exec(`CREATE TABLE IF NOT EXISTS po_drafts (
   created_at TEXT DEFAULT (datetime('now','localtime'))
 )`);
 
+// v1.0.9: vendor_notes 테이블 (미팅일지) — CREATE 누락 수정
+await db.exec(`CREATE TABLE IF NOT EXISTS vendor_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  vendor_id INTEGER,
+  vendor_name TEXT DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT DEFAULT '',
+  note_type TEXT DEFAULT 'meeting',
+  note_date TEXT DEFAULT (date('now','localtime')),
+  status TEXT DEFAULT 'open',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
 try { await db.exec("ALTER TABLE vendor_notes ADD COLUMN status TEXT DEFAULT 'open'"); } catch(_) {}
+try { await db.exec("ALTER TABLE vendor_notes ADD COLUMN updated_at TEXT DEFAULT (datetime('now','localtime'))"); } catch(_) {}
 // v1.0.8: po_drafts 법인 분리
 try { await db.exec("ALTER TABLE po_drafts ADD COLUMN legal_entity TEXT DEFAULT 'barunson'"); } catch(_) {}
+// v1.0.9: po_drafts 완료/연결PO
+try { await db.exec("ALTER TABLE po_drafts ADD COLUMN linked_po_id INTEGER DEFAULT 0"); } catch(_) {}
+try { await db.exec("ALTER TABLE po_drafts ADD COLUMN completed_at TEXT"); } catch(_) {}
 
 // ── 불량 클레임 정산 (defect settlements) ──
 await db.exec(`CREATE TABLE IF NOT EXISTS defect_settlements (
@@ -5698,6 +5715,22 @@ async function handleRequest(req, res) {
       }
       if (!r.next_destination) r.next_destination = '파주(본사)';
     }
+    // 재고 정보 보강 (거래처가 긴급도 판단용)
+    try {
+      const invRows = await db.prepare("SELECT product_code, current_stock, monthly_usage FROM products WHERE product_code IN (SELECT DISTINCT product_code FROM po_items WHERE po_id IN (SELECT po_id FROM po_header WHERE vendor_name=?))").all(vendor.name);
+      const invMap = {};
+      invRows.forEach(r => { invMap[r.product_code] = { stock: r.current_stock||0, monthly: r.monthly_usage||0 }; });
+      for (const po of rows) {
+        for (const it of (po.items||[])) {
+          const inv = invMap[it.product_code] || {};
+          it.current_stock = inv.stock || 0;
+          it.monthly_usage = inv.monthly || 0;
+          it.stock_months = inv.monthly > 0 ? Math.round((inv.stock / inv.monthly) * 10) / 10 : null;
+          it.is_urgent = inv.monthly > 0 && inv.stock <= inv.monthly; // 1개월 이하 = 긴급
+        }
+      }
+    } catch(e) { console.warn('vendor-portal 재고 보강 실패:', e.message); }
+
     // 취소 제외 전체 표시, 처리 가능한 것 분리
     const activePOs = rows.filter(r => r.status !== '취소');
     const actionable = activePOs.filter(r => ['발송','확인'].includes(r.status));
@@ -8470,6 +8503,19 @@ async function handleRequest(req, res) {
       console.error('발주서 이메일 오류:', e.message);
       fail(res, 500, '이메일 발송 실패: ' + e.message);
     }
+    return;
+  }
+
+  // PATCH /api/po-drafts/:id/status — 발주서 완료/복원
+  if (pathname.match(/^\/api\/po-drafts\/\d+\/status$/) && method === 'PATCH') {
+    const id = parseInt(pathname.split('/')[3]);
+    const body = await readJSON(req);
+    if (body.action === 'complete') {
+      await db.prepare("UPDATE po_drafts SET status='completed', completed_at=datetime('now','localtime') WHERE id=?").run(id);
+    } else if (body.action === 'restore') {
+      await db.prepare("UPDATE po_drafts SET status='sent', completed_at=NULL WHERE id=?").run(id);
+    }
+    ok(res, { updated: true });
     return;
   }
 
