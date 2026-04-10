@@ -1,0 +1,33 @@
+환경변수 로드: C:\GitHub\S.C_erp\barunson-database-reference\.env (DB_SERVER: OK )
+ℹ️ GOOGLE_CLIENT_ID 미설정 — .env에 추가하면 Google 로그인 활성화
+ℹ️ SMTP 미설정 — .env에 SMTP_USER, SMTP_PASS 추가 필요 (Gmail 앱 비밀번호)
+스마트재고현황: http://localhost:12026
+헬스체크: http://localhost:12026/api/health
+[자동발주 스케줄러] 다음 실행: 2026. 4. 5. AM 9:00:00 (644분 후)
+[XERP 동기화] 다음 실행: 2026. 4. 5. AM 9:30:00 (674분 후)
+DD MySQL 연결 실패: Access denied for user 'readonly_wedding'@'210.104.178.250' (using password: YES)
+토큰 갱신 실패: {
+  "error": "invalid_grant",
+  "error_description": "reauth related error (invalid_rapt)",
+  "error_uri": "https://support.google.com/a/answer/9368756",
+  "error_subtype": "invalid_rapt"
+}
+Google Sheet 동기화 준비 완료 (Apps Script 웹앱)
+XERP 연결 실패 (시도 1): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 5초 후 (시도 #1)
+XERP 연결 실패 (시도 2): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 10초 후 (시도 #2)
+XERP 연결 실패 (시도 3): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 20초 후 (시도 #3)
+XERP 연결 실패 (시도 4): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 40초 후 (시도 #4)
+XERP 연결 실패 (시도 5): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 5): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 5): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 5): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 80초 후 (시도 #5)
+XERP 연결 실패 (시도 6): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 6): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 6): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 연결 실패 (시도 6): Failed to connect to barun-shopdb.9925ce92729d.database.windows.net:1433 in 15000ms
+XERP 재연결 예약: 160초 후 (시도 #6)

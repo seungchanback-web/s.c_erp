@@ -1,0 +1,3486 @@
+paths:
+  /health:
+    get:
+      summary: 서버 상태 확인 (기본)
+      operationId: healthCheck
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: 서버 정상
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  timestamp: { type: string, format: date-time }
+
+  /api/health:
+    get:
+      summary: API 서버 상태 확인 (상세)
+      operationId: apiHealthCheck
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: 서버 및 DB 연결 상태
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  db: { type: string }
+                  uptime: { type: number }
+
+  /api/menu-settings:
+    get:
+      summary: 메뉴 설정 조회
+      operationId: getMenuSettings
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 메뉴 설정 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings: { type: object }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 메뉴 설정 저장 (관리자 전용)
+      operationId: saveMenuSettings
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settings]
+              properties:
+                settings:
+                  type: object
+                  description: page_id 키별 is_enabled, sort_order 설정
+                  additionalProperties:
+                    type: object
+                    properties:
+                      is_enabled: { type: boolean }
+                      sort_order: { type: integer }
+      responses:
+        '200':
+          description: 저장 성공
+        '401':
+          description: 인증 필요
+        '403':
+          description: 관리자 권한 필요
+
+  /api/rbac/roles:
+    get:
+      summary: 역할 목록 조회
+      operationId: getRbacRoles
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 역할 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        description: { type: string }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 역할 생성
+      operationId: createRbacRole
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                permissions: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 역할 생성 성공
+        '401':
+          description: 인증 필요
+
+  /api/rbac/permissions:
+    get:
+      summary: 전체 권한 목록 조회
+      operationId: getRbacPermissions
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 권한 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resource: { type: string }
+                        action: { type: string }
+        '401':
+          description: 인증 필요
+
+  /api/rbac/user-permissions:
+    get:
+      summary: 사용자별 권한 조회
+      operationId: getRbacUserPermissions
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 사용자 권한
+        '401':
+          description: 인증 필요
+
+  /api/rbac/check:
+    post:
+      summary: 권한 확인
+      operationId: checkRbacPermission
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resource: { type: string }
+                action: { type: string }
+      responses:
+        '200':
+          description: 권한 확인 결과
+        '401':
+          description: 인증 필요
+
+  /api/audit-log:
+    get:
+      summary: 감사 로그 조회 (관리자 전용)
+      operationId: getAuditLog
+      tags: [AuditLog]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: user
+          in: query
+          schema: { type: string }
+          description: 사용자 이름 필터
+        - name: action
+          in: query
+          schema: { type: string }
+          description: 액션 필터
+        - name: resource
+          in: query
+          schema: { type: string }
+          description: 리소스 필터
+        - name: start
+          in: query
+          schema: { type: string, format: date }
+          description: 시작일
+        - name: end
+          in: query
+          schema: { type: string, format: date }
+          description: 종료일
+        - name: q
+          in: query
+          schema: { type: string }
+          description: 검색어
+      responses:
+        '200':
+          description: 감사 로그 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        user_name: { type: string }
+                        action: { type: string }
+                        resource: { type: string }
+                        detail: { type: string }
+                        created_at: { type: string, format: date-time }
+                  total: { type: integer }
+        '401':
+          description: 인증 필요
+        '403':
+          description: 관리자 권한 필요
+
+  /api/audit-log/stats:
+    get:
+      summary: 감사 로그 통계
+      operationId: getAuditLogStats
+      tags: [AuditLog]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, default: 7 }
+      responses:
+        '200':
+          description: 감사 로그 통계
+        '401':
+          description: 인증 필요
+        '403':
+          description: 관리자 권한 필요
+
+  /api/audit-log/actions:
+    get:
+      summary: 감사 로그 액션 유형 목록
+      operationId: getAuditLogActions
+      tags: [AuditLog]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 액션 유형 목록
+        '401':
+          description: 인증 필요
+
+  /api/error-logs:
+    get:
+      summary: 에러 로그 조회 (관리자 전용)
+      operationId: getErrorLogs
+      tags: [AuditLog]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: level
+          in: query
+          schema: { type: string, enum: [error, warn, info] }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 에러 로그 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        level: { type: string }
+                        message: { type: string }
+                        stack: { type: string }
+                        created_at: { type: string, format: date-time }
+                  total: { type: integer }
+        '401':
+          description: 인증 필요
+        '403':
+          description: 관리자 권한 필요
+
+  /api/notes:
+    get:
+      summary: 노트 목록 조회
+      operationId: getNotes
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vendor_id
+          in: query
+          schema: { type: integer }
+        - name: note_type
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 노트 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        content: { type: string }
+                        note_type: { type: string }
+                        vendor_id: { type: integer }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 노트 생성
+      operationId: createNote
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                note_type: { type: string }
+                vendor_id: { type: integer }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 노트 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/notes/{id}:
+    get:
+      summary: 노트 상세 조회
+      operationId: getNoteById
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 노트 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 노트를 찾을 수 없음
+    put:
+      summary: 노트 수정
+      operationId: updateNote
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                content: { type: string }
+                note_type: { type: string }
+                vendor_id: { type: integer }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 노트를 찾을 수 없음
+    delete:
+      summary: 노트 삭제
+      operationId: deleteNote
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 노트를 찾을 수 없음
+
+  /api/notes/{id}/comments:
+    get:
+      summary: 노트 댓글 목록 조회
+      operationId: getNoteComments
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 댓글 목록
+        '401':
+          description: 인증 필요
+    post:
+      summary: 노트 댓글 작성
+      operationId: createNoteComment
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        '200':
+          description: 댓글 작성 성공
+        '401':
+          description: 인증 필요
+
+  /api/note-comments/{id}:
+    delete:
+      summary: 노트 댓글 삭제
+      operationId: deleteNoteComment
+      tags: [Notes]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 댓글을 찾을 수 없음
+
+  /api/tasks:
+    get:
+      summary: 업무 목록 조회
+      operationId: getTasks
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, in_progress, done, cancelled] }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: assignee
+          in: query
+          schema: { type: integer }
+          description: 담당자 user_id
+        - name: priority
+          in: query
+          schema: { type: string, enum: [low, medium, high, urgent] }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 업무 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        status: { type: string }
+                        priority: { type: string }
+                        assignee_id: { type: integer }
+                        due_date: { type: string, format: date }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 업무 생성
+      operationId: createTask
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                category: { type: string }
+                priority: { type: string, enum: [low, medium, high, urgent] }
+                assignee_id: { type: integer }
+                due_date: { type: string, format: date }
+                template_id: { type: integer }
+      responses:
+        '200':
+          description: 업무 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/tasks/{id}:
+    get:
+      summary: 업무 상세 조회
+      operationId: getTaskById
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 업무 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 업무를 찾을 수 없음
+    put:
+      summary: 업무 수정
+      operationId: updateTask
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+                status: { type: string }
+                priority: { type: string }
+                assignee_id: { type: integer }
+                due_date: { type: string, format: date }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 업무를 찾을 수 없음
+    delete:
+      summary: 업무 삭제
+      operationId: deleteTask
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+
+  /api/tasks/{id}/comments:
+    get:
+      summary: 업무 댓글 목록 조회
+      operationId: getTaskComments
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 댓글 목록
+        '401':
+          description: 인증 필요
+    post:
+      summary: 업무 댓글 작성
+      operationId: createTaskComment
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        '200':
+          description: 댓글 작성 성공
+        '401':
+          description: 인증 필요
+
+  /api/tasks/{id}/steps/init:
+    post:
+      summary: 업무 단계 초기화 (템플릿 기반)
+      operationId: initTaskSteps
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 단계 초기화 성공
+        '401':
+          description: 인증 필요
+
+  /api/tasks/{id}/steps:
+    get:
+      summary: 업무 단계 목록 조회
+      operationId: getTaskSteps
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 단계 목록
+        '401':
+          description: 인증 필요
+
+  /api/task-steps/{stepId}:
+    put:
+      summary: 업무 단계 상태 업데이트
+      operationId: updateTaskStep
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: stepId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [pending, done, skipped] }
+                note: { type: string }
+      responses:
+        '200':
+          description: 단계 업데이트 성공
+        '401':
+          description: 인증 필요
+
+  /api/task-templates:
+    get:
+      summary: 업무 템플릿 목록 조회
+      operationId: getTaskTemplates
+      tags: [Tasks]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 템플릿 목록
+        '401':
+          description: 인증 필요
+
+  /api/notices:
+    get:
+      summary: 공지사항 목록 조회
+      operationId: getNotices
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 공지사항 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        category: { type: string }
+                        is_pinned: { type: boolean }
+                        created_at: { type: string, format: date-time }
+                  total: { type: integer }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 공지사항 작성
+      operationId: createNotice
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                category: { type: string }
+                is_pinned: { type: boolean }
+                is_popup: { type: boolean }
+                popup_start: { type: string, format: date }
+                popup_end: { type: string, format: date }
+      responses:
+        '200':
+          description: 공지사항 작성 성공
+        '401':
+          description: 인증 필요
+
+  /api/notices/popup:
+    get:
+      summary: 팝업 공지사항 조회
+      operationId: getPopupNotices
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 현재 표시할 팝업 공지사항
+        '401':
+          description: 인증 필요
+
+  /api/notices/release:
+    post:
+      summary: 릴리즈 노트 공지 생성
+      operationId: createReleaseNotice
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string }
+                changes: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 릴리즈 공지 생성 성공
+        '401':
+          description: 인증 필요
+
+  /api/notices/{id}:
+    get:
+      summary: 공지사항 상세 조회
+      operationId: getNoticeById
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 공지사항 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 공지사항을 찾을 수 없음
+    put:
+      summary: 공지사항 수정
+      operationId: updateNotice
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                content: { type: string }
+                category: { type: string }
+                is_pinned: { type: boolean }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 공지사항을 찾을 수 없음
+    delete:
+      summary: 공지사항 삭제
+      operationId: deleteNotice
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+
+  /api/notices/popup/{id}/dismiss:
+    post:
+      summary: 팝업 공지사항 닫기
+      operationId: dismissPopupNotice
+      tags: [Notices]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 팝업 닫기 성공
+        '401':
+          description: 인증 필요
+
+  /api/notifications:
+    get:
+      summary: 알림 목록 조회
+      operationId: getNotifications
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 알림 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        type: { type: string }
+                        message: { type: string }
+                        is_read: { type: boolean }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+
+  /api/notifications/unread-count:
+    get:
+      summary: 읽지 않은 알림 개수 조회
+      operationId: getUnreadNotificationCount
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 읽지 않은 알림 수
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        '401':
+          description: 인증 필요
+
+  /api/notifications/read/{id}:
+    post:
+      summary: 알림 읽음 처리
+      operationId: readNotification
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 읽음 처리 성공
+        '401':
+          description: 인증 필요
+
+  /api/notifications/read-all:
+    post:
+      summary: 전체 알림 읽음 처리
+      operationId: readAllNotifications
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 전체 읽음 처리 성공
+        '401':
+          description: 인증 필요
+
+  /api/approvals/pending-count:
+    get:
+      summary: 대기 중인 결재 건수 조회
+      operationId: getApprovalPendingCount
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 대기 결재 건수
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        '401':
+          description: 인증 필요
+
+  /api/approvals:
+    get:
+      summary: 결재 목록 조회
+      operationId: getApprovals
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tab
+          in: query
+          schema: { type: string, enum: [my, pending, done], default: my }
+          description: my=내가 올린 결재, pending=내가 처리할 결재, done=완료
+      responses:
+        '200':
+          description: 결재 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        status: { type: string }
+                        requester_name: { type: string }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 결재 요청 생성
+      operationId: createApproval
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, type]
+              properties:
+                title: { type: string }
+                type: { type: string }
+                content: { type: string }
+                approver_id: { type: integer }
+                ref_type: { type: string }
+                ref_id: { type: integer }
+      responses:
+        '200':
+          description: 결재 요청 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/approvals/{id}:
+    get:
+      summary: 결재 상세 조회
+      operationId: getApprovalById
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 결재 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 결재를 찾을 수 없음
+
+  /api/approvals/{id}/approve:
+    post:
+      summary: 결재 승인
+      operationId: approveApproval
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string }
+      responses:
+        '200':
+          description: 결재 승인 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 결재를 찾을 수 없음
+
+  /api/approvals/{id}/reject:
+    post:
+      summary: 결재 반려
+      operationId: rejectApproval
+      tags: [Approvals]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: 결재 반려 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 결재를 찾을 수 없음
+
+  /api/dashboard/analytics:
+    get:
+      summary: 대시보드 분석 데이터 조회
+      operationId: getDashboardAnalytics
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 대시보드 분석 데이터
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary: { type: object }
+                  charts: { type: object }
+        '401':
+          description: 인증 필요
+
+  /api/exec/summary:
+    get:
+      summary: 경영진 요약 대시보드 조회
+      operationId: getExecSummary
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 경영진 요약 데이터
+        '401':
+          description: 인증 필요
+
+  /api/exec/trend:
+    get:
+      summary: 경영 트렌드 조회
+      operationId: getExecTrend
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          schema: { type: integer, default: 6 }
+          description: 조회할 개월 수
+      responses:
+        '200':
+          description: 트렌드 데이터
+        '401':
+          description: 인증 필요
+
+  /api/exec/dashboard-full:
+    get:
+      summary: 경영진 전체 대시보드 조회
+      operationId: getExecDashboardFull
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 전체 경영 대시보드 데이터
+        '401':
+          description: 인증 필요
+
+  /api/stats:
+    get:
+      summary: 재고 통계 조회
+      operationId: getStats
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 재고 통계 데이터
+        '401':
+          description: 인증 필요
+
+  /api/stats/vendor-summary:
+    get:
+      summary: 공급업체별 통계 요약
+      operationId: getVendorSummaryStats
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 공급업체별 통계
+        '401':
+          description: 인증 필요
+
+  /api/stats/usage-trend:
+    get:
+      summary: 품목별 사용 트렌드 조회
+      operationId: getUsageTrend
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+          description: 품목 코드
+        - name: months
+          in: query
+          schema: { type: integer, default: 6 }
+      responses:
+        '200':
+          description: 사용 트렌드 데이터
+        '401':
+          description: 인증 필요
+
+  /api/stats/usage-trend-all:
+    get:
+      summary: 전체 품목 사용 트렌드 조회
+      operationId: getUsageTrendAll
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: months
+          in: query
+          schema: { type: integer, default: 6 }
+      responses:
+        '200':
+          description: 전체 사용 트렌드 데이터
+        '401':
+          description: 인증 필요
+
+  /api/activity-log:
+    get:
+      summary: 최근 활동 로그 조회
+      operationId: getActivityLog
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 최근 활동 로그
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        user_name: { type: string }
+                        action: { type: string }
+                        detail: { type: string }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+
+  /api/china-shipment/logs:
+    get:
+      summary: 중국 출고 로그 목록 조회
+      operationId: getChinaShipmentLogs
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 중국 출고 로그 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        product_code: { type: string }
+                        quantity: { type: number }
+                        status: { type: string }
+                        shipped_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+
+  /api/china-shipment/logs/{id}:
+    get:
+      summary: 중국 출고 로그 상세 조회
+      operationId: getChinaShipmentLogById
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 출고 로그 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 로그를 찾을 수 없음
+    put:
+      summary: 중국 출고 로그 상태 변경
+      operationId: updateChinaShipmentLogStatus
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string }
+      responses:
+        '200':
+          description: 상태 변경 성공
+        '401':
+          description: 인증 필요
+    delete:
+      summary: 중국 출고 로그 삭제
+      operationId: deleteChinaShipmentLog
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+
+  /api/china-shipment/save:
+    post:
+      summary: 중국 출고 저장
+      operationId: saveChinaShipment
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_code: { type: string }
+                quantity: { type: number }
+                destination: { type: string }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 출고 저장 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/china-shipment/{id}:
+    patch:
+      summary: 중국 출고 부분 수정
+      operationId: patchChinaShipment
+      tags: [ChinaShipment]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity: { type: number }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 출고 기록을 찾을 수 없음
+
+  /api/safety-stock:
+    get:
+      summary: 안전재고 목록 조회
+      operationId: getSafetyStock
+      tags: [SafetyStock]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 안전재고 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        product_code: { type: string }
+                        product_name: { type: string }
+                        min_stock: { type: number }
+                        current_stock: { type: number }
+                        is_below_min: { type: boolean }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 안전재고 기준 설정
+      operationId: setSafetyStock
+      tags: [SafetyStock]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_code, min_stock]
+              properties:
+                product_code: { type: string }
+                min_stock: { type: number }
+                max_stock: { type: number }
+                reorder_qty: { type: number }
+      responses:
+        '200':
+          description: 안전재고 설정 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/safety-stock/check:
+    post:
+      summary: 안전재고 초과 여부 확인
+      operationId: checkSafetyStock
+      tags: [SafetyStock]
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_codes: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 안전재고 확인 결과
+        '401':
+          description: 인증 필요
+
+  /api/safety-stock/import-from-xerp:
+    post:
+      summary: XERP에서 안전재고 기준 가져오기
+      operationId: importSafetyStockFromXerp
+      tags: [SafetyStock]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: XERP 데이터 가져오기 성공
+        '401':
+          description: 인증 필요
+
+  /api/cycle-count:
+    get:
+      summary: 주기 재고 실사 목록 조회
+      operationId: getCycleCounts
+      tags: [CycleCount]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 주기 재고 실사 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        status: { type: string }
+                        planned_date: { type: string, format: date }
+                        completed_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 주기 재고 실사 생성
+      operationId: createCycleCount
+      tags: [CycleCount]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                planned_date: { type: string, format: date }
+                product_codes: { type: array, items: { type: string } }
+                warehouse: { type: string }
+      responses:
+        '200':
+          description: 실사 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/cycle-count/{id}:
+    get:
+      summary: 주기 재고 실사 상세 조회
+      operationId: getCycleCountById
+      tags: [CycleCount]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 실사 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 실사를 찾을 수 없음
+
+  /api/cycle-count/{id}/count:
+    post:
+      summary: 실사 수량 입력
+      operationId: submitCycleCount
+      tags: [CycleCount]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      product_code: { type: string }
+                      counted_qty: { type: number }
+      responses:
+        '200':
+          description: 수량 입력 성공
+        '401':
+          description: 인증 필요
+
+  /api/cycle-count/{id}/complete:
+    post:
+      summary: 실사 완료 처리
+      operationId: completeCycleCount
+      tags: [CycleCount]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 실사 완료 처리 성공
+        '401':
+          description: 인증 필요
+
+  /api/lots/summary:
+    get:
+      summary: 로트 요약 통계 조회
+      operationId: getLotSummary
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 로트 요약
+        '401':
+          description: 인증 필요
+
+  /api/lots:
+    get:
+      summary: 로트 목록 조회
+      operationId: getLots
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: product
+          in: query
+          schema: { type: string }
+          description: 품목 코드 필터
+        - name: warehouse
+          in: query
+          schema: { type: string }
+          description: 창고 필터
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, quarantine, expired, consumed] }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 로트 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lots:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        lot_number: { type: string }
+                        batch_number: { type: string }
+                        product_code: { type: string }
+                        quantity: { type: number }
+                        status: { type: string }
+                        expiry_date: { type: string, format: date }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 로트 생성
+      operationId: createLot
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_code, quantity]
+              properties:
+                product_code: { type: string }
+                quantity: { type: number }
+                batch_number: { type: string }
+                warehouse: { type: string }
+                expiry_date: { type: string, format: date }
+                supplier_lot: { type: string }
+      responses:
+        '200':
+          description: 로트 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/lots/{id}:
+    get:
+      summary: 로트 상세 조회
+      operationId: getLotById
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 로트 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 로트를 찾을 수 없음
+    put:
+      summary: 로트 정보 수정
+      operationId: updateLot
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string }
+                warehouse: { type: string }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 로트를 찾을 수 없음
+
+  /api/lots/{id}/transaction:
+    post:
+      summary: 로트 입출고 트랜잭션 생성
+      operationId: createLotTransaction
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, quantity]
+              properties:
+                type: { type: string, enum: [in, out, transfer, adjust] }
+                quantity: { type: number }
+                reason: { type: string }
+                ref_id: { type: integer }
+      responses:
+        '200':
+          description: 트랜잭션 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/lots/{id}/inspect:
+    post:
+      summary: 로트 품질 검사 결과 등록
+      operationId: inspectLot
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              properties:
+                result: { type: string, enum: [pass, fail, quarantine] }
+                notes: { type: string }
+                inspector: { type: string }
+      responses:
+        '200':
+          description: 검사 결과 등록 성공
+        '401':
+          description: 인증 필요
+
+  /api/lots/trace/{batchNumber}:
+    get:
+      summary: 배치 번호로 로트 이력 추적
+      operationId: traceLotByBatch
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batchNumber
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 로트 추적 이력
+        '401':
+          description: 인증 필요
+        '404':
+          description: 배치를 찾을 수 없음
+
+  /api/lots/fifo:
+    get:
+      summary: FIFO 소진 순서 조회
+      operationId: getLotFifo
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: FIFO 소진 순서 목록
+        '401':
+          description: 인증 필요
+
+  /api/lots/fifo-consume:
+    post:
+      summary: FIFO 방식 로트 소진 처리
+      operationId: consumeLotFifo
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_code, quantity]
+              properties:
+                product_code: { type: string }
+                quantity: { type: number }
+                ref_id: { type: integer }
+      responses:
+        '200':
+          description: FIFO 소진 성공
+        '400':
+          description: 재고 부족 또는 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/lots/sync-xerp:
+    post:
+      summary: XERP 로트 데이터 동기화
+      operationId: syncLotsFromXerp
+      tags: [Lots]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: XERP 동기화 성공
+        '401':
+          description: 인증 필요
+
+  /api/gift-sets:
+    get:
+      summary: 선물세트 목록 조회
+      operationId: getGiftSets
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, inactive, all] }
+      responses:
+        '200':
+          description: 선물세트 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        status: { type: string }
+                        components: { type: array, items: { type: object } }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 선물세트 생성
+      operationId: createGiftSet
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, components]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                status: { type: string }
+                components:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      product_code: { type: string }
+                      quantity: { type: number }
+      responses:
+        '200':
+          description: 선물세트 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/gift-sets/{id}:
+    put:
+      summary: 선물세트 수정
+      operationId: updateGiftSet
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                status: { type: string }
+                components: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 선물세트를 찾을 수 없음
+
+  /api/gift-sets/{id}/transaction:
+    post:
+      summary: 선물세트 재고 트랜잭션
+      operationId: createGiftSetTransaction
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, quantity]
+              properties:
+                type: { type: string, enum: [produce, ship, adjust] }
+                quantity: { type: number }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 트랜잭션 성공
+        '401':
+          description: 인증 필요
+
+  /api/gift-sets/{id}/transactions:
+    get:
+      summary: 선물세트 트랜잭션 이력 조회
+      operationId: getGiftSetTransactions
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 트랜잭션 이력
+        '401':
+          description: 인증 필요
+
+  /api/gift-sets/production-capacity:
+    get:
+      summary: 선물세트 생산 가능 수량 조회
+      operationId: getGiftSetProductionCapacity
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 생산 가능 수량
+        '401':
+          description: 인증 필요
+
+  /api/gift-shipment-schedule:
+    get:
+      summary: 선물세트 출하 일정 조회
+      operationId: getGiftShipmentSchedule
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: set_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 출하 일정 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        gift_set_id: { type: integer }
+                        planned_date: { type: string, format: date }
+                        quantity: { type: number }
+                        status: { type: string }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 선물세트 출하 일정 등록
+      operationId: createGiftShipmentSchedule
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gift_set_id, planned_date, quantity]
+              properties:
+                gift_set_id: { type: integer }
+                planned_date: { type: string, format: date }
+                quantity: { type: number }
+                destination: { type: string }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 출하 일정 등록 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/gift-shipment-schedule/{id}/ship:
+    post:
+      summary: 선물세트 출하 처리
+      operationId: shipGiftSetSchedule
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actual_quantity: { type: number }
+                shipped_at: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 출하 처리 성공
+        '401':
+          description: 인증 필요
+
+  /api/gift-shipment-schedule/{id}:
+    delete:
+      summary: 선물세트 출하 일정 삭제
+      operationId: deleteGiftShipmentSchedule
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+
+  /api/gift-production-summary:
+    get:
+      summary: 선물세트 생산 요약 조회
+      operationId: getGiftProductionSummary
+      tags: [GiftSets]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 생산 요약 데이터
+        '401':
+          description: 인증 필요
+
+  /api/trade-document:
+    get:
+      summary: 무역 서류 목록 조회
+      operationId: getTradeDocuments
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: vendor_name
+          in: query
+          schema: { type: string }
+        - name: po_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 무역 서류 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        doc_type: { type: string }
+                        vendor_name: { type: string }
+                        po_id: { type: integer }
+                        status: { type: string }
+                        created_at: { type: string, format: date-time }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 무역 서류 등록
+      operationId: createTradeDocument
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_type, po_id]
+              properties:
+                doc_type: { type: string, enum: [invoice, packing_list, bl, co, inspection] }
+                po_id: { type: integer }
+                vendor_name: { type: string }
+                file_url: { type: string }
+                notes: { type: string }
+                meta: { type: object }
+      responses:
+        '200':
+          description: 서류 등록 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/trade-document/{id}:
+    patch:
+      summary: 무역 서류 부분 수정
+      operationId: patchTradeDocument
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string }
+                file_url: { type: string }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 서류를 찾을 수 없음
+
+  /api/trade-document/review:
+    get:
+      summary: 검토 대기 무역 서류 조회
+      operationId: getTradeDocumentReview
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 검토 대기 서류 목록
+        '401':
+          description: 인증 필요
+
+  /api/trade-document/{id}/approve:
+    post:
+      summary: 무역 서류 승인
+      operationId: approveTradeDocument
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string }
+      responses:
+        '200':
+          description: 승인 성공
+        '401':
+          description: 인증 필요
+
+  /api/trade-document/management:
+    get:
+      summary: 무역 서류 관리 현황 조회
+      operationId: getTradeDocumentManagement
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: vendor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 관리 현황 데이터
+        '401':
+          description: 인증 필요
+
+  /api/trade-document/export:
+    get:
+      summary: 무역 서류 목록 엑셀 내보내기
+      operationId: exportTradeDocuments
+      tags: [TradeDocuments]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 엑셀 파일
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: 인증 필요
+
+  /api/vendor-portal/generate-token:
+    get:
+      summary: 벤더 포털 접근 토큰 생성
+      operationId: generateVendorPortalToken
+      tags: [VendorPortal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string, format: email }
+        - name: name
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 벤더 포털 접근 토큰
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  url: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '400':
+          description: 이메일 필수
+        '401':
+          description: 인증 필요
+
+  /api/vendor-portal:
+    get:
+      summary: 벤더 포털 발주 조회 (공급업체 전용)
+      operationId: getVendorPortal
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: access
+          in: query
+          schema: { type: string }
+          description: JWT 접근 토큰
+        - name: token
+          in: query
+          schema: { type: string }
+          description: 레거시 토큰
+        - name: email
+          in: query
+          schema: { type: string }
+          description: 레거시 인증 이메일
+        - name: vendor_name
+          in: query
+          schema: { type: string }
+          description: 레거시 인증 업체명
+      responses:
+        '200':
+          description: 발주 목록 (해당 공급업체)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vendor: { type: object }
+                  orders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        po_id: { type: integer }
+                        product_code: { type: string }
+                        quantity: { type: number }
+                        due_date: { type: string, format: date }
+                        status: { type: string }
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/po/{id}:
+    patch:
+      summary: 벤더 포털 발주 업데이트 (공급업체 전용)
+      operationId: patchVendorPortalPo
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: access
+          in: query
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ship_date: { type: string, format: date }
+                tracking_no: { type: string }
+                notes: { type: string }
+      responses:
+        '200':
+          description: 업데이트 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/po/{id}/reset-ship:
+    post:
+      summary: 벤더 포털 출하 정보 초기화
+      operationId: resetVendorPortalShip
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: access
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 초기화 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/material-shipped:
+    post:
+      summary: 벤더 포털 자재 출하 등록
+      operationId: vendorPortalMaterialShipped
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [po_id, quantity]
+              properties:
+                po_id: { type: integer }
+                quantity: { type: number }
+                ship_date: { type: string, format: date }
+                tracking_no: { type: string }
+                access: { type: string }
+      responses:
+        '200':
+          description: 출하 등록 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/set-shipment:
+    post:
+      summary: 벤더 포털 출하 일정 설정
+      operationId: vendorPortalSetShipment
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                po_id: { type: integer }
+                ship_date: { type: string, format: date }
+                access: { type: string }
+      responses:
+        '200':
+          description: 출하 일정 설정 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/item-ship-date:
+    post:
+      summary: 벤더 포털 품목별 출하일 설정
+      operationId: vendorPortalItemShipDate
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                po_item_id: { type: integer }
+                ship_date: { type: string, format: date }
+                access: { type: string }
+      responses:
+        '200':
+          description: 출하일 설정 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/items-ship-dates:
+    post:
+      summary: 벤더 포털 복수 품목 출하일 일괄 설정
+      operationId: vendorPortalItemsShipDates
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      po_item_id: { type: integer }
+                      ship_date: { type: string, format: date }
+                access: { type: string }
+      responses:
+        '200':
+          description: 일괄 설정 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/shipment-schedule:
+    get:
+      summary: 벤더 포털 출하 스케줄 조회
+      operationId: getVendorPortalShipmentSchedule
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: access
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 출하 스케줄
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/lead-time:
+    get:
+      summary: 벤더 포털 리드타임 조회
+      operationId: getVendorPortalLeadTime
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: access
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 리드타임 정보
+        '401':
+          description: 인증 실패
+    post:
+      summary: 벤더 포털 리드타임 업데이트
+      operationId: updateVendorPortalLeadTime
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_code: { type: string }
+                lead_days: { type: integer }
+                access: { type: string }
+      responses:
+        '200':
+          description: 리드타임 업데이트 성공
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/trade-doc:
+    get:
+      summary: 벤더 포털 무역 서류 조회
+      operationId: getVendorPortalTradeDoc
+      tags: [VendorPortal]
+      security: []
+      parameters:
+        - name: access
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 무역 서류 목록
+        '401':
+          description: 인증 실패
+
+  /api/vendor-portal/update-trade-doc:
+    post:
+      summary: 벤더 포털 무역 서류 업데이트
+      operationId: updateVendorPortalTradeDoc
+      tags: [VendorPortal]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                doc_id: { type: integer }
+                file_url: { type: string }
+                notes: { type: string }
+                access: { type: string }
+      responses:
+        '200':
+          description: 서류 업데이트 성공
+        '401':
+          description: 인증 실패
+
+  /api/journal/auto-entries:
+    get:
+      summary: 자동 분개 항목 목록 조회
+      operationId: getJournalAutoEntries
+      tags: [JournalAuto]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: event_type
+          in: query
+          schema: { type: string }
+          description: 이벤트 유형 필터
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, posted, failed] }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: 자동 분개 항목 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        event_type: { type: string }
+                        po_id: { type: integer }
+                        debit_account: { type: string }
+                        credit_account: { type: string }
+                        amount: { type: number }
+                        status: { type: string }
+                        created_at: { type: string, format: date-time }
+                  total: { type: integer }
+        '401':
+          description: 인증 필요
+
+  /api/journal/auto-entry:
+    post:
+      summary: 자동 분개 수동 실행
+      operationId: triggerJournalAutoEntry
+      tags: [JournalAuto]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [po_id]
+              properties:
+                po_id: { type: integer }
+      responses:
+        '200':
+          description: 분개 생성 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/journal/auto-config:
+    get:
+      summary: 자동 분개 설정 조회
+      operationId: getJournalAutoConfig
+      tags: [JournalAuto]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 자동 분개 설정 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        event_type: { type: string }
+                        enabled: { type: boolean }
+                        debit_account: { type: string }
+                        credit_account: { type: string }
+                        description: { type: string }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 자동 분개 설정 저장
+      operationId: saveJournalAutoConfig
+      tags: [JournalAuto]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_type]
+              properties:
+                event_type: { type: string }
+                enabled: { type: boolean }
+                debit_account: { type: string }
+                credit_account: { type: string }
+                description: { type: string }
+      responses:
+        '200':
+          description: 설정 저장 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/vat/report:
+    get:
+      summary: 부가가치세 신고 데이터 조회
+      operationId: getVatReport
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer }
+          description: 과세연도
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [1q1, 1q2, 2q1, 2q2] }
+          description: 신고 기간 (1기예정/1기확정/2기예정/2기확정)
+        - name: company
+          in: query
+          schema: { type: string, enum: [barunson, dd] }
+          description: 법인 구분
+      responses:
+        '200':
+          description: 부가가치세 신고 데이터
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sales_total: { type: number }
+                  sales_tax: { type: number }
+                  purchase_total: { type: number }
+                  purchase_tax: { type: number }
+                  net_tax: { type: number }
+        '401':
+          description: 인증 필요
+
+  /api/vat/summary:
+    get:
+      summary: 부가가치세 연간 요약 조회
+      operationId: getVatSummary
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: company
+          in: query
+          schema: { type: string, enum: [barunson, dd] }
+      responses:
+        '200':
+          description: 연간 VAT 요약
+        '401':
+          description: 인증 필요
+
+  /api/vat/report/save:
+    post:
+      summary: 부가가치세 신고 데이터 저장
+      operationId: saveVatReport
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [report_type, year, period, company]
+              properties:
+                report_type: { type: string }
+                year: { type: integer }
+                period: { type: string, enum: [1q1, 1q2, 2q1, 2q2] }
+                company: { type: string, enum: [barunson, dd] }
+                sales_total: { type: number }
+                sales_tax: { type: number }
+                purchase_total: { type: number }
+                purchase_tax: { type: number }
+                status: { type: string, enum: [draft, submitted, confirmed] }
+      responses:
+        '200':
+          description: 저장 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/vat/report/{id}:
+    get:
+      summary: 특정 부가가치세 신고서 조회
+      operationId: getVatReportById
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: VAT 신고서 상세
+        '401':
+          description: 인증 필요
+        '404':
+          description: 신고서를 찾을 수 없음
+
+  /api/vat/sales-list:
+    get:
+      summary: 매출 세금계산서 목록 조회
+      operationId: getVatSalesList
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [1q1, 1q2, 2q1, 2q2] }
+        - name: company
+          in: query
+          schema: { type: string, enum: [barunson, dd] }
+      responses:
+        '200':
+          description: 매출 세금계산서 목록
+        '401':
+          description: 인증 필요
+
+  /api/vat/purchase-list:
+    get:
+      summary: 매입 세금계산서 목록 조회
+      operationId: getVatPurchaseList
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [1q1, 1q2, 2q1, 2q2] }
+        - name: company
+          in: query
+          schema: { type: string, enum: [barunson, dd] }
+      responses:
+        '200':
+          description: 매입 세금계산서 목록
+        '401':
+          description: 인증 필요
+
+  /api/vat/export:
+    get:
+      summary: 부가가치세 신고 데이터 엑셀 내보내기
+      operationId: exportVatReport
+      tags: [VatReport]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [1q1, 1q2, 2q1, 2q2] }
+        - name: company
+          in: query
+          schema: { type: string, enum: [barunson, dd] }
+      responses:
+        '200':
+          description: 엑셀 파일
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: 인증 필요
+
+  /api/barcode/generate:
+    get:
+      summary: 바코드 생성 (Code128B)
+      operationId: generateBarcode
+      tags: [Barcode]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [product, po, lot, location] }
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+          description: 대상 ID 또는 코드
+        - name: format
+          in: query
+          schema: { type: string, enum: [svg, png], default: svg }
+      responses:
+        '200':
+          description: 바코드 이미지
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/barcode/generate-qr:
+    get:
+      summary: QR 코드 데이터 생성
+      operationId: generateQrCode
+      tags: [Barcode]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [product, po, lot, location] }
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: QR 코드 데이터
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qr_data: { type: string }
+                  url: { type: string }
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/barcode/scan:
+    post:
+      summary: 바코드 스캔 처리
+      operationId: scanBarcode
+      tags: [Barcode]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [barcode_value]
+              properties:
+                barcode_value: { type: string }
+      responses:
+        '200':
+          description: 스캔 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string }
+                  id: { type: string }
+                  data: { type: object }
+        '400':
+          description: 인식할 수 없는 바코드
+        '401':
+          description: 인증 필요
+
+  /api/barcode/quick-receive:
+    post:
+      summary: 바코드 스캔으로 빠른 입고 처리
+      operationId: barcodeQuickReceive
+      tags: [Barcode]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [barcode_value, qty]
+              properties:
+                barcode_value: { type: string }
+                qty: { type: number }
+                received_by: { type: string }
+      responses:
+        '200':
+          description: 입고 처리 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/barcode/registry:
+    get:
+      summary: 바코드 등록 목록 조회
+      operationId: getBarcodeRegistry
+      tags: [Barcode]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [product, po, lot, location] }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: 바코드 등록 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        barcode_value: { type: string }
+                        type: { type: string }
+                        ref_id: { type: string }
+                        label: { type: string }
+                  total: { type: integer }
+        '401':
+          description: 인증 필요
+
+  /api/report-engine/types:
+    get:
+      summary: 리포트 엔진 유형 목록 조회
+      operationId: getReportEngineTypes
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 리포트 유형 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  types:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        description: { type: string }
+                        available_filters: { type: array, items: { type: string } }
+                        available_groups: { type: array, items: { type: string } }
+        '401':
+          description: 인증 필요
+
+  /api/report-engine/generate:
+    post:
+      summary: 리포트 생성
+      operationId: generateReport
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [purchase_summary, sales_analysis, inventory_status, vendor_comparison, production_summary, financial_overview]
+                filters:
+                  type: object
+                  description: 필터 조건 (from, to, vendor, product, category 등)
+                groupBy:
+                  type: string
+                  description: 그룹 기준
+                sortBy:
+                  type: string
+                  description: 정렬 기준
+                limit:
+                  type: integer
+                  default: 100
+      responses:
+        '200':
+          description: 리포트 데이터
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string }
+                  generated_at: { type: string, format: date-time }
+                  rows: { type: array, items: { type: object } }
+                  summary: { type: object }
+        '400':
+          description: 지원하지 않는 리포트 유형
+        '401':
+          description: 인증 필요
+
+  /api/report-engine/templates:
+    get:
+      summary: 리포트 템플릿 목록 조회
+      operationId: getReportTemplates
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 리포트 템플릿 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        report_type: { type: string }
+                        description: { type: string }
+                        config: { type: object }
+        '401':
+          description: 인증 필요
+    post:
+      summary: 리포트 템플릿 저장
+      operationId: createReportTemplate
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, report_type]
+              properties:
+                name: { type: string }
+                report_type: { type: string }
+                description: { type: string }
+                config:
+                  type: object
+                  description: 필터, 그룹, 정렬 등 저장된 설정
+      responses:
+        '200':
+          description: 템플릿 저장 성공
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/report-engine/templates/{id}:
+    put:
+      summary: 리포트 템플릿 수정
+      operationId: updateReportTemplate
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                config: { type: object }
+      responses:
+        '200':
+          description: 수정 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 템플릿을 찾을 수 없음
+    delete:
+      summary: 리포트 템플릿 삭제
+      operationId: deleteReportTemplate
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 삭제 성공
+        '401':
+          description: 인증 필요
+        '404':
+          description: 템플릿을 찾을 수 없음
+
+  /api/report-engine/export-csv:
+    post:
+      summary: 리포트 CSV 내보내기
+      operationId: exportReportCsv
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [purchase_summary, sales_analysis, inventory_status, vendor_comparison, production_summary, financial_overview]
+                filters: { type: object }
+                groupBy: { type: string }
+                sortBy: { type: string }
+                limit: { type: integer }
+      responses:
+        '200':
+          description: CSV 파일
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
+
+  /api/report-engine/drill-down:
+    post:
+      summary: 리포트 드릴다운 상세 조회
+      operationId: reportDrillDown
+      tags: [ReportEngine]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, row_key, row_value]
+              properties:
+                type: { type: string }
+                row_key: { type: string }
+                row_value: { type: string }
+                filters: { type: object }
+      responses:
+        '200':
+          description: 드릴다운 상세 데이터
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows: { type: array, items: { type: object } }
+                  summary: { type: object }
+        '400':
+          description: 잘못된 요청
+        '401':
+          description: 인증 필요
