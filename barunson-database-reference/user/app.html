@@ -28496,13 +28496,27 @@ function showApprovalCreateModal(){
   h+='<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">내용</label><textarea id="apNewContent" rows="4" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px" placeholder="상세 내용"></textarea></div>';
   h+='<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">금액</label><input id="apNewAmount" type="number" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px" placeholder="0"></div>';
   h+='<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">결재선 (1~3단계)</label>';
-  h+='<input id="apLine1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:4px" placeholder="1단계 결재자 이름">';
-  h+='<input id="apLine2" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:4px" placeholder="2단계 결재자 이름 (선택)">';
-  h+='<input id="apLine3" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px" placeholder="3단계 결재자 이름 (선택)"></div>';
+  h+='<select id="apLine1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:4px"><option value="">1단계 결재자 선택</option></select>';
+  h+='<select id="apLine2" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:4px"><option value="">2단계 (선택)</option></select>';
+  h+='<select id="apLine3" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px"><option value="">3단계 (선택)</option></select></div>';
   h+='<button onclick="submitApproval()" class="btn btn-sm" style="background:#4338ca;color:#fff;padding:10px 24px;width:100%">상신하기</button>';
   h+='</div></div>';
   bg.innerHTML=h;
   document.body.appendChild(bg);
+  // 사용자 목록 로드하여 결재선 드롭다운 채우기
+  (async()=>{
+    try{
+      var r=await authFetch('/api/auth/user-list');var d=await r.json();
+      if(d.ok && d.data){
+        var opts='';
+        d.data.forEach(function(u){opts+='<option value="'+u.user_id+'">'+esc(u.display_name||u.username)+' ('+esc(u.role||'')+')</option>';});
+        ['apLine1','apLine2','apLine3'].forEach(function(id){
+          var sel=document.getElementById(id);
+          if(sel) sel.innerHTML=sel.options[0].outerHTML+opts;
+        });
+      }
+    }catch(e){}
+  })();
 }
 async function submitApproval(){
   var docType=(document.getElementById('apNewDocType')||{}).value||'general';
@@ -28511,12 +28525,13 @@ async function submitApproval(){
   var amount=parseFloat((document.getElementById('apNewAmount')||{}).value)||0;
   if(!title){alert('제목을 입력하세요');return;}
   var lines=[];
-  var l1=(document.getElementById('apLine1')||{}).value;
-  var l2=(document.getElementById('apLine2')||{}).value;
-  var l3=(document.getElementById('apLine3')||{}).value;
-  if(l1) lines.push({approver_name:l1});
-  if(l2) lines.push({approver_name:l2});
-  if(l3) lines.push({approver_name:l3});
+  ['apLine1','apLine2','apLine3'].forEach(function(id){
+    var sel=document.getElementById(id);
+    if(sel && sel.value){
+      var name=sel.options[sel.selectedIndex].textContent.split(' (')[0];
+      lines.push({approver_id:parseInt(sel.value), approver_name:name});
+    }
+  });
   if(lines.length===0){alert('결재자를 최소 1명 지정하세요');return;}
   try{
     var r=await authFetch('/api/approvals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_type:docType,title:title,content:content,amount:amount,lines:lines})});

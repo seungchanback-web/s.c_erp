@@ -14341,12 +14341,20 @@ async function handleRequest(req, res) {
     const seq = (await db.prepare("SELECT COUNT(*) AS cnt FROM approvals WHERE approval_no LIKE ?").get('AP-'+today+'%')).cnt + 1;
     const no = 'AP-'+today+'-'+String(seq).padStart(3,'0');
     const lines = body.lines || []; // [{approver_id, approver_name}]
+    // approver_name만 있고 approver_id가 없으면 users에서 자동 조회
+    for (const ln of lines) {
+      if (!ln.approver_id && ln.approver_name) {
+        const u = await db.prepare("SELECT user_id, display_name, username FROM users WHERE display_name = ? OR username = ? LIMIT 1").get(ln.approver_name, ln.approver_name);
+        if (u) { ln.approver_id = u.user_id; ln.approver_name = u.display_name || u.username; }
+      }
+    }
     const info = await db.prepare("INSERT INTO approvals (approval_no,doc_type,doc_ref,title,content,amount,status,requester_id,requester_name,current_step,total_steps) VALUES (?,?,?,?,?,?,?,?,?,1,?)").run(
       no, body.doc_type||'general', body.doc_ref||'', body.title||'', body.content||'', body.amount||0, 'pending', uid, uname, Math.max(lines.length,1));
     const aid = info.lastInsertRowid;
-    lines.forEach(async function(ln, i) {
-      await db.prepare("INSERT INTO approval_lines (approval_id,step_order,approver_id,approver_name,role) VALUES (?,?,?,?,?)").run(aid, i+1, ln.approver_id, ln.approver_name||'', ln.role||'approver');
-    });
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      await db.prepare("INSERT INTO approval_lines (approval_id,step_order,approver_id,approver_name,role) VALUES (?,?,?,?,?)").run(aid, i+1, ln.approver_id||null, ln.approver_name||'', ln.role||'approver');
+    }
     // 첫 번째 결재자에게 알림
     if (lines.length > 0) createNotification(lines[0].approver_id, 'approval', '결재 요청: '+body.title, uname+'님이 결재를 요청했습니다.', 'approval');
     ok(res, { id: aid, approval_no: no }); return;
@@ -14413,7 +14421,7 @@ async function handleRequest(req, res) {
     const search = qs.get('search') || '';
     let where = '1=1';
     const params = [];
-    if (status) { where += " AND status=?"; params.push(status); }
+    if (status && status !== 'all') { where += " AND status=?"; params.push(status); }
     if (type) { where += " AND order_type=?"; params.push(type); }
     if (search) { where += " AND (order_no LIKE ? OR customer_name LIKE ?)"; params.push('%'+search+'%', '%'+search+'%'); }
     const rows = await db.prepare('SELECT * FROM sales_orders WHERE '+where+' ORDER BY created_at DESC LIMIT 200').all(...params);
@@ -14572,7 +14580,7 @@ async function handleRequest(req, res) {
     let where = '1=1';
     if (product) where += " AND product_code='" + product.replace(/'/g,'') + "'";
     if (warehouse) where += " AND warehouse='" + warehouse.replace(/'/g,'') + "'";
-    if (status) where += " AND quality_status='" + status.replace(/'/g,'') + "'";
+    if (status && status !== 'all') where += " AND quality_status='" + status.replace(/'/g,'') + "'";
     if (search) where += " AND (batch_number LIKE '%" + search.replace(/'/g,'') + "%' OR product_name LIKE '%" + search.replace(/'/g,'') + "%')";
     if (entity && entity !== 'all' && _hasEntity.batch_master) where += " AND legal_entity='" + entity.replace(/'/g,'') + "'";
     const rows = await db.prepare('SELECT *, batch_id AS id, quality_status AS status, exp_date AS expiry_date FROM batch_master WHERE '+where+' ORDER BY created_at DESC LIMIT 300').all();
