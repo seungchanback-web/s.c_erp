@@ -5734,11 +5734,43 @@ async function handleRequest(req, res) {
       }
       if (!r.next_destination) r.next_destination = '파주(본사)';
     }
-    // 재고 정보 보강 (거래처가 긴급도 판단용)
+    // 재고 정보 보강 (XERP 캐시 활용 — 거래처가 긴급도 판단용)
     try {
-      const invRows = await db.prepare("SELECT product_code, current_stock, monthly_usage FROM products WHERE product_code IN (SELECT DISTINCT product_code FROM po_items WHERE po_id IN (SELECT po_id FROM po_header WHERE vendor_name=?))").all(vendor.name);
+      // XERP 재고 캐시에서 가져오기 (10분 갱신)
       const invMap = {};
-      invRows.forEach(r => { invMap[r.product_code] = { stock: r.current_stock||0, monthly: r.monthly_usage||0 }; });
+      const cacheKeys = ['all', 'barunson', 'dd'];
+      for (const ck of cacheKeys) {
+        const ce = (typeof xerpInventoryCaches !== 'undefined' && xerpInventoryCaches) ? xerpInventoryCaches[ck] : null;
+        if (ce && ce.data && ce.data.products) {
+          for (const p of ce.data.products) {
+            const code = p['제품코드'] || p.product_code;
+            if (code && !invMap[code]) {
+              invMap[code] = { stock: p['현재고'] || 0, monthly: p['_xerpMonthly'] || 0 };
+            }
+          }
+        }
+      }
+      // 캐시가 비어있으면 XERP 직접 조회 시도
+      if (Object.keys(invMap).length === 0 && typeof ensureXerpPool === 'function') {
+        try {
+          if (await ensureXerpPool()) {
+            const codes = new Set();
+            for (const po of rows) { for (const it of (po.items||[])) { if (it.product_code) codes.add(it.product_code); } }
+            if (codes.size > 0) {
+              const safeList = [...codes].filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
+              if (safeList) {
+                const invR = await xerpPool.request().query(`SELECT RTRIM(ItemCode) AS code, SUM(OhQty) AS qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='BK10' AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
+                for (const r of (invR.recordset||[])) { invMap[r.code.trim()] = { stock: Math.round(r.qty||0), monthly: 0 }; }
+                // 월출고
+                const today = new Date(); const s3m = new Date(today); s3m.setMonth(s3m.getMonth()-3);
+                const fmt = d => d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+                const shipR = await xerpPool.request().input('s3',sql.NChar(16),fmt(s3m)).input('t',sql.NChar(16),fmt(today)).query(`SELECT RTRIM(ItemCode) AS code, SUM(InoutQty) AS qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='BK10' AND InoutGubun='SO' AND InoutDate>=@s3 AND InoutDate<@t AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
+                for (const r of (shipR.recordset||[])) { const c=r.code.trim(); if(invMap[c]) invMap[c].monthly = Math.round((r.qty||0)/3); }
+              }
+            }
+          }
+        } catch(xe) { console.warn('vendor-portal XERP 직접 조회 실패:', xe.message); }
+      }
       for (const po of rows) {
         for (const it of (po.items||[])) {
           const inv = invMap[it.product_code] || {};
