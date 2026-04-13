@@ -4164,6 +4164,7 @@ async function handleRequest(req, res) {
       await db.prepare('INSERT INTO product_field_history (product_code, field_name, old_value, new_value) VALUES (?,?,?,?)').run(code, body.field, String(oldVal), String(body.value));
     }
     await db.prepare(`UPDATE products SET ${body.field}=?, updated_at=datetime('now','localtime') WHERE product_code=?`).run(body.value, code);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'product_update', 'products', code, `품목수정: ${code} ${body.field} "${oldVal}"→"${body.value}"`, clientIP);
     ok(res, { updated: code, field: body.field });
     return;
   }
@@ -5408,6 +5409,7 @@ async function handleRequest(req, res) {
       try { global._hookReceiveJournal(body.po_id, items, body.received_by || ''); }
       catch(e) { console.error('전표 자동생성 오류:', e.message); }
     }
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'receipt_create', 'receipts', receiptId, `입고: PO ${body.po_id}, ${items.length}건`, clientIP);
     ok(res, { receipt_id: receiptId }); return;
   }
 
@@ -5584,6 +5586,7 @@ async function handleRequest(req, res) {
       .run(poId, poNum, body.material_vendor, 'material', JSON.stringify(body.items));
     await db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
       poId, 'created', body.actor || 'system', `한국 후공정 PO 생성 (원재료:${body.material_vendor}, 후공정:${body.process_vendor})`);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_create', 'po_header', poId, `발주생성: ${poNum}, 원재료:${body.material_vendor}, 후공정:${body.process_vendor}`, clientIP);
     ok(res, { po_id: poId, po_number: poNum }); return;
   }
 
@@ -5752,6 +5755,7 @@ async function handleRequest(req, res) {
     // Activity log
     await db.prepare("INSERT INTO po_activity_log (po_id, po_number, action, actor, from_status, to_status, details) VALUES (?,?,?,?,?,?,?)").run(
       body.po_id, po.po_number, 'stage_change', body.actor || 'system', po.status, body.stage, body.notes || '');
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_stage_change', 'po_header', body.po_id, `발주단계변경: ${po.po_number} ${po.status}→${body.stage}`, clientIP);
     ok(res, { updated: true, stage: body.stage }); return;
   }
 
@@ -7834,6 +7838,7 @@ async function handleRequest(req, res) {
     }
 
     const emailFailed = emailResult && !emailResult.ok;
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_update', 'po_header', id, `발주수정: PO#${id} 상태→${dbStatus}`, clientIP);
     ok(res, { updated: true, po_id: id, status: dbStatus, google_sheet: sheetResult, email: emailResult, email_failed: emailFailed });
     return;
   }
@@ -14357,6 +14362,7 @@ async function handleRequest(req, res) {
     }
     // 첫 번째 결재자에게 알림
     if (lines.length > 0) createNotification(lines[0].approver_id, 'approval', '결재 요청: '+body.title, uname+'님이 결재를 요청했습니다.', 'approval');
+    auditLog(decoded.userId, uname, 'approval_create', 'approvals', aid, `결재상신: ${no} "${body.title}" (${body.type||'일반'})`, clientIP);
     ok(res, { id: aid, approval_no: no }); return;
   }
   if (pathname.match(/^\/api\/approvals\/(\d+)$/) && method === 'GET') {
@@ -14384,6 +14390,7 @@ async function handleRequest(req, res) {
       await db.prepare("UPDATE approvals SET status='approved', updated_at=datetime('now','localtime') WHERE id=?").run(id);
       createNotification(ap.requester_id, 'approval', '결재 승인: '+ap.title, '요청하신 결재가 최종 승인되었습니다.', 'approval');
     }
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'approval_approve', 'approvals', id, `결재승인: ${ap.approval_no||id} "${ap.title}"`, clientIP);
     ok(res, { approved: true }); return;
   }
   if (pathname.match(/^\/api\/approvals\/(\d+)\/reject$/) && method === 'POST') {
@@ -14397,6 +14404,7 @@ async function handleRequest(req, res) {
     await db.prepare("UPDATE approval_lines SET status='rejected', comment=?, acted_at=datetime('now','localtime') WHERE id=?").run(body.comment||'', line.id);
     await db.prepare("UPDATE approvals SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?").run(id);
     createNotification(ap.requester_id, 'approval', '결재 반려: '+ap.title, (body.comment||'사유 없음'), 'approval');
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'approval_reject', 'approvals', id, `결재반려: ${ap.approval_no||id} "${ap.title}" 사유:${body.comment||'없음'}`, clientIP);
     ok(res, { rejected: true }); return;
   }
 
@@ -14818,6 +14826,7 @@ async function handleRequest(req, res) {
     const upsert = db.prepare("INSERT INTO budgets (year,month,acc_code,acc_name,budget_type,budget_amount,notes) VALUES (?,?,?,?,?,?,?) ON CONFLICT(year,month,acc_code) DO UPDATE SET budget_amount=excluded.budget_amount, acc_name=excluded.acc_name, budget_type=excluded.budget_type, notes=excluded.notes, updated_at=datetime('now','localtime')");
     const tx = db.transaction(async function() { for (const it of items) { await upsert.run(it.year, it.month, it.acc_code||'', it.acc_name||'', it.budget_type||'expense', it.budget_amount||0, it.notes||''); } });
     await tx();
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'budget_save', 'budgets', items[0]?.year||'', `예산편성: ${items.length}건 (${items[0]?.year||''})`, clientIP);
     ok(res, { saved: items.length }); return;
   }
   if (pathname === '/api/budget/vs-actual' && method === 'GET') {
