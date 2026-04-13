@@ -7012,14 +7012,14 @@ fetch('/api/products').then(r=>r.json()).then(d=>{
     const existing = productInfo[p.product_code] || {};
     productInfo[p.product_code] = {
       ...existing,
-      '품명': existing['품명'] || p.product_name || '',
-      '생산지': existing['생산지'] || p.origin || '',
-      '브랜드': existing['브랜드'] || p.brand || '',
-      '절': existing['절'] || p.cut_spec || '',
-      '조판': existing['조판'] || p.jopan || '',
-      '원자재코드': existing['원자재코드'] || p.material_code || '',
-      '원재료용지명': existing['원재료용지명'] || p.material_name || '',
-      '제지사': existing['제지사'] || p.paper_maker || '',
+      '품명': p.product_name || existing['품명'] || '',
+      '생산지': p.origin || existing['생산지'] || '',
+      '브랜드': p.brand || existing['브랜드'] || '',
+      '절': p.cut_spec || existing['절'] || '',
+      '조판': p.jopan || existing['조판'] || '',
+      '원자재코드': p.material_code || existing['원자재코드'] || '',
+      '원재료용지명': p.material_name || existing['원재료용지명'] || '',
+      '제지사': p.paper_maker || existing['제지사'] || '',
     };
   });
 }).catch(()=>{});
