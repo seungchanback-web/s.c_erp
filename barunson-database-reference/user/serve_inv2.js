@@ -1,7 +1,7 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.0.9';
-const APP_VERSION_DATE = '2026-04-10';
+const APP_VERSION = '1.1.0';
+const APP_VERSION_DATE = '2026-04-13';
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -1126,6 +1126,80 @@ try { await db.exec("ALTER TABLE products ADD COLUMN op_category TEXT DEFAULT ''
 // ── 생산지별 기본 리드타임 (일) ──
 const ORIGIN_LEAD_TIME = { '중국': 50, '한국': 7, '더기프트': 14 };
 
+// ── 공유 상수: PO 상태 매핑 (중복 제거) ──
+const PO_STATUS_EN_TO_KO = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
+const PO_STATUS_KO_TO_EN = { '대기':'draft', '발송':'sent', '확인':'confirmed', '수령중':'partial', '완료':'received', '취소':'cancelled', 'OS등록대기':'os_pending', 'OS검증대기':'os_registered' };
+const MATERIAL_STATUS_KO = { 'sent':'발주완료', 'confirmed':'확인', 'scheduled':'출고예정', 'shipped':'출고완료' };
+const PROCESS_STATUS_KO = { 'waiting':'대기', 'sent':'발주완료', 'confirmed':'확인', 'working':'작업중', 'completed':'완료' };
+
+// ── 후공정 타입: DB에서 로드 (getPostProcessTypes() 사용) ──
+let _cachedPostCols = null;
+let _processTypesInMemory = null; // DB 테이블 없을 때 인메모리 저장소
+const _defaultPostTypes = [
+  {id:1,name:'재단',category:'post',group_name:'',icon:'⚙️',sort_order:1,is_active:1,default_vendor:''},
+  {id:2,name:'인쇄',category:'post',group_name:'',icon:'⚙️',sort_order:2,is_active:1,default_vendor:''},
+  {id:3,name:'박/형압',category:'post',group_name:'',icon:'⚙️',sort_order:3,is_active:1,default_vendor:''},
+  {id:4,name:'톰슨',category:'post',group_name:'',icon:'⚙️',sort_order:4,is_active:1,default_vendor:''},
+  {id:5,name:'봉투가공',category:'post',group_name:'',icon:'⚙️',sort_order:5,is_active:1,default_vendor:''},
+  {id:6,name:'세아리',category:'post',group_name:'',icon:'⚙️',sort_order:6,is_active:1,default_vendor:''},
+  {id:7,name:'레이져',category:'post',group_name:'',icon:'⚙️',sort_order:7,is_active:1,default_vendor:''},
+  {id:8,name:'실크',category:'post',group_name:'',icon:'⚙️',sort_order:8,is_active:1,default_vendor:''},
+  {id:9,name:'임가공',category:'post',group_name:'',icon:'⚙️',sort_order:9,is_active:1,default_vendor:''},
+  {id:10,name:'우찌누끼',category:'post',group_name:'',icon:'⚙️',sort_order:10,is_active:1,default_vendor:'예지가'}
+];
+const _defaultBomTypes = [
+  {id:11,name:'오프셋인쇄',category:'bom',group_name:'인쇄',icon:'🖨️',sort_order:1,is_active:1,default_vendor:''},
+  {id:12,name:'디지털인쇄',category:'bom',group_name:'인쇄',icon:'💻',sort_order:2,is_active:1,default_vendor:''},
+  {id:13,name:'박가공',category:'bom',group_name:'후가공',icon:'✨',sort_order:3,is_active:1,default_vendor:''},
+  {id:14,name:'형압',category:'bom',group_name:'후가공',icon:'🔲',sort_order:4,is_active:1,default_vendor:''},
+  {id:15,name:'에폭시',category:'bom',group_name:'후가공',icon:'💎',sort_order:5,is_active:1,default_vendor:''},
+  {id:16,name:'톰슨',category:'bom',group_name:'후가공',icon:'✂️',sort_order:6,is_active:1,default_vendor:''},
+  {id:17,name:'코팅/라미',category:'bom',group_name:'후가공',icon:'🛡️',sort_order:7,is_active:1,default_vendor:''},
+  {id:18,name:'접지',category:'bom',group_name:'제본',icon:'📐',sort_order:8,is_active:1,default_vendor:''},
+  {id:19,name:'제본',category:'bom',group_name:'제본',icon:'📚',sort_order:9,is_active:1,default_vendor:''},
+  {id:20,name:'포장',category:'bom',group_name:'포장',icon:'📦',sort_order:10,is_active:1,default_vendor:''}
+];
+let _processTypesTableExists = null;
+
+async function checkProcessTypesTable() {
+  if (_processTypesTableExists !== null) return _processTypesTableExists;
+  try {
+    await db.prepare("SELECT COUNT(*) AS cnt FROM process_types").get();
+    _processTypesTableExists = true;
+  } catch(e) {
+    _processTypesTableExists = false;
+    // 인메모리 초기화
+    _processTypesInMemory = [..._defaultPostTypes, ..._defaultBomTypes];
+    // JSON 파일로 영속화 시도
+    try {
+      const ptFile = path.join(__dirname, 'process_types.json');
+      if (fs.existsSync(ptFile)) _processTypesInMemory = JSON.parse(fs.readFileSync(ptFile, 'utf8'));
+    } catch(_) {}
+  }
+  return _processTypesTableExists;
+}
+
+function saveProcessTypesToFile() {
+  if (!_processTypesInMemory) return;
+  try { fs.writeFileSync(path.join(__dirname, 'process_types.json'), JSON.stringify(_processTypesInMemory, null, 2)); } catch(_) {}
+}
+
+async function getPostProcessTypes() {
+  if (_cachedPostCols) return _cachedPostCols;
+  const hasTable = await checkProcessTypesTable();
+  if (hasTable) {
+    try {
+      const rows = await db.prepare("SELECT name FROM process_types WHERE category='post' AND is_active=1 ORDER BY sort_order, id").all();
+      if (rows.length > 0) { _cachedPostCols = rows.map(r => r.name); return _cachedPostCols; }
+    } catch(e) { /* fallback */ }
+  } else if (_processTypesInMemory) {
+    _cachedPostCols = _processTypesInMemory.filter(p => p.category === 'post' && p.is_active).sort((a,b) => a.sort_order - b.sort_order).map(p => p.name);
+    return _cachedPostCols;
+  }
+  return ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼'];
+}
+function invalidatePostColsCache() { _cachedPostCols = null; }
+
 // 원지사(paper_maker) 약칭 → 등록된 거래처명 매핑
 const PAPER_MAKER_TO_VENDOR = {
   '대한': '대한통상', '대한통상': '대한통상',
@@ -1369,6 +1443,38 @@ await db.exec(`CREATE TABLE IF NOT EXISTS product_process_map (
 await db.exec(`CREATE INDEX IF NOT EXISTS idx_ppm_product ON product_process_map(product_code)`);
 await db.exec(`CREATE INDEX IF NOT EXISTS idx_ppm_vendor ON product_process_map(vendor_name)`);
 
+// ── 공정 타입 마스터 (동적 관리) ──
+await db.exec(`CREATE TABLE IF NOT EXISTS process_types (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'post',
+  group_name TEXT DEFAULT '',
+  icon TEXT DEFAULT '⚙️',
+  sort_order INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  default_vendor TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(name, category)
+)`);
+// 시드 데이터: 기존 하드코딩된 후공정 타입
+try {
+  const seedPost = [
+    {name:'재단',sort:1},{name:'인쇄',sort:2},{name:'박/형압',sort:3},{name:'톰슨',sort:4},
+    {name:'봉투가공',sort:5},{name:'세아리',sort:6},{name:'레이져',sort:7},{name:'실크',sort:8},
+    {name:'임가공',sort:9},{name:'우찌누끼',sort:10,vendor:'예지가'}
+  ];
+  const seedBom = [
+    {name:'오프셋인쇄',group:'인쇄',icon:'🖨️',sort:1},{name:'디지털인쇄',group:'인쇄',icon:'💻',sort:2},
+    {name:'박가공',group:'후가공',icon:'✨',sort:3},{name:'형압',group:'후가공',icon:'🔲',sort:4},
+    {name:'에폭시',group:'후가공',icon:'💎',sort:5},{name:'톰슨',group:'후가공',icon:'✂️',sort:6},
+    {name:'코팅/라미',group:'후가공',icon:'🛡️',sort:7},{name:'접지',group:'제본',icon:'📐',sort:8},
+    {name:'제본',group:'제본',icon:'📚',sort:9},{name:'포장',group:'포장',icon:'📦',sort:10}
+  ];
+  const ins = db.prepare("INSERT OR IGNORE INTO process_types (name,category,group_name,icon,sort_order,default_vendor) VALUES (?,?,?,?,?,?)");
+  for (const s of seedPost) await ins.run(s.name,'post','',s.icon||'⚙️',s.sort,s.vendor||'');
+  for (const s of seedBom) await ins.run(s.name,'bom',s.group||'',s.icon||'⚙️',s.sort,'');
+} catch(e) { console.warn('process_types 시드 데이터 삽입 실패 (무시):', e.message); }
+
 // ── 품목 필드 변경 이력 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS product_field_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1379,6 +1485,9 @@ await db.exec(`CREATE TABLE IF NOT EXISTS product_field_history (
   changed_at TEXT DEFAULT (datetime('now','localtime'))
 )`);
 await db.exec(`CREATE INDEX IF NOT EXISTS idx_pfh_code ON product_field_history(product_code)`);
+// reason, changed_by 컬럼 추가 (기존 테이블 호환)
+try { await db.exec("ALTER TABLE product_field_history ADD COLUMN reason TEXT DEFAULT ''"); } catch(_) {}
+try { await db.exec("ALTER TABLE product_field_history ADD COLUMN changed_by TEXT DEFAULT ''"); } catch(_) {}
 
 // ── 중국 선적 이력 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS china_shipment_log (
@@ -4161,10 +4270,12 @@ async function handleRequest(req, res) {
     const prev = await db.prepare(`SELECT ${body.field} as val FROM products WHERE product_code=?`).get(code);
     const oldVal = prev ? (prev.val || '') : '';
     if (String(oldVal) !== String(body.value)) {
-      await db.prepare('INSERT INTO product_field_history (product_code, field_name, old_value, new_value) VALUES (?,?,?,?)').run(code, body.field, String(oldVal), String(body.value));
+      const reason = body.reason || '';
+      const changer = body.changed_by || (currentUser ? currentUser.username : '');
+      await db.prepare('INSERT INTO product_field_history (product_code, field_name, old_value, new_value, reason, changed_by) VALUES (?,?,?,?,?,?)').run(code, body.field, String(oldVal), String(body.value), reason, changer);
     }
     await db.prepare(`UPDATE products SET ${body.field}=?, updated_at=datetime('now','localtime') WHERE product_code=?`).run(body.value, code);
-    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'product_update', 'products', code, `품목수정: ${code} ${body.field} "${oldVal}"→"${body.value}"`, clientIP);
+    if (currentUser) auditLog(currentUser.userId, currentUser.username, 'product_update', 'products', code, `품목수정: ${code} ${body.field} "${oldVal}"→"${body.value}"${body.reason ? ' 사유: '+body.reason : ''}`, clientIP);
     ok(res, { updated: code, field: body.field });
     return;
   }
@@ -5795,18 +5906,16 @@ async function handleRequest(req, res) {
     }
     if (!vendor) { fail(res, 404, '등록된 업체가 아닙니다'); return; }
 
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
-    const materialStatusKo = { 'sent':'발주완료', 'confirmed':'확인', 'scheduled':'출고예정', 'shipped':'출고완료' };
-    const processStatusKo = { 'waiting':'대기', 'sent':'발주완료', 'confirmed':'확인', 'working':'작업중', 'completed':'완료' };
     const rows = await db.prepare('SELECT * FROM po_header WHERE vendor_name = ? ORDER BY po_date DESC, po_id DESC').all(vendor.name);
+    const _postCols = await getPostProcessTypes();
     for (const r of rows) {
-      r.status = enToKo[r.status] || r.status;
-      r.material_status_label = materialStatusKo[r.material_status] || r.material_status;
-      r.process_status_label = processStatusKo[r.process_status] || r.process_status;
+      r.status = PO_STATUS_EN_TO_KO[r.status] || r.status;
+      r.material_status_label = MATERIAL_STATUS_KO[r.material_status] || r.material_status;
+      r.process_status_label = PROCESS_STATUS_KO[r.process_status] || r.process_status;
       r.items = await db.prepare('SELECT * FROM po_items WHERE po_id = ?').all(r.po_id);
       // product_info 데이터 보강 (원자재코드, 원재료용지명, 절, 조판, 후공정체인)
       const pInfo = getProductInfo();
-      const postCols = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크'];
+      const postCols = _postCols;
       const steps = [];
       for (const it of r.items) {
         const info = pInfo[it.product_code] || {};
@@ -5923,9 +6032,7 @@ async function handleRequest(req, res) {
     if (!vendor) { fail(res, 403, '본인 발주서가 아닙니다'); return; }
 
     const action = body.action; // 'confirm' or 'ship'
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
-    const koToEn = { '대기':'draft', '발송':'sent', '확인':'confirmed', '수령중':'partial', '완료':'received', '취소':'cancelled', 'OS등록대기':'os_pending', 'OS검증대기':'os_registered' };
-    const currentStatus = enToKo[po.status] || po.status;
+    const currentStatus = PO_STATUS_EN_TO_KO[po.status] || po.status;
 
     let emailResult = null;
 
@@ -7062,10 +7169,9 @@ async function handleRequest(req, res) {
 
   // GET /api/po/os-pending — OS등록 대기 PO 목록 (os_pending + os_registered)
   if (pathname === '/api/po/os-pending' && method === 'GET') {
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
     const rows = await db.prepare(`SELECT * FROM po_header WHERE status IN ('os_pending','os_registered') ORDER BY po_date DESC`).all();
     for (const r of rows) {
-      r.status = enToKo[r.status] || r.status;
+      r.status = PO_STATUS_EN_TO_KO[r.status] || r.status;
       r.items = await db.prepare('SELECT * FROM po_items WHERE po_id = ?').all(r.po_id);
     }
     ok(res, rows);
@@ -7127,10 +7233,8 @@ async function handleRequest(req, res) {
       // 4. 매칭 결과 분류
       const matched = [];
       const unmatched = [];
-      const enToKo = { 'os_pending':'OS등록대기', 'os_registered':'OS검증대기', 'received':'완료' };
-
       for (const po of pending) {
-        po.status = enToKo[po.status] || po.status;
+        po.status = PO_STATUS_EN_TO_KO[po.status] || po.status;
         let poMatched = false;
         const matchedItems = [];
 
@@ -7236,10 +7340,10 @@ async function handleRequest(req, res) {
       }
 
       // 완료 PO도 한글 변환
-      for (const po of completed) po.status = enToKo[po.status] || po.status;
+      for (const po of completed) po.status = PO_STATUS_EN_TO_KO[po.status] || po.status;
 
       // 취소 PO도 한글 변환
-      for (const po of cancelled) po.status = enToKo[po.status] || po.status;
+      for (const po of cancelled) po.status = PO_STATUS_EN_TO_KO[po.status] || po.status;
 
       ok(res, { matched, unmatched, completed, cancelled, verified, mismatched, xerp_match_count: Object.keys(xerpMatches).length });
     } catch (e) {
@@ -7430,10 +7534,9 @@ async function handleRequest(req, res) {
 
   // GET /api/po/stats — 대시보드 전용 통계
   if (pathname === '/api/po/stats' && method === 'GET') {
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
     const allPO = await db.prepare('SELECT * FROM po_header ORDER BY po_date DESC, po_id DESC').all();
     // 상태 정규화
-    for (const r of allPO) r.status = enToKo[r.status] || r.status;
+    for (const r of allPO) r.status = PO_STATUS_EN_TO_KO[r.status] || r.status;
 
     // 파이프라인
     const pipeline = {}, pipelineQty = {};
@@ -7495,9 +7598,8 @@ async function handleRequest(req, res) {
     sql += ' ORDER BY po_date DESC, po_id DESC';
     const rows = await db.prepare(sql).all(...params);
     // 상태 영→한 정규화
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'cancelled':'취소', 'os_pending':'OS등록대기', 'os_registered':'OS검증대기' };
     for (const row of rows) {
-      row.status = enToKo[row.status] || row.status;
+      row.status = PO_STATUS_EN_TO_KO[row.status] || row.status;
     }
     // include=items 시 품목 정보 포함
     if (parsed.searchParams.get('include') === 'items') {
@@ -7679,7 +7781,7 @@ async function handleRequest(req, res) {
     if (!body.process_chain && items.length) {
       try {
         const pInfo = getProductInfo();
-        const postCols = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크'];
+        const postCols = await getPostProcessTypes();
         // 첫 번째 품목 기준으로 후공정 체인 구성
         const info = pInfo[items[0].product_code] || {};
         const chainSteps = [];
@@ -7741,8 +7843,7 @@ async function handleRequest(req, res) {
     const id = parseInt(poPatch[1]);
     const body = await readJSON(req);
     const newStatus = body.status;
-    const koToEn = { '대기': 'draft', '발송': 'sent', '확인': 'confirmed', '수령중': 'partial', '완료': 'received', '취소': 'cancelled', 'OS등록대기': 'os_pending', 'OS검증대기': 'os_registered' };
-    const dbStatus = koToEn[newStatus] || newStatus;
+    const dbStatus = PO_STATUS_KO_TO_EN[newStatus] || newStatus;
     const poBeforePatch = await db.prepare('SELECT status, material_status, process_status FROM po_header WHERE po_id=?').get(id);
     await db.prepare(`UPDATE po_header SET status = ?, updated_at = datetime('now','localtime') WHERE po_id = ?`).run(dbStatus, id);
 
@@ -8107,8 +8208,7 @@ async function handleRequest(req, res) {
 
     // 3. 발주 상태 분포 (도넛 차트용)
     const statusDist = await db.prepare(`SELECT status, COUNT(*) as count FROM po_header WHERE status != 'cancelled' GROUP BY status`).all();
-    const enToKo = { 'draft':'대기', 'sent':'발송', 'confirmed':'확인', 'partial':'수령중', 'received':'완료', 'os_pending':'OS등록대기' };
-    statusDist.forEach(r => r.label = enToKo[r.status] || r.status);
+    statusDist.forEach(r => r.label = PO_STATUS_EN_TO_KO[r.status] || r.status);
 
     // 4. 리드타임 분석 (발주일~완료일)
     const ltRows = await db.prepare(`SELECT po_date, updated_at, vendor_name FROM po_header WHERE status IN ('received','os_pending') AND po_date IS NOT NULL AND updated_at IS NOT NULL ORDER BY updated_at DESC LIMIT 50`).all();
@@ -8944,7 +9044,7 @@ async function handleRequest(req, res) {
   // GET /api/bom/export — BOM 전체를 플랫 CSV용 데이터로
   if (pathname === '/api/bom/export' && method === 'GET') {
     const headers = await db.prepare('SELECT * FROM bom_header ORDER BY product_code').all();
-    const processes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+    const processes = await getPostProcessTypes();
     const rows = await Promise.all(headers.map(async h => {
       const items = await db.prepare('SELECT * FROM bom_items WHERE bom_id=? ORDER BY sort_order').all(h.bom_id);
       const mat = items.find(i => i.item_type === 'material') || {};
@@ -8964,7 +9064,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/bom/bulk-upload' && method === 'POST') {
     const body = await readJSON(req);
     const rows = body.rows || [];
-    const processes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+    const processes = await getPostProcessTypes();
     let updated = 0, created = 0;
     const txn = db.transaction(async () => {
       for (const r of rows) {
@@ -9056,7 +9156,7 @@ async function handleRequest(req, res) {
     const piPath = path.join(__dir, 'product_info.json');
     let pi;
     try { pi = JSON.parse(fs.readFileSync(piPath, 'utf8')); } catch(e) { res.writeHead(500); res.end(JSON.stringify({error:'product_info.json not found'})); return; }
-    const processes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공'];
+    const processes = await getPostProcessTypes();
     const insH = db.prepare('INSERT INTO bom_header (product_code, product_name, brand) VALUES (?,?,?) ON CONFLICT (product_code) DO NOTHING');
     const insI = db.prepare('INSERT INTO bom_items (bom_id, item_type, material_code, material_name, vendor_name, process_type, qty_per, cut_spec, plate_spec, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)');
     let count = 0;
@@ -14292,6 +14392,116 @@ async function handleRequest(req, res) {
     const monthlyOrders = await db.prepare(`SELECT TO_CHAR(created_at::timestamp, 'YYYY-MM') AS ym, COUNT(*) AS cnt, SUM(ordered_qty) AS total_qty FROM work_orders GROUP BY TO_CHAR(created_at::timestamp, 'YYYY-MM') ORDER BY ym DESC LIMIT 12`).all();
     const recentCompleted = await db.prepare(`SELECT * FROM work_orders WHERE status='completed' ORDER BY completed_date DESC LIMIT 10`).all();
     ok(res, { statusSummary, monthlyOrders, recentCompleted }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  공정 타입 마스터 API (Process Types)
+  // ════════════════════════════════════════════════════════════════════
+
+  if (pathname === '/api/process-types' && method === 'GET') {
+    const qs = new URL(req.url, 'http://localhost').searchParams;
+    const cat = qs.get('category');
+    const hasTable = await checkProcessTypesTable();
+    let rows;
+    if (hasTable) {
+      if (cat) rows = await db.prepare("SELECT * FROM process_types WHERE category=? ORDER BY sort_order, id").all(cat);
+      else rows = await db.prepare("SELECT * FROM process_types ORDER BY category, sort_order, id").all();
+    } else {
+      const mem = _processTypesInMemory || [..._defaultPostTypes, ..._defaultBomTypes];
+      rows = cat ? mem.filter(p => p.category === cat) : mem;
+      rows = rows.sort((a,b) => a.sort_order - b.sort_order);
+    }
+    ok(res, rows); return;
+  }
+
+  if (pathname === '/api/process-types' && method === 'POST') {
+    const body = await readJSON(req);
+    if (!body.name) { fail(res, 400, '공정명 필수'); return; }
+    const cat = body.category || 'post';
+    const hasTable = await checkProcessTypesTable();
+    if (hasTable) {
+      const maxSort = await db.prepare("SELECT MAX(sort_order) AS mx FROM process_types WHERE category=?").get(cat);
+      const nextSort = (maxSort?.mx || 0) + 1;
+      try {
+        const r = await db.prepare("INSERT INTO process_types (name,category,group_name,icon,sort_order,default_vendor) VALUES (?,?,?,?,?,?)").run(
+          body.name, cat, body.group_name||'', body.icon||'⚙️', body.sort_order || nextSort, body.default_vendor||''
+        );
+        invalidatePostColsCache();
+        ok(res, { id: r.lastInsertRowid, message: '공정 추가 완료' });
+      } catch(e) {
+        if (e.message?.includes('UNIQUE') || e.message?.includes('unique') || e.message?.includes('duplicate')) fail(res, 409, '이미 존재하는 공정명입니다');
+        else fail(res, 500, e.message);
+      }
+    } else {
+      // 인메모리 모드
+      if (!_processTypesInMemory) _processTypesInMemory = [..._defaultPostTypes, ..._defaultBomTypes];
+      if (_processTypesInMemory.find(p => p.name === body.name && p.category === cat)) { fail(res, 409, '이미 존재하는 공정명입니다'); return; }
+      const maxId = Math.max(..._processTypesInMemory.map(p => p.id), 0);
+      const maxSort = Math.max(..._processTypesInMemory.filter(p => p.category === cat).map(p => p.sort_order), 0);
+      const newPt = { id: maxId + 1, name: body.name, category: cat, group_name: body.group_name||'', icon: body.icon||'⚙️', sort_order: body.sort_order || maxSort + 1, is_active: 1, default_vendor: body.default_vendor||'' };
+      _processTypesInMemory.push(newPt);
+      saveProcessTypesToFile();
+      invalidatePostColsCache();
+      ok(res, { id: newPt.id, message: '공정 추가 완료' });
+    }
+    return;
+  }
+
+  const ptPut = pathname.match(/^\/api\/process-types\/(\d+)$/);
+  if (ptPut && method === 'PUT') {
+    const id = parseInt(ptPut[1]);
+    const body = await readJSON(req);
+    const hasTable = await checkProcessTypesTable();
+    if (hasTable) {
+      const sets = [], vals = [];
+      if (body.name !== undefined) { sets.push('name=?'); vals.push(body.name); }
+      if (body.group_name !== undefined) { sets.push('group_name=?'); vals.push(body.group_name); }
+      if (body.icon !== undefined) { sets.push('icon=?'); vals.push(body.icon); }
+      if (body.sort_order !== undefined) { sets.push('sort_order=?'); vals.push(body.sort_order); }
+      if (body.is_active !== undefined) { sets.push('is_active=?'); vals.push(body.is_active); }
+      if (body.default_vendor !== undefined) { sets.push('default_vendor=?'); vals.push(body.default_vendor); }
+      if (sets.length === 0) { fail(res, 400, '변경할 항목 없음'); return; }
+      vals.push(id);
+      await db.prepare(`UPDATE process_types SET ${sets.join(',')} WHERE id=?`).run(...vals);
+    } else {
+      if (!_processTypesInMemory) _processTypesInMemory = [..._defaultPostTypes, ..._defaultBomTypes];
+      const pt = _processTypesInMemory.find(p => p.id === id);
+      if (pt) {
+        if (body.name !== undefined) pt.name = body.name;
+        if (body.group_name !== undefined) pt.group_name = body.group_name;
+        if (body.icon !== undefined) pt.icon = body.icon;
+        if (body.sort_order !== undefined) pt.sort_order = body.sort_order;
+        if (body.is_active !== undefined) pt.is_active = body.is_active;
+        if (body.default_vendor !== undefined) pt.default_vendor = body.default_vendor;
+        saveProcessTypesToFile();
+      }
+    }
+    invalidatePostColsCache();
+    ok(res, { updated: id }); return;
+  }
+
+  const ptDel = pathname.match(/^\/api\/process-types\/(\d+)$/);
+  if (ptDel && method === 'DELETE') {
+    const id = parseInt(ptDel[1]);
+    const hasTable = await checkProcessTypesTable();
+    if (hasTable) {
+      const pt = await db.prepare("SELECT name FROM process_types WHERE id=?").get(id);
+      if (pt) {
+        const used = await db.prepare("SELECT COUNT(*) AS cnt FROM product_process_map WHERE process_type=?").get(pt.name);
+        if (used && used.cnt > 0) {
+          await db.prepare("UPDATE process_types SET is_active=0 WHERE id=?").run(id);
+          invalidatePostColsCache();
+          ok(res, { deactivated: id, reason: `${used.cnt}개 제품에서 사용 중이어서 비활성화됨` }); return;
+        }
+      }
+      await db.prepare("DELETE FROM process_types WHERE id=?").run(id);
+    } else {
+      if (!_processTypesInMemory) _processTypesInMemory = [..._defaultPostTypes, ..._defaultBomTypes];
+      _processTypesInMemory = _processTypesInMemory.filter(p => p.id !== id);
+      saveProcessTypesToFile();
+    }
+    invalidatePostColsCache();
+    ok(res, { deleted: id }); return;
   }
 
   // ════════════════════════════════════════════════════════════════════
