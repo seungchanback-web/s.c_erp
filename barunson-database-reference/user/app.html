@@ -14921,6 +14921,12 @@ function renderPOList(){
   });
 
   container.innerHTML = html;
+
+  // 후공정 업체 datalist 채우기
+  if (Array.isArray(vendorList) && vendorList.length) {
+    const vOpts = vendorList.map(v => '<option value="'+(v.name||v.vendor_name||'')+'">').join('');
+    container.querySelectorAll('datalist[id^="poVendorDL_"]').forEach(dl => { dl.innerHTML = vOpts; });
+  }
 }
 
 // 발주생성 페이지에서 저장 전 현재 목록 엑셀 다운로드
@@ -15142,8 +15148,8 @@ function renderPOSubCard(po, idx, steps, icon) {
             const postOsVal=it.os_number||'';
             return `<tr>
               <td style="font-weight:600">${esc(it.product_code||'')}</td>
-              <td style="color:#7c3aed">${esc(po.vendor_name||'')}</td>
-              <td>${esc(it.process_type||it.spec||'')}</td>
+              <td style="color:#7c3aed"><input type="text" value="${esc(po.vendor_name||'')}" list="poVendorDL_${po.po_id}" onclick="event.stopPropagation()" onchange="inlinePOVendor(${po.po_id},this.value)" style="width:90px;padding:2px 4px;border:1px solid transparent;border-radius:3px;font-size:12px;color:#7c3aed;font-weight:600;background:transparent;cursor:pointer" onfocus="this.style.border='1px solid #c4b5fd';this.style.background='#fff'" onblur="this.style.border='1px solid transparent';this.style.background='transparent'"></td>
+              <td><input type="text" value="${esc(it.process_type||it.spec||'')}" list="poProcessDL_${po.po_id}" onclick="event.stopPropagation()" onchange="inlinePOProcess(${po.po_id},${it.item_id},this.value)" style="width:80px;padding:2px 4px;border:1px solid transparent;border-radius:3px;font-size:12px;background:transparent;cursor:pointer" onfocus="this.style.border='1px solid #d1d5db';this.style.background='#fff'" onblur="this.style.border='1px solid transparent';this.style.background='transparent'"></td>
               <td style="font-weight:700">${esc(postReamQty)}</td>
               <td><input type="text" data-item-id="${it.item_id}" data-po-id="${po.po_id}" value="${esc(postOsVal)}" placeholder="OS번호" onclick="event.stopPropagation()" onchange="saveItemOS(this)" style="width:110px;padding:2px 4px;border:1px solid ${postOsVal?'#86efac':'#d1d5db'};border-radius:3px;font-size:11px;${postOsVal?'background:#f0fdf4':''}"></td>
               <td>${recvHtml}</td>
@@ -15151,6 +15157,29 @@ function renderPOSubCard(po, idx, steps, icon) {
             </tr>`;
           }
         }).join('')}</tbody></table>`;
+      // 후공정 PO: datalist + 후공정 추가 인라인 폼
+      if (!isMat) {
+        const _pc = typeof getPostCols==='function'?getPostCols():[];
+        itemsHtml += `<datalist id="poProcessDL_${po.po_id}">${_pc.map(p=>'<option value="'+esc(p)+'">').join('')}</datalist>`;
+        itemsHtml += `<datalist id="poVendorDL_${po.po_id}"></datalist>`;
+        // 후공정 추가 행 — 체크박스로 기존 품목 선택
+        const canEdit = (currentAuthUser && currentAuthUser.role==='admin') || (po.status!=='완료'&&po.status!=='취소');
+        if (canEdit) {
+          // 이 PO의 고유 제품코드 목록
+          const uniqueCodes = [...new Set(items.map(it=>it.product_code).filter(Boolean))];
+          const cbHtml = uniqueCodes.map(code =>
+            `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;background:#fff">
+              <input type="checkbox" class="inlineAddCb_${po.po_id}" value="${esc(code)}" style="margin:0;cursor:pointer"> ${esc(code)}
+            </label>`
+          ).join('');
+          itemsHtml += `<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding:4px 0;flex-wrap:wrap" onclick="event.stopPropagation()">
+            <span style="font-size:11px;color:#6b7280;font-weight:600;white-space:nowrap">품목:</span>
+            ${cbHtml}
+            <input id="inlineAddProc_${po.po_id}" placeholder="공정명" list="poProcessDL_${po.po_id}" style="width:80px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px">
+            <button onclick="inlineAddPostItem(${po.po_id})" style="padding:3px 10px;background:#7c3aed;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap">+ 후공정추가</button>
+          </div>`;
+        }
+      }
     } else {
       itemsHtml=`<div style="padding:12px;text-align:center;color:var(--text-muted)">품목 정보 없음</div>`;
     }
@@ -15529,6 +15558,66 @@ async function _poItemSaveChanges(poId) {
   } catch(e) {
     alert('❌ 서버 오류: ' + e.message);
   }
+}
+
+// ── 발주현황 인라인 편집: 업체명, 공정, 후공정 추가 ──
+async function inlinePOVendor(poId, newName) {
+  if (!newName) return;
+  try {
+    const resp = await authFetch(`/api/po/${poId}/items`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ add:[], remove:[], update:[], vendor_name: newName, reason:'업체명 변경: '+newName })
+    });
+    const d = await resp.json();
+    if (d.ok !== false && !d.error) { loadPOList(); }
+    else { alert('업체명 변경 실패: '+(d.error||'')); }
+  } catch(e) { alert('오류: '+e.message); }
+}
+
+async function inlinePOProcess(poId, itemId, newProcess) {
+  if (!newProcess) return;
+  try {
+    const resp = await authFetch(`/api/po/${poId}/items`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ add:[], remove:[], update:[{item_id:itemId, process_type:newProcess}], reason:'공정 변경: '+newProcess })
+    });
+    const d = await resp.json();
+    if (d.ok !== false && !d.error) { loadPOList(); }
+    else { alert('공정 변경 실패: '+(d.error||'')); }
+  } catch(e) { alert('오류: '+e.message); }
+}
+
+async function inlineAddPostItem(poId) {
+  const checkboxes = document.querySelectorAll('.inlineAddCb_'+poId+':checked');
+  const codes = [...checkboxes].map(cb => cb.value);
+  const proc = document.getElementById('inlineAddProc_'+poId)?.value?.trim();
+  if (!codes.length) { alert('품목을 선택하세요.'); return; }
+  if (!proc) { alert('공정명을 입력하세요.'); return; }
+  // 기존 PO에서 해당 제품코드의 수량을 가져옴
+  const po = poList.find(p => p.po_id === poId);
+  const addItems = codes.map(code => {
+    const existing = (po?.items||[]).find(it => it.product_code === code);
+    return {
+      product_code: code,
+      ordered_qty: existing?.ordered_qty || 0,
+      process_type: proc,
+      brand: (productInfo[code]||{})['브랜드']||'',
+      spec: proc
+    };
+  });
+  try {
+    const resp = await authFetch(`/api/po/${poId}/items`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        add: addItems,
+        remove:[], update:[], reason:'후공정 추가: '+codes.join(',')+' '+proc
+      })
+    });
+    const d = await resp.json();
+    if (d.ok !== false && !d.error) {
+      loadPOList();
+    } else { alert('후공정 추가 실패: '+(d.error||'')); }
+  } catch(e) { alert('오류: '+e.message); }
 }
 
 function changePOStatus(idx,newStatus,forceEmail){
