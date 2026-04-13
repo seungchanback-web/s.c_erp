@@ -4013,16 +4013,17 @@ async function handleRequest(req, res) {
       if (vErr) { fail(res, 400, vErr); return; }
     }
     const fields = [];
-    const params = { id };
+    const values = [];
     for (const col of ['vendor_code', 'name', 'type', 'contact', 'phone', 'email', 'email_cc', 'kakao', 'memo']) {
       if (body[col] !== undefined) {
-        fields.push(`${col} = @${col}`);
-        params[col] = body[col];
+        fields.push(`${col} = ?`);
+        values.push(body[col]);
       }
     }
     if (fields.length === 0) { fail(res, 400, 'No fields to update'); return; }
     fields.push(`updated_at = datetime('now','localtime')`);
-    await db.prepare(`UPDATE vendors SET ${fields.join(', ')} WHERE vendor_id = @id`).run(params);
+    values.push(id);
+    await db.prepare(`UPDATE vendors SET ${fields.join(', ')} WHERE vendor_id = ?`).run(...values);
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'vendor_update', 'vendors', id, `거래처 수정: ${body.name || id}`, clientIP);
     ok(res, { vendor_id: id });
     return;
@@ -9061,16 +9062,17 @@ async function handleRequest(req, res) {
     const id = parseInt(notePut[1]);
     const body = await readJSON(req);
     const fields = [];
-    const params = { id };
+    const values = [];
     for (const col of ['vendor_id', 'vendor_name', 'title', 'content', 'note_type', 'note_date', 'status']) {
       if (body[col] !== undefined) {
-        fields.push(`${col} = @${col}`);
-        params[col] = body[col];
+        fields.push(`${col} = ?`);
+        values.push(body[col]);
       }
     }
     if (fields.length === 0) { fail(res, 400, 'No fields to update'); return; }
     fields.push(`updated_at = datetime('now','localtime')`);
-    await db.prepare(`UPDATE vendor_notes SET ${fields.join(', ')} WHERE id = @id`).run(params);
+    values.push(id);
+    await db.prepare(`UPDATE vendor_notes SET ${fields.join(', ')} WHERE id = ?`).run(...values);
     ok(res, { note_id: id });
     return;
   }
@@ -10988,12 +10990,13 @@ async function handleRequest(req, res) {
   if (accPut && method === 'PUT') {
     const b = await readJSON(req);
     const id = accPut[1];
-    const fields = [], params = { id };
+    const fields = [], values = [];
     for (const col of ['acc_code','acc_name','acc_type','current_stock','min_stock','unit','vendor','memo','origin']) {
-      if (b[col] !== undefined) { fields.push(`${col}=@${col}`); params[col] = b[col]; }
+      if (b[col] !== undefined) { fields.push(`${col}=?`); values.push(b[col]); }
     }
     fields.push(`updated_at=datetime('now','localtime')`);
-    await db.prepare(`UPDATE accessories SET ${fields.join(',')} WHERE id=@id`).run(params);
+    values.push(id);
+    await db.prepare(`UPDATE accessories SET ${fields.join(',')} WHERE id=?`).run(...values);
     ok(res, { updated: true });
     return;
   }
