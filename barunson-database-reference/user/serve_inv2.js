@@ -1160,6 +1160,7 @@ try { await db.exec("ALTER TABLE products ADD COLUMN lead_time_days INTEGER DEFA
 try { await db.exec("ALTER TABLE products ADD COLUMN post_vendor TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'EA'"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN op_category TEXT DEFAULT ''"); } catch(e) {}
+try { await db.exec("ALTER TABLE products ADD COLUMN temp_code TEXT DEFAULT ''"); } catch(e) {}
 
 // ── 생산지별 기본 리드타임 (일) ──
 const ORIGIN_LEAD_TIME = { '중국': 50, '한국': 7, '더기프트': 14 };
@@ -4177,14 +4178,14 @@ async function handleRequest(req, res) {
     try {
       let info;
       if (_hasEntity.products) {
-        info = await db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, legal_entity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        info = await db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, legal_entity, temp_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           b.product_code, b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-          b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', entity
+          b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', entity, b.temp_code||''
         );
       } else {
-        info = await db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        info = await db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, temp_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           b.product_code, b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-          b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||''
+          b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.temp_code||''
         );
       }
       ok(res, { id: info.lastInsertRowid });
@@ -4200,14 +4201,14 @@ async function handleRequest(req, res) {
     const b = await readJSON(req);
     const entity = (b.legal_entity === 'dd') ? 'dd' : 'barunson';
     if (_hasEntity.products) {
-      await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, legal_entity=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, legal_entity=?, temp_code=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', entity, id
+        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', entity, b.temp_code||'', id
       );
     } else {
-      await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
+      await db.prepare(`UPDATE products SET product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, temp_code=?, updated_at=datetime('now','localtime') WHERE id=?`).run(
         b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', id
+        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.temp_code||'', id
       );
     }
     // op_category → product_notes 동기화

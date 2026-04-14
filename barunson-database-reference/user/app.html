@@ -4090,14 +4090,15 @@ function closeMegaMenu() { /* no-op */ }
         <table id="pmTable" style="table-layout:fixed;width:100%">
           <colgroup>
             <col style="width:8%">
-            <col style="width:11%">
+            <col style="width:6%">
+            <col style="width:10%">
             <col style="width:6%">
             <col style="width:6%">
             <col style="width:6%">
             <col style="width:4%">
             <col style="width:5%">
-            <col style="width:7%">
-            <col style="width:16%">
+            <col style="width:6%">
+            <col style="width:14%">
             <col style="width:3%">
             <col style="width:4%">
             <col style="width:5%">
@@ -4105,6 +4106,7 @@ function closeMegaMenu() { /* no-op */ }
           </colgroup>
           <thead><tr>
             <th>제품코드</th>
+            <th>임시코드</th>
             <th>품목명</th>
             <th>브랜드</th>
             <th>카테고리</th>
@@ -4119,7 +4121,7 @@ function closeMegaMenu() { /* no-op */ }
             <th></th>
           </tr></thead>
           <tbody id="pmTableBody">
-            <tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
+            <tr><td colspan="14" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -4235,6 +4237,7 @@ function closeMegaMenu() { /* no-op */ }
     <h3 id="pmModalTitle" style="margin:0 0 16px">품목 등록</h3>
     <div class="form-row">
       <div class="form-group"><label>제품코드 *</label><input type="text" id="pmCode" placeholder="예: BI202"></div>
+      <div class="form-group"><label>임시코드</label><input type="text" id="pmTempCode" placeholder="임시코드"></div>
       <div class="form-group"><label>품목명</label><input type="text" id="pmName" placeholder="품목명"></div>
     </div>
     <div class="form-row">
@@ -16879,7 +16882,8 @@ function pofCodeInput(inputEl, idx){
 
   const matches = pmData.filter(p =>
     (p.product_code||'').toUpperCase().includes(q) ||
-    (p.product_name||'').includes(inputEl.value.trim())
+    (p.product_name||'').includes(inputEl.value.trim()) ||
+    (p.temp_code||'').toUpperCase().includes(q)
   ).slice(0,8);
 
   if(!matches.length){ box.style.display='none'; return; }
@@ -16889,6 +16893,7 @@ function pofCodeInput(inputEl, idx){
       style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:center"
       onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background=''">
       <span style="font-weight:700;color:#1d4ed8;min-width:80px">${esc(p.product_code||'')}</span>
+      ${p.temp_code?`<span style="font-size:10px;color:#d97706;background:#fef3c7;padding:1px 5px;border-radius:3px">${esc(p.temp_code)}</span>`:''}
       <span style="color:#374151;flex:1">${esc(p.product_name||'')}</span>
       ${p.brand?`<span style="font-size:11px;color:#94a3b8">${esc(p.brand)}</span>`:''}
     </div>`).join('');
@@ -19705,13 +19710,13 @@ function renderProductMgmt(){
     return v;
   };
   filtered = filtered.filter(p => normalizeOrigin(p.origin, p.legal_entity||'barunson') === pmTab);
-  if(search) filtered=filtered.filter(p=>(p.product_code||'').toLowerCase().includes(search)||(p.product_name||'').toLowerCase().includes(search));
+  if(search) filtered=filtered.filter(p=>(p.product_code||'').toLowerCase().includes(search)||(p.product_name||'').toLowerCase().includes(search)||(p.temp_code||'').toLowerCase().includes(search));
 
   document.getElementById('pmCountBadge').textContent=`${filtered.length}개 품목`;
 
   const tbody=document.getElementById('pmTableBody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="14" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
     return;
   }
 
@@ -19735,6 +19740,7 @@ function renderProductMgmt(){
       : '';
     return`<tr style="${trStyle}">
       <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${entityBadge}${esc(p.product_code)}</td>
+      <td style="${cellStyle};color:#6b7280" title="${esc(p.temp_code||'')}">${esc(p.temp_code||'')}</td>
       <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}${originVariantBadge}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
@@ -19949,6 +19955,7 @@ function showAddProductModal(){
   pmEditId=null;
   document.getElementById('pmModalTitle').textContent='품목 등록';
   document.getElementById('pmCode').value='';
+  document.getElementById('pmTempCode').value='';
   document.getElementById('pmName').value='';
   document.getElementById('pmBrand').value = (pmEntity==='dd') ? '디얼디어' : '바른손카드';
   // 법인은 현재 선택된 토글에 맞춤
@@ -19980,6 +19987,7 @@ function editProduct(id){
   document.getElementById('pmModalTitle').textContent='품목 수정';
   document.getElementById('pmCode').value=p.product_code;
   document.getElementById('pmCode').disabled=true;
+  document.getElementById('pmTempCode').value=p.temp_code||'';
   document.getElementById('pmName').value=p.product_name||'';
   document.getElementById('pmBrand').value=p.brand||'';
   const leSel = document.getElementById('pmLegalEntity');
@@ -20021,6 +20029,7 @@ async function saveProduct(){
     paper_maker:document.getElementById('pmPaperMaker').value.trim(),
     memo:document.getElementById('pmMemo').value.trim(),
     is_new_product: document.getElementById('pmNewProduct')?.checked ? 1 : 0,
+    temp_code:document.getElementById('pmTempCode').value.trim(),
   };
   if(!body.product_code){alert('제품코드를 입력하세요');return;}
 
