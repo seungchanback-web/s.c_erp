@@ -1627,6 +1627,29 @@ try { await db.exec(`ALTER TABLE po_items ADD COLUMN ship_date TEXT DEFAULT ''`)
 try { await db.exec(`ALTER TABLE po_items ADD COLUMN os_number TEXT DEFAULT ''`); } catch(e) {}
 try { await db.exec(`ALTER TABLE po_items ADD COLUMN produced_qty INTEGER DEFAULT 0`); } catch(e) {}
 try { await db.exec(`ALTER TABLE po_items ADD COLUMN defect_qty INTEGER DEFAULT 0`); } catch(e) {}
+try { await db.exec(`ALTER TABLE po_items ADD COLUMN unit_price REAL DEFAULT 0`); } catch(e) {}
+try { await db.exec(`ALTER TABLE po_items ADD COLUMN amount REAL DEFAULT 0`); } catch(e) {}
+try { await db.exec(`ALTER TABLE po_items ADD COLUMN tax_amount REAL DEFAULT 0`); } catch(e) {}
+try { await db.exec(`ALTER TABLE po_items ADD COLUMN received_date TEXT DEFAULT ''`); } catch(e) {}
+
+// ── 구매마감 업체 첨부파일 (세금계산서/거래명세서) ──
+await db.exec(`CREATE TABLE IF NOT EXISTS purchase_closing_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  closing_year INTEGER NOT NULL,
+  closing_month INTEGER NOT NULL,
+  legal_entity TEXT NOT NULL DEFAULT 'barunson',
+  vendor_name TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  file_type TEXT DEFAULT '',
+  file_size INTEGER DEFAULT 0,
+  parsed_total REAL DEFAULT 0,
+  parsed_tax REAL DEFAULT 0,
+  parsed_data TEXT DEFAULT '[]',
+  match_status TEXT DEFAULT 'pending',
+  notes TEXT DEFAULT '',
+  uploaded_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
 
 // ── 거래처 불량 보고 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS vendor_defect_reports (
@@ -3061,6 +3084,7 @@ const ALL_PAGES = [
   { id: 'delivery-schedule', name: '입고일정', group: '구매' },
   { id: 'receipts', name: '입고관리', group: '구매' },
   { id: 'os-register', name: 'OS등록', group: '구매' },
+  { id: 'purchase-closing', name: '구매마감', group: '구매' },
   // 판매
   { id: 'sales', name: '통합매출', group: '판매' },
   { id: 'sales-barun', name: '바른손매출', group: '판매' },
@@ -3176,6 +3200,31 @@ function hasPermission(role, page, userPermissions) {
 
 // GET /api/auth/pages — 전체 페이지 목록 (관리자 권한 UI용)
 // (handleRequest 내에서 처리)
+
+// ── 구매마감 테이블 ──
+await db.exec(`CREATE TABLE IF NOT EXISTS purchase_closing (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  legal_entity TEXT NOT NULL DEFAULT 'barunson',
+  vendor_name TEXT NOT NULL,
+  closing_year INTEGER NOT NULL,
+  closing_month INTEGER NOT NULL,
+  po_count INTEGER DEFAULT 0,
+  total_ordered_qty INTEGER DEFAULT 0,
+  total_received_qty INTEGER DEFAULT 0,
+  total_defect_qty INTEGER DEFAULT 0,
+  total_amount REAL DEFAULT 0,
+  adjustment_amount REAL DEFAULT 0,
+  final_amount REAL DEFAULT 0,
+  status TEXT DEFAULT 'open',
+  confirmed_by TEXT DEFAULT '',
+  confirmed_at TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(legal_entity, vendor_name, closing_year, closing_month)
+)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_pc_ym ON purchase_closing(closing_year, closing_month)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_pc_status ON purchase_closing(status)`);
 
 // ── 메뉴 활성화/비활성화 설정 테이블 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS menu_settings (
@@ -6045,6 +6094,422 @@ async function handleRequest(req, res) {
       body.po_id, po.po_number, 'stage_change', body.actor || 'system', po.status, body.stage, body.notes || '');
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_stage_change', 'po_header', body.po_id, `발주단계변경: ${po.po_number} ${po.status}→${body.stage}`, clientIP);
     ok(res, { updated: true, stage: body.stage }); return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  구매마감 API
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/purchase-closing — 월별 업체별 마감 데이터 조회
+  if (pathname === '/api/purchase-closing' && method === 'GET') {
+    try {
+      const year = parseInt(parsed.searchParams.get('year')) || new Date().getFullYear();
+      const month = parseInt(parsed.searchParams.get('month')) || new Date().getMonth() + 1;
+      const entity = parsed.searchParams.get('entity') || 'all'; // barunson, dd, all
+      const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+      const nextMonth = month === 12 ? `${year+1}-01` : `${year}-${String(month+1).padStart(2,'0')}`;
+
+      let entityWhere = '';
+      if (entity === 'barunson') entityWhere = "AND h.legal_entity = 'barunson'";
+      else if (entity === 'dd') entityWhere = "AND h.legal_entity = 'dd'";
+
+      // po_items에 amount 컬럼이 있는지 확인 (PG 권한 부족 시 ALTER TABLE 실패)
+      let hasAmountCol = false;
+      try {
+        await db.prepare('SELECT amount FROM po_items LIMIT 1').get();
+        hasAmountCol = true;
+      } catch(e) {}
+
+      const amtSelect = hasAmountCol
+        ? ', SUM(COALESCE(i.amount,0)) AS sys_amount, SUM(COALESCE(i.tax_amount,0)) AS sys_tax'
+        : ', 0 AS sys_amount, 0 AS sys_tax';
+
+      const rows = await db.prepare(`
+        SELECT h.vendor_name,
+               h.legal_entity,
+               h.po_type,
+               COUNT(DISTINCT h.po_id) AS po_count,
+               SUM(i.ordered_qty) AS total_ordered,
+               SUM(COALESCE(i.received_qty,0)) AS total_received,
+               SUM(COALESCE(i.produced_qty,0)) AS total_produced,
+               SUM(COALESCE(i.defect_qty,0)) AS total_defect
+               ${amtSelect}
+        FROM po_header h
+        JOIN po_items i ON h.po_id = i.po_id
+        WHERE h.status NOT IN ('cancelled','draft')
+          AND h.po_date >= ? AND h.po_date < ?
+          ${entityWhere}
+        GROUP BY h.vendor_name, h.legal_entity, h.po_type
+        ORDER BY h.legal_entity, h.vendor_name
+      `).all(monthStr + '-01', nextMonth + '-01');
+
+      // 거래명세서에서 금액 가져오기
+      // trade_document는 doc_date 없음 → po_header의 po_date로 조인, legal_entity도 po_header에서 가져옴
+      const amountRaw = await db.prepare(`
+        SELECT td.vendor_name, h.legal_entity, td.items_json
+        FROM trade_document td
+        JOIN po_header h ON td.po_id = h.po_id
+        WHERE h.po_date >= ? AND h.po_date < ?
+          AND td.status NOT IN ('cancelled','rejected')
+          ${entityWhere}
+      `).all(monthStr + '-01', nextMonth + '-01');
+      const amountMap = {};
+      for (const r of amountRaw) {
+        const key = `${r.vendor_name}|${r.legal_entity}`;
+        let amt = 0;
+        try {
+          if (r.items_json) {
+            const items = JSON.parse(r.items_json);
+            if (Array.isArray(items)) items.forEach(it => { amt += Number(it.amount) || 0; });
+          }
+        } catch(e) {}
+        amountMap[key] = (amountMap[key] || 0) + amt;
+      }
+
+      // 기존 마감 상태 (테이블 없으면 빈 맵)
+      const closingMap = {};
+      try {
+        const closings = await db.prepare(`
+          SELECT * FROM purchase_closing
+          WHERE closing_year = ? AND closing_month = ?
+          ${entity !== 'all' ? "AND legal_entity = '" + entity + "'" : ''}
+        `).all(year, month);
+        for (const c of closings) {
+          closingMap[`${c.vendor_name}|${c.legal_entity}`] = c;
+        }
+      } catch(e) { /* purchase_closing 테이블 미존재 시 무시 */ }
+
+      // 첨부파일 금액 (업체 청구금액)
+      const uploadAmtMap = {};
+      try {
+        const uploadRows = await db.prepare(`SELECT vendor_name, legal_entity, SUM(parsed_total) AS vendor_total, SUM(parsed_tax) AS vendor_tax FROM purchase_closing_files WHERE closing_year=? AND closing_month=? GROUP BY vendor_name, legal_entity`).all(year, month);
+        for (const u of uploadRows) { uploadAmtMap[`${u.vendor_name}|${u.legal_entity}`] = { total: u.vendor_total||0, tax: u.vendor_tax||0 }; }
+      } catch(e) {}
+
+      // 결과 조합
+      const vendors = rows.map(r => {
+        const key = `${r.vendor_name}|${r.legal_entity}`;
+        const closing = closingMap[key] || null;
+        const upload = uploadAmtMap[key] || null;
+        const sysAmt = parseFloat(r.sys_amount) || 0;
+        const sysTax = parseFloat(r.sys_tax) || 0;
+        const vendorAmt = upload ? parseFloat(upload.total) : 0;
+        const vendorTax = upload ? parseFloat(upload.tax) : 0;
+        return {
+          vendor_name: r.vendor_name,
+          legal_entity: r.legal_entity,
+          po_type: r.po_type,
+          po_count: r.po_count,
+          total_ordered: r.total_ordered || 0,
+          total_received: r.total_received || 0,
+          total_produced: r.total_produced || 0,
+          total_defect: r.total_defect || 0,
+          sys_amount: sysAmt,
+          sys_tax: sysTax,
+          vendor_amount: vendorAmt,
+          vendor_tax: vendorTax,
+          diff_amount: sysAmt > 0 && vendorAmt > 0 ? sysAmt - vendorAmt : 0,
+          has_upload: !!upload,
+          total_amount: amountMap[key] || 0,
+          closing_status: closing ? closing.status : 'open',
+          closing_id: closing ? closing.id : null,
+          confirmed_at: closing ? closing.confirmed_at : '',
+          final_amount: closing ? closing.final_amount : sysAmt,
+          adjustment_amount: closing ? closing.adjustment_amount : 0,
+          notes: closing ? closing.notes : ''
+        };
+      });
+
+      ok(res, { vendors, year, month, entity });
+    } catch(e) {
+      console.error('구매마감 조회 오류:', e.message);
+      fail(res, 500, '구매마감 조회 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // GET /api/purchase-closing/detail — 업체별 상세 PO 품목 목록 (단가/금액 포함)
+  if (pathname === '/api/purchase-closing/detail' && method === 'GET') {
+    try {
+      const year = parseInt(parsed.searchParams.get('year')) || new Date().getFullYear();
+      const month = parseInt(parsed.searchParams.get('month')) || new Date().getMonth() + 1;
+      const vendorName = parsed.searchParams.get('vendor');
+      const entity = parsed.searchParams.get('entity') || 'barunson';
+      if (!vendorName) { fail(res, 400, '거래처명 필수'); return; }
+
+      const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+      const nextMonth = month === 12 ? `${year+1}-01` : `${year}-${String(month+1).padStart(2,'0')}`;
+
+      // po_items에 amount 컬럼 존재 여부 확인
+      let _hasAmt = false;
+      try { await db.prepare('SELECT amount FROM po_items LIMIT 1').get(); _hasAmt = true; } catch(e) {}
+
+      const priceSelect = _hasAmt
+        ? ', COALESCE(i.unit_price,0) AS unit_price, COALESCE(i.amount,0) AS amount, COALESCE(i.tax_amount,0) AS tax_amount, COALESCE(i.received_date,\'\') AS received_date'
+        : ', 0 AS unit_price, 0 AS amount, 0 AS tax_amount, \'\' AS received_date';
+
+      const pos = await db.prepare(`
+        SELECT h.po_id, h.po_number, h.po_type, h.status, h.po_date, h.total_qty,
+               i.item_id, i.product_code, i.brand, i.process_type, i.spec,
+               i.ordered_qty, COALESCE(i.received_qty,0) AS received_qty,
+               COALESCE(i.produced_qty,0) AS produced_qty,
+               COALESCE(i.defect_qty,0) AS defect_qty,
+               i.ship_date
+               ${priceSelect}
+        FROM po_header h
+        JOIN po_items i ON h.po_id = i.po_id
+        WHERE h.vendor_name = ? AND h.legal_entity = ?
+          AND h.status NOT IN ('cancelled','draft')
+          AND h.po_date >= ? AND h.po_date < ?
+        ORDER BY h.po_date DESC, h.po_id DESC, i.item_id
+      `).all(vendorName, entity, monthStr + '-01', nextMonth + '-01');
+
+      // 품목명 보충 (xerpItemNameCache + products)
+      for (const p of pos) {
+        const code = (p.product_code||'').trim();
+        p.product_name = (xerpItemNameCache && xerpItemNameCache[code]) || '';
+        if (!p.product_name) {
+          try {
+            const lp = await db.prepare('SELECT product_name, material_name FROM products WHERE product_code=?').get(code);
+            if (lp) p.product_name = (lp.product_name||'').trim() || (lp.material_name||'').trim();
+          } catch(e) {}
+        }
+      }
+
+      // 첨부파일 목록
+      let files = [];
+      try {
+        files = await db.prepare(`SELECT * FROM purchase_closing_files WHERE closing_year=? AND closing_month=? AND vendor_name=? AND legal_entity=? ORDER BY uploaded_at DESC`).all(year, month, vendorName, entity);
+      } catch(e) {}
+
+      // 시스템 합계
+      let sysTotal = 0, sysTax = 0;
+      for (const p of pos) {
+        sysTotal += parseFloat(p.amount) || 0;
+        sysTax += parseFloat(p.tax_amount) || 0;
+      }
+
+      ok(res, { items: pos, vendor_name: vendorName, entity, year, month, files, sys_total: sysTotal, sys_tax: sysTax });
+    } catch(e) {
+      fail(res, 500, '구매마감 상세 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // POST /api/purchase-closing/update-price — 품목별 단가/금액 수정
+  if (pathname === '/api/purchase-closing/update-price' && method === 'POST') {
+    try {
+      const body = await readJSON(req);
+      const { item_id, unit_price, amount, tax_amount, received_date } = body;
+      if (!item_id) { fail(res, 400, 'item_id 필수'); return; }
+      const up = parseFloat(unit_price) || 0;
+      const amt = parseFloat(amount) || 0;
+      const tax = parseFloat(tax_amount) || 0;
+      const rd = received_date || '';
+      await db.prepare(`UPDATE po_items SET unit_price=?, amount=?, tax_amount=?, received_date=? WHERE item_id=?`).run(up, amt, tax, rd, item_id);
+      ok(res, { message: '단가 수정 완료', item_id, unit_price: up, amount: amt, tax_amount: tax });
+    } catch(e) {
+      fail(res, 500, '단가 수정 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // POST /api/purchase-closing/upload — 세금계산서/거래명세서 파일 업로드
+  if (pathname === '/api/purchase-closing/upload' && method === 'POST') {
+    try {
+      const contentType = req.headers['content-type'] || '';
+      if (!contentType.includes('multipart/form-data')) {
+        fail(res, 400, 'multipart/form-data 필요'); return;
+      }
+      const boundary = contentType.split('boundary=')[1];
+      if (!boundary) { fail(res, 400, 'boundary 없음'); return; }
+
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const buf = Buffer.concat(chunks);
+      const sep = Buffer.from('--' + boundary);
+
+      // 파트 파싱
+      const fields = {};
+      let fileData = null, fileName = '', fileType = '';
+      const parts = [];
+      let start = 0;
+      while (true) {
+        const idx = buf.indexOf(sep, start);
+        if (idx === -1) break;
+        if (start > 0) parts.push(buf.slice(start, idx - 2));
+        start = idx + sep.length + 2;
+      }
+      for (const part of parts) {
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd === -1) continue;
+        const header = part.slice(0, headerEnd).toString('utf8');
+        const body = part.slice(headerEnd + 4);
+        const nameMatch = header.match(/name="([^"]+)"/);
+        const fileMatch = header.match(/filename="([^"]+)"/);
+        if (nameMatch) {
+          if (fileMatch) {
+            fileData = body;
+            fileName = fileMatch[1];
+            const ctMatch = header.match(/Content-Type:\s*(.+)/i);
+            fileType = ctMatch ? ctMatch[1].trim() : '';
+          } else {
+            fields[nameMatch[1]] = body.toString('utf8').trim();
+          }
+        }
+      }
+
+      if (!fileData || !fileName) { fail(res, 400, '파일이 없습니다'); return; }
+      const vendor = fields.vendor_name || '';
+      const entity = fields.legal_entity || 'barunson';
+      const yr = parseInt(fields.year) || new Date().getFullYear();
+      const mo = parseInt(fields.month) || new Date().getMonth() + 1;
+      if (!vendor) { fail(res, 400, 'vendor_name 필수'); return; }
+
+      // 파일 저장
+      const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
+      const closingDir = path.join(uploadDir, 'closing', `${yr}-${String(mo).padStart(2,'0')}`);
+      const fs = require('fs');
+      if (!fs.existsSync(closingDir)) fs.mkdirSync(closingDir, { recursive: true });
+      const safeName = `${entity}_${vendor}_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9가-힣._-]/g, '_')}`;
+      const filePath = path.join(closingDir, safeName);
+      fs.writeFileSync(filePath, fileData);
+
+      // 엑셀 파싱 시도
+      let parsedTotal = 0, parsedTax = 0, parsedData = [];
+      const ext = path.extname(fileName).toLowerCase();
+      if (ext === '.xlsx' || ext === '.xls') {
+        try {
+          const XLSX = require('xlsx');
+          const wb = XLSX.read(fileData, { type: 'buffer' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          // 금액/세액 컬럼 자동 탐지
+          const amtKeys = ['금액','공급가액','공급가','amount','supply_amount','합계금액'];
+          const taxKeys = ['세액','부가세','vat','tax','tax_amount'];
+          for (const row of rows) {
+            let amt = 0, tax = 0;
+            for (const [k,v] of Object.entries(row)) {
+              const kl = k.toLowerCase().replace(/\s/g,'');
+              if (amtKeys.some(a => kl.includes(a))) amt = parseFloat(String(v).replace(/,/g,'')) || 0;
+              if (taxKeys.some(t => kl.includes(t))) tax = parseFloat(String(v).replace(/,/g,'')) || 0;
+            }
+            if (amt > 0 || tax > 0) {
+              parsedTotal += amt;
+              parsedTax += tax;
+              parsedData.push(row);
+            }
+          }
+        } catch(e) { console.warn('엑셀 파싱 실패:', e.message); }
+      }
+
+      // DB 저장
+      await db.prepare(`INSERT INTO purchase_closing_files (closing_year, closing_month, legal_entity, vendor_name, file_name, file_path, file_type, file_size, parsed_total, parsed_tax, parsed_data) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        yr, mo, entity, vendor, fileName, filePath, fileType, fileData.length,
+        parsedTotal, parsedTax, JSON.stringify(parsedData)
+      );
+
+      ok(res, { message: '파일 업로드 완료', file_name: fileName, parsed_total: parsedTotal, parsed_tax: parsedTax, parsed_rows: parsedData.length });
+    } catch(e) {
+      console.error('파일 업로드 오류:', e.message);
+      fail(res, 500, '파일 업로드 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // DELETE /api/purchase-closing/file/:id — 첨부파일 삭제
+  if (pathname.startsWith('/api/purchase-closing/file/') && method === 'DELETE') {
+    try {
+      const fileId = parseInt(pathname.split('/').pop());
+      if (!fileId) { fail(res, 400, 'file id 필수'); return; }
+      const f = await db.prepare('SELECT file_path FROM purchase_closing_files WHERE id=?').get(fileId);
+      if (f && f.file_path) {
+        const fs = require('fs');
+        try { fs.unlinkSync(f.file_path); } catch(e) {}
+      }
+      await db.prepare('DELETE FROM purchase_closing_files WHERE id=?').run(fileId);
+      ok(res, { message: '파일 삭제 완료' });
+    } catch(e) {
+      fail(res, 500, '파일 삭제 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // POST /api/purchase-closing/confirm — 마감 확정
+  if (pathname === '/api/purchase-closing/confirm' && method === 'POST') {
+    try {
+      const body = await readJSON(req);
+      const { vendor_name, legal_entity, year, month, notes } = body;
+      if (!vendor_name || !year || !month) { fail(res, 400, '필수 값 누락'); return; }
+      const ent = legal_entity || 'barunson';
+
+      const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+      const nextMonth = month === 12 ? `${year+1}-01` : `${year}-${String(month+1).padStart(2,'0')}`;
+
+      // 집계
+      const agg = await db.prepare(`
+        SELECT COUNT(DISTINCT h.po_id) AS po_count,
+               SUM(i.ordered_qty) AS total_ordered,
+               SUM(COALESCE(i.received_qty,0)) AS total_received,
+               SUM(COALESCE(i.defect_qty,0)) AS total_defect
+        FROM po_header h JOIN po_items i ON h.po_id = i.po_id
+        WHERE h.vendor_name = ? AND h.legal_entity = ?
+          AND h.status NOT IN ('cancelled','draft')
+          AND h.po_date >= ? AND h.po_date < ?
+      `).get(vendor_name, ent, monthStr + '-01', nextMonth + '-01');
+
+      // 금액
+      const amtRaw = await db.prepare(`
+        SELECT td.items_json FROM trade_document td
+        JOIN po_header h ON td.po_id = h.po_id
+        WHERE td.vendor_name = ? AND h.legal_entity = ?
+          AND h.po_date >= ? AND h.po_date < ?
+          AND td.status NOT IN ('cancelled','rejected')
+      `).all(vendor_name, ent, monthStr + '-01', nextMonth + '-01');
+      let totalAmount = 0;
+      for (const ar of amtRaw) {
+        try {
+          if (ar.items_json) {
+            const items = JSON.parse(ar.items_json);
+            if (Array.isArray(items)) items.forEach(it => { totalAmount += Number(it.amount) || 0; });
+          }
+        } catch(e) {}
+      }
+
+      await db.prepare(`
+        INSERT INTO purchase_closing (legal_entity, vendor_name, closing_year, closing_month,
+          po_count, total_ordered_qty, total_received_qty, total_defect_qty,
+          total_amount, final_amount, status, confirmed_at, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'confirmed',datetime('now','localtime'),?)
+        ON CONFLICT(legal_entity, vendor_name, closing_year, closing_month)
+        DO UPDATE SET po_count=excluded.po_count, total_ordered_qty=excluded.total_ordered_qty,
+          total_received_qty=excluded.total_received_qty, total_defect_qty=excluded.total_defect_qty,
+          total_amount=excluded.total_amount, final_amount=excluded.final_amount,
+          status='confirmed', confirmed_at=datetime('now','localtime'),
+          notes=excluded.notes, updated_at=datetime('now','localtime')
+      `).run(ent, vendor_name, year, month,
+        agg.po_count||0, agg.total_ordered||0, agg.total_received||0, agg.total_defect||0,
+        totalAmount, totalAmount, notes||'');
+
+      ok(res, { message: '마감 확정 완료' });
+    } catch(e) {
+      fail(res, 500, '마감 확정 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // POST /api/purchase-closing/reopen — 마감 해제
+  if (pathname === '/api/purchase-closing/reopen' && method === 'POST') {
+    try {
+      const body = await readJSON(req);
+      const { closing_id } = body;
+      if (!closing_id) { fail(res, 400, 'closing_id 필수'); return; }
+      await db.prepare(`UPDATE purchase_closing SET status='open', updated_at=datetime('now','localtime') WHERE id=?`).run(closing_id);
+      ok(res, { message: '마감 해제 완료' });
+    } catch(e) {
+      fail(res, 500, '마감 해제 오류: ' + e.message);
+    }
+    return;
   }
 
   // ════════════════════════════════════════════════════════════════════
