@@ -6104,17 +6104,21 @@ async function handleRequest(req, res) {
         // 품목별 후공정 체인 (순서대로) — 숫자만 있는 값은 업체명이 아니므로 제외
         const itemSteps = [];
         postCols.forEach(c => {
-          if (info[c] && info[c] !== '0' && !/^\d+(\.\d+)?$/.test(String(info[c]).trim())) itemSteps.push({ p: c, v: info[c] });
+          if (info[c] && info[c] !== '0' && !/^[\d,.]+$/.test(String(info[c]).trim())) itemSteps.push({ p: c, v: info[c] });
         });
         it.first_process = itemSteps.length ? itemSteps[0].p : '';
         it.first_process_vendor = itemSteps.length ? itemSteps[0].v : '';
         it.process_chain_full = itemSteps.map(s => s.v + '(' + s.p + ')').join(' → ');
-        // 품목별 입고처: 현재 업체의 공정 다음 단계 찾기
+        // 품목별 입고처 + 공정명 보정: 현재 업체의 공정 찾기
         if (vendor.type === '후공정' && itemSteps.length > 0) {
           const vName = vendor.name || '';
           let foundIdx = -1;
           for (let si = 0; si < itemSteps.length; si++) {
             if (itemSteps[si].v === vName) { foundIdx = si; break; }
+          }
+          // 공정명: product_info 기반으로 보정 (DB에 깨진 한글 방지)
+          if (foundIdx >= 0) {
+            it.resolved_process = itemSteps[foundIdx].p;
           }
           if (foundIdx >= 0 && foundIdx < itemSteps.length - 1) {
             const nxt = itemSteps[foundIdx + 1];

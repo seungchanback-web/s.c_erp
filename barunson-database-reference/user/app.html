@@ -20532,15 +20532,15 @@ async function loadVendorPortal(){
             <table style="width:100%;font-size:13px;border-collapse:collapse;table-layout:fixed">
               ${vendor.type==='원재료' ? `<colgroup><col style="width:10%"><col style="width:8%"><col style="width:14%"><col style="width:4%"><col style="width:6%"><col style="width:14%"><col style="width:14%"><col style="width:12%"><col style="width:18%"></colgroup>
               <thead><tr style="background:#f1f5f9">
-                <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">제품코드</th>
-                <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원자재코드</th>
-                <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원재료용지명</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">제품코드</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원자재코드</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">원재료용지명</th>
                 <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">절</th>
-                <th style="padding:8px 6px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">수량(R)</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">수량(R)</th>
                 <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:12px">긴급도</th>
-                <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">입고처(공정)</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">입고처(공정)</th>
                 <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:13px">출고일</th>
-                <th style="padding:8px 6px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">전체공정</th>
+                <th style="padding:8px 6px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">전체공정</th>
               </tr></thead>
               <tbody>${items.map((it,idx)=>{
                 const jeol=parseJeol(it.cut);
@@ -20549,11 +20549,11 @@ async function loadVendorPortal(){
                 const ream=(jeol&&jopan)? (qty/500/jeol/jopan).toFixed(1) : qty.toLocaleString();
                 const today=new Date().toISOString().slice(0,10);
                 return `<tr style="border-bottom:1px solid #e2e8f0">
-                <td style="padding:8px 6px;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.product_code||'')}">${esc(it.product_code||'')}</td>
-                <td style="padding:8px 6px;color:#7c3aed;font-weight:600;font-size:13px">${esc(it.material_code||'-')}</td>
-                <td style="padding:8px 6px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
+                <td style="padding:8px 6px;text-align:center;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.product_code||'')}">${esc(it.product_code||'')}</td>
+                <td style="padding:8px 6px;text-align:center;color:#7c3aed;font-weight:600;font-size:13px">${esc(it.material_code||'-')}</td>
+                <td style="padding:8px 6px;text-align:center;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
                 <td style="padding:8px 6px;text-align:center;font-size:13px">${esc(it.cut||'-')}</td>
-                <td style="padding:8px 6px;text-align:right;font-weight:700;color:var(--primary);font-size:15px">${ream}</td>
+                <td style="padding:8px 6px;text-align:center;font-weight:700;color:var(--primary);font-size:15px">${ream}</td>
                 <td style="padding:8px 4px;text-align:center;font-size:11px">${(()=>{
                   const cs=it.current_stock||0, mu=it.monthly_usage||0, sm=it.stock_months;
                   const detail=mu>0?'현재고 '+cs.toLocaleString()+' / 월사용 '+mu.toLocaleString()+(sm!==null?' / 잔여 '+sm+'개월':''):'재고정보 없음';
@@ -20561,21 +20561,21 @@ async function loadVendorPortal(){
                   if(sm!==null&&sm<=2) return '<div title="'+detail+'"><span style="background:#f59e0b;color:#fff;padding:2px 6px;border-radius:3px;font-weight:600">⚠ 부족</span><div style="font-size:10px;color:#b45309;margin-top:3px">'+detail+'</div></div>';
                   return '<span style="color:#10b981" title="'+detail+'">안전</span>';
                 })()}</td>
-                <td style="padding:8px 6px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${it.first_process_vendor ? `<span style="color:#0369a1;font-weight:700">${esc(it.first_process_vendor)}</span><span style="color:#64748b;font-size:12px">(${esc(it.first_process)})</span>` : '<span style="color:#94a3b8">-</span>'}</td>
+                <td style="padding:8px 6px;text-align:center;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${it.first_process_vendor ? `<span style="color:#0369a1;font-weight:700">${esc(it.first_process_vendor)}</span><span style="color:#64748b;font-size:12px">(${esc(it.first_process)})</span>` : '<span style="color:#94a3b8">-</span>'}</td>
                 <td style="padding:5px 4px;text-align:center"><input type="date" class="vp-ship-date" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${it.ship_date||today}" style="width:100%;padding:5px 4px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:center"></td>
-                <td style="padding:8px 6px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${esc(it.process_chain_full||'-')}</td>
+                <td style="padding:8px 6px;text-align:center;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${esc(it.process_chain_full||'-')}</td>
               </tr>`;}).join('')}</tbody>`
               : `<colgroup><col style="width:13%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:7%"><col style="width:5%"><col style="width:14%"></colgroup>
               <thead><tr style="background:#f1f5f9">
-                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">원재료명</th>
-                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품코드</th>
-                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">공정</th>
-                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품사양</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">원재료명</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품코드</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">공정</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품사양</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:11px">긴급도</th>
-                <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산수량</th>
-                <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산완료</th>
-                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#0369a1;font-size:12px">입고처</th>
-                <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:12px">불량</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산수량</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산완료</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#0369a1;font-size:12px">입고처</th>
+                <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:12px">불량</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:11px">불량<br>보고</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">출고일</th>
               </tr></thead>
@@ -20592,15 +20592,15 @@ async function loadVendorPortal(){
                   :'<span style="color:#10b981;font-size:11px">안전</span>';
                 const itemDest = it.item_next_dest || '파주(본사)';
                 return `<tr style="border-bottom:1px solid #e2e8f0;${it.is_urgent?'background:#fff5f5;':''}">
-                <td style="padding:6px 4px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
-                <td style="padding:6px 4px;font-weight:600;font-size:12px">${esc(it.product_code||'')}</td>
-                <td style="padding:6px 4px;color:#0369a1;font-weight:600;font-size:12px">${esc(it.process_type||it.spec||'-')}</td>
-                <td style="padding:6px 4px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.product_spec||'')}">${esc(it.product_spec||'-')}</td>
+                <td style="padding:6px 4px;text-align:center;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
+                <td style="padding:6px 4px;text-align:center;font-weight:600;font-size:12px">${esc(it.product_code||'')}</td>
+                <td style="padding:6px 4px;text-align:center;color:#0369a1;font-weight:600;font-size:12px">${esc(it.resolved_process||it.process_type||it.spec||'-')}</td>
+                <td style="padding:6px 4px;text-align:center;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.product_spec||'')}">${esc(it.product_spec||'-')}</td>
                 <td style="padding:6px 4px;text-align:center">${urgBadge}</td>
-                <td style="padding:6px 4px;text-align:right;font-weight:700;color:var(--primary);font-size:14px">${oq.toLocaleString()}</td>
-                <td style="padding:4px 2px;text-align:right"><input type="number" class="vp-produced-qty" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${pq||''}" placeholder="0" style="width:80px;padding:4px 3px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:right;font-weight:700;color:${pqColor}"></td>
-                <td style="padding:6px 4px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(itemDest)}"><span style="color:#0369a1;font-weight:600">${esc(itemDest)}</span></td>
-                <td style="padding:6px 4px;text-align:right;font-weight:700;color:${dq>0?'#dc2626':'#94a3b8'};font-size:13px">${dq>0?dq.toLocaleString():'-'}</td>
+                <td style="padding:6px 4px;text-align:center;font-weight:700;color:var(--primary);font-size:14px">${oq.toLocaleString()}</td>
+                <td style="padding:4px 2px;text-align:center"><input type="number" class="vp-produced-qty" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${pq||''}" placeholder="0" style="width:80px;padding:4px 3px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:center;font-weight:700;color:${pqColor}"></td>
+                <td style="padding:6px 4px;text-align:center;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(itemDest)}"><span style="color:#0369a1;font-weight:600">${esc(itemDest)}</span></td>
+                <td style="padding:6px 4px;text-align:center;font-weight:700;color:${dq>0?'#dc2626':'#94a3b8'};font-size:13px">${dq>0?dq.toLocaleString():'-'}</td>
                 <td style="padding:4px 2px;text-align:center"><button onclick="openVpDefectModal('${po.po_id}','${it.item_id||idx}','${esc(it.product_code||'')}')" style="padding:3px 8px;border:1px solid #fca5a5;border-radius:4px;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🚫 보고</button></td>
                 <td style="padding:4px 2px;text-align:center"><input type="date" class="vp-ship-date" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${it.ship_date||today}" style="width:100%;padding:4px 3px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center"></td>
               </tr>`}).join('')}</tbody>`}
