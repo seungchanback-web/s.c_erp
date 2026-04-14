@@ -20524,7 +20524,7 @@ async function loadVendorPortal(){
                 <span style="font-size:13px;color:#64748b">${esc(po.po_date||'')} · ${vendor.type==='원재료' ? (()=>{
                   let totalR=0; items.forEach(it=>{const j=parseJeol(it.cut),jp=parseJeol(it.imposition); totalR+=(j&&jp)?(it.ordered_qty||0)/500/j/jp:0;}); return totalR.toFixed(1)+' R';
                 })() : totalQty.toLocaleString()+'매'} · ${items.length}품목</span>
-                ${vendor.type!=='원재료' ? `<span style="font-size:11px;padding:2px 8px;border-radius:3px;background:#fef3c7;color:#92400e;font-weight:500">입고처: ${esc(dest)}</span>` : ''}
+                ${vendor.type!=='원재료' ? (()=>{ const dests=[...new Set(items.map(it=>it.item_next_dest||'').filter(d=>d))]; return dests.length ? dests.map(d=>`<span style="font-size:11px;padding:2px 8px;border-radius:3px;background:#fef3c7;color:#92400e;font-weight:500">→ ${esc(d)}</span>`).join('') : `<span style="font-size:11px;padding:2px 8px;border-radius:3px;background:#e0f2fe;color:#0369a1;font-weight:500">→ 파주(본사)</span>`; })() : ''}
               </div>
               <div onclick="event.stopPropagation()">${actionBtn}</div>
             </div>
@@ -20565,14 +20565,16 @@ async function loadVendorPortal(){
                 <td style="padding:5px 4px;text-align:center"><input type="date" class="vp-ship-date" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${it.ship_date||today}" style="width:100%;padding:5px 4px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:center"></td>
                 <td style="padding:8px 6px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.process_chain_full||'')}">${esc(it.process_chain_full||'-')}</td>
               </tr>`;}).join('')}</tbody>`
-              : `<colgroup><col style="width:12%"><col style="width:9%"><col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:7%"><col style="width:18%"></colgroup>
+              : `<colgroup><col style="width:13%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:7%"><col style="width:5%"><col style="width:14%"></colgroup>
               <thead><tr style="background:#f1f5f9">
+                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">원재료명</th>
                 <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품코드</th>
                 <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">공정</th>
                 <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">제품사양</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:11px">긴급도</th>
                 <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산수량</th>
                 <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">생산완료</th>
+                <th style="padding:8px 4px;text-align:left;border-bottom:2px solid #94a3b8;font-weight:700;color:#0369a1;font-size:12px">입고처</th>
                 <th style="padding:8px 4px;text-align:right;border-bottom:2px solid #94a3b8;font-weight:700;color:#dc2626;font-size:12px">불량</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:11px">불량<br>보고</th>
                 <th style="padding:8px 4px;text-align:center;border-bottom:2px solid #94a3b8;font-weight:700;color:#334155;font-size:12px">출고일</th>
@@ -20588,13 +20590,16 @@ async function loadVendorPortal(){
                 const urgBadge=it.is_urgent?'<div><span style="background:#dc2626;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;font-size:11px;animation:pulse 1.5s infinite">🚨 긴급</span>'+(urgDetail?'<div style="font-size:9px;color:#dc2626;margin-top:2px">'+urgDetail+'</div>':'')+'</div>'
                   :it.is_danger?'<div><span style="background:#f59e0b;color:#fff;padding:2px 6px;border-radius:3px;font-weight:600;font-size:11px">⚠ 위험</span>'+(urgDetail?'<div style="font-size:9px;color:#b45309;margin-top:2px">'+urgDetail+'</div>':'')+'</div>'
                   :'<span style="color:#10b981;font-size:11px">안전</span>';
+                const itemDest = it.item_next_dest || '파주(본사)';
                 return `<tr style="border-bottom:1px solid #e2e8f0;${it.is_urgent?'background:#fff5f5;':''}">
+                <td style="padding:6px 4px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.material_name||'')}">${esc(it.material_name||'-')}</td>
                 <td style="padding:6px 4px;font-weight:600;font-size:12px">${esc(it.product_code||'')}</td>
                 <td style="padding:6px 4px;color:#0369a1;font-weight:600;font-size:12px">${esc(it.process_type||it.spec||'-')}</td>
                 <td style="padding:6px 4px;font-size:11px;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.product_spec||'')}">${esc(it.product_spec||'-')}</td>
                 <td style="padding:6px 4px;text-align:center">${urgBadge}</td>
                 <td style="padding:6px 4px;text-align:right;font-weight:700;color:var(--primary);font-size:14px">${oq.toLocaleString()}</td>
                 <td style="padding:4px 2px;text-align:right"><input type="number" class="vp-produced-qty" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${pq||''}" placeholder="0" style="width:80px;padding:4px 3px;border:1px solid #cbd5e1;border-radius:5px;font-size:13px;text-align:right;font-weight:700;color:${pqColor}"></td>
+                <td style="padding:6px 4px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(itemDest)}"><span style="color:#0369a1;font-weight:600">${esc(itemDest)}</span></td>
                 <td style="padding:6px 4px;text-align:right;font-weight:700;color:${dq>0?'#dc2626':'#94a3b8'};font-size:13px">${dq>0?dq.toLocaleString():'-'}</td>
                 <td style="padding:4px 2px;text-align:center"><button onclick="openVpDefectModal('${po.po_id}','${it.item_id||idx}','${esc(it.product_code||'')}')" style="padding:3px 8px;border:1px solid #fca5a5;border-radius:4px;background:#fef2f2;color:#dc2626;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🚫 보고</button></td>
                 <td style="padding:4px 2px;text-align:center"><input type="date" class="vp-ship-date" data-po="${po.po_id}" data-item="${it.item_id||idx}" value="${it.ship_date||today}" style="width:100%;padding:4px 3px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:center"></td>

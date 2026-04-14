@@ -6109,6 +6109,20 @@ async function handleRequest(req, res) {
         it.first_process = itemSteps.length ? itemSteps[0].p : '';
         it.first_process_vendor = itemSteps.length ? itemSteps[0].v : '';
         it.process_chain_full = itemSteps.map(s => s.v + '(' + s.p + ')').join(' → ');
+        // 품목별 입고처: 현재 업체의 공정 다음 단계 찾기
+        if (vendor.type === '후공정' && itemSteps.length > 0) {
+          const vName = vendor.name || '';
+          let foundIdx = -1;
+          for (let si = 0; si < itemSteps.length; si++) {
+            if (itemSteps[si].v === vName) { foundIdx = si; break; }
+          }
+          if (foundIdx >= 0 && foundIdx < itemSteps.length - 1) {
+            const nxt = itemSteps[foundIdx + 1];
+            it.item_next_dest = nxt.v + '(' + nxt.p + ')';
+          } else {
+            it.item_next_dest = '파주(본사)';
+          }
+        }
         // PO 전체 후공정 체인 수집
         itemSteps.forEach(s => {
           if (!steps.find(x => x.p === s.p && x.v === s.v)) steps.push(s);
