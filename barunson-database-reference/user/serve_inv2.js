@@ -575,13 +575,89 @@ function extractVendorAuth(params) {
   return { email, vendorName, token: accessToken };
 }
 
-// product_info.json 로드 (원자재코드, 원재료명, 절 조회용)
+// product_info 데이터 (원자재코드, 원재료명, 절, 후공정업체 조회용)
+// 1차 소스: products + product_post_vendor DB 테이블
+// 2차 폴백: product_info.json 파일 (레거시)
 let productInfoCache = null;
+let _productInfoReloadScheduled = false;
+
+const _POST_COL_TO_KR = {
+  thomson: '톰슨',
+  envelope: '봉투가공',
+  seari: '세아리',
+  laser: '레이져',
+  cutting: '재단',
+  silk: '실크',
+};
+
+async function reloadProductInfoFromDB() {
+  try {
+    const products = await db.prepare("SELECT product_code, material_code, material_name, cut_spec, jopan, paper_maker, product_spec, thomson, envelope, seari, laser, cutting, silk FROM products").all();
+    let ppv = [];
+    try { ppv = await db.prepare('SELECT product_code, process_type, vendor_name FROM product_post_vendor').all(); } catch(_) {}
+    const ppvByCode = {};
+    for (const r of ppv) {
+      if (!r.product_code) continue;
+      if (!ppvByCode[r.product_code]) ppvByCode[r.product_code] = {};
+      if (r.process_type && r.vendor_name) ppvByCode[r.product_code][r.process_type] = r.vendor_name;
+    }
+    // 레거시 JSON을 기본값으로 두고 DB가 override
+    let legacy = {};
+    try { legacy = JSON.parse(fs.readFileSync(path.join(__dir, 'product_info.json'), 'utf8')); } catch(_) {}
+    const out = {};
+    // 먼저 legacy 복사 (DB에 없는 코드/필드 보존)
+    for (const code in legacy) { out[code] = Object.assign({}, legacy[code]); }
+    // DB 값으로 override
+    for (const p of products) {
+      const code = p.product_code;
+      if (!code) continue;
+      const row = out[code] || {};
+      if (p.material_code) row['원자재코드'] = p.material_code;
+      if (p.material_name) row['원재료용지명'] = p.material_name;
+      if (p.paper_maker) row['제지사'] = p.paper_maker;
+      if (p.cut_spec !== null && p.cut_spec !== undefined && p.cut_spec !== '') row['절'] = String(p.cut_spec);
+      if (p.jopan !== null && p.jopan !== undefined && p.jopan !== '') row['조판'] = String(p.jopan);
+      if (p.product_spec) row['제품사양'] = p.product_spec;
+      // products 테이블의 영문 후공정 컬럼 반영
+      for (const [col, kr] of Object.entries(_POST_COL_TO_KR)) {
+        const v = p[col];
+        if (v !== null && v !== undefined && String(v).trim() !== '') row[kr] = String(v).trim();
+      }
+      out[code] = row;
+    }
+    // product_post_vendor가 최종 override (사용자가 품목관리에서 바꾼 값)
+    for (const [code, ptMap] of Object.entries(ppvByCode)) {
+      if (!out[code]) out[code] = {};
+      for (const [pt, vn] of Object.entries(ptMap)) out[code][pt] = vn;
+    }
+    productInfoCache = out;
+    console.log(`[product_info] DB 재로드 완료: ${Object.keys(out).length}개 품목`);
+  } catch (e) {
+    console.warn('[product_info] DB 재로드 실패:', e.message);
+    // DB 실패 시 레거시 JSON으로라도 초기화
+    if (!productInfoCache) {
+      try { productInfoCache = JSON.parse(fs.readFileSync(path.join(__dir, 'product_info.json'), 'utf8')); }
+      catch (_) { productInfoCache = {}; }
+    }
+  }
+}
+
+function scheduleProductInfoReload() {
+  if (_productInfoReloadScheduled) return;
+  _productInfoReloadScheduled = true;
+  setTimeout(() => {
+    _productInfoReloadScheduled = false;
+    reloadProductInfoFromDB();
+  }, 300);
+}
+
 function getProductInfo() {
   if (productInfoCache) return productInfoCache;
+  // 첫 호출 — DB 재로드 트리거 + 레거시 파일로 즉시 응답
   try {
     productInfoCache = JSON.parse(fs.readFileSync(path.join(__dir, 'product_info.json'), 'utf8'));
   } catch (e) { productInfoCache = {}; }
+  scheduleProductInfoReload();
   return productInfoCache;
 }
 
@@ -4383,6 +4459,7 @@ async function handleRequest(req, res) {
     setCols += ", updated_at=datetime('now','localtime')";
     setVals.push(id);
     await db.prepare(`UPDATE products SET ${setCols} WHERE id=?`).run(...setVals);
+    scheduleProductInfoReload();
     // op_category → product_notes 동기화
     if (b.op_category) {
       const prod = await db.prepare('SELECT product_code FROM products WHERE id=?').get(id);
@@ -4556,6 +4633,7 @@ async function handleRequest(req, res) {
       } catch(histErr) { console.warn('[product_field_history] insert skip:', histErr.message); }
     }
     await db.prepare(`UPDATE products SET ${body.field}=?, updated_at=datetime('now','localtime') WHERE product_code=?`).run(body.value, code);
+    scheduleProductInfoReload();
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'product_update', 'products', code, `품목수정: ${code} ${body.field} "${oldVal}"→"${body.value}"${body.reason ? ' 사유: '+body.reason : ''}`, clientIP);
     ok(res, { updated: code, field: body.field });
     return;
@@ -4569,6 +4647,7 @@ async function handleRequest(req, res) {
     await db.prepare("UPDATE products SET post_vendor=?, updated_at=datetime('now','localtime') WHERE product_code=?").run(body.post_vendor || '', code);
     // 캐시 무효화
     xerpInventoryCacheTime = 0;
+    scheduleProductInfoReload();
     ok(res, { ok: true, code, post_vendor: body.post_vendor });
     return;
   }
@@ -4607,6 +4686,7 @@ async function handleRequest(req, res) {
       }
     });
     await tx();
+    scheduleProductInfoReload();
     ok(res, { ok: true, saved: mappings.length });
     return;
   }
