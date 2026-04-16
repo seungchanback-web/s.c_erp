@@ -7212,6 +7212,12 @@ let currentOrigin='all';
 Promise.all([
   fetch('/api/products').then(r=>r.json()).catch(()=>({data:[]})),
   fetch('/api/product-post-vendor').then(r=>r.json()).catch(()=>({data:[]}))
+  fetch('/api/material-price/latest').then(r=>r.json()).catch(()=>({data:{items:[]}})).then(priceResp=>{
+    const priceItems=(priceResp.data||priceResp)?.items||[];
+    window._materialPrices={};
+    priceItems.forEach(p=>{if(p.product_code) window._materialPrices[p.product_code]={apply_price:p.apply_price||p.xerp_price||0,vendor:p.vendor_name||'',source:p.source||'sqlite'};});
+    console.log('[단가] 원재료 단가 로드:', Object.keys(window._materialPrices).length, '건');
+  })
 ]).then(([prodResp, ppvResp])=>{
   const list=prodResp.data||prodResp||[];
   const ppvList=ppvResp.data||ppvResp||[];
@@ -7275,22 +7281,24 @@ const COLS_STOCK=[
 ];
 
 const COLS_ORDER=[
-  {k:'상태',w:40,special:'statusBadge',label:'상태'},
-  {k:'운영구분',w:60,special:'opCategory',label:'운영구분'},
-  {k:'제품코드',w:88,special:'productCode',label:'제품코드'},
-  {k:'품목명',w:100,special:'productName',label:'품목명'},
-  {k:'가용재고',w:65,special:'availStock',num:true,label:'가용재고'},
-  {k:'일평균',w:50,special:'dailyUsage',num:true,label:'일평균'},
-  {k:'가용일수',w:55,special:'remainDays',num:true,label:'가용일수'},
-  {k:'안전재고',w:55,special:'safetyStock',num:true,label:'안전재고'},
-  {k:'부족수량',w:60,special:'shortage',num:true,label:'부족수량'},
-  {k:'미입고',w:60,special:'pendingQty',num:true,label:'미입고'},
-  {k:'예상재고',w:65,special:'effectiveStock',num:true,label:'예상재고'},
-  {k:'발주OS',w:70,special:'pendingOS',label:'발주OS'},
-  {k:'발주수량',w:100,special:'orderInput',label:'발주수량'},
-  {k:'예상소진일',w:80,special:'depletionDate',label:'예상소진일'},
-  {k:'필요입고일',w:80,special:'requiredReceiveDate',label:'필요입고일'},
-  {k:'발주필요일',w:75,special:'orderByDate',label:'발주필요일'},
+  {k:'상태',w:35,special:'statusBadge',label:'상태'},
+  {k:'운영',w:50,special:'opCategory',label:'운영'},
+  {k:'제품코드',w:80,special:'productCode',label:'제품코드'},
+  {k:'원자재코드',w:68,special:'matCode',label:'원자재코드'},
+  {k:'원재료용지명',w:115,special:'matName',label:'원재료용지명'},
+  {k:'제지사',w:50,special:'paperMaker',label:'제지사'},
+  {k:'절',w:25,special:'cutSpec',num:true,label:'절'},
+  {k:'조판',w:25,special:'jopanSpec',num:true,label:'조판'},
+  {k:'가용재고',w:58,special:'availStock',num:true,label:'가용재고'},
+  {k:'일평균',w:42,special:'dailyUsage',num:true,label:'일평균'},
+  {k:'가용일수',w:50,special:'remainDays',num:true,label:'가용일수'},
+  {k:'부족수량',w:52,special:'shortage',num:true,label:'부족수량'},
+  {k:'발주(R)',w:90,special:'orderInput',label:'발주(R)'},
+  {k:'단가',w:65,special:'matPrice',num:true,label:'단가'},
+  {k:'예상금액',w:75,special:'estAmount',num:true,label:'예상금액'},
+  {k:'미입고',w:50,special:'pendingQty',num:true,label:'미입고'},
+  {k:'후공정',w:130,special:'postChain',label:'후공정'},
+  {k:'사양',w:80,special:'productSpec',label:'사양'},
   {k:'✓',w:24,special:'orderCheck',label:'✓'},
 ];
 
@@ -7835,12 +7843,75 @@ function renderCell(c, p){
     const chk=orderChecked[code]===true?'checked':'';
     return`<td style="text-align:center"><input type="checkbox" class="order-chk" data-code="${esc(code)}" ${chk} onchange="toggleOrderCheck(this)"></td>`;
   }
+  if(c.special==='matCode'){
+    const info=productInfo[code]||{};
+    const mc=info['원자재코드']||'';
+    return`<td style="font-size:10px;color:#2563eb;white-space:nowrap">${esc(mc)}</td>`;
+  }
+  if(c.special==='matName'){
+    const info=productInfo[code]||{};
+    const mn=info['원재료용지명']||'';
+    return`<td style="font-size:10px;max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(mn)}">${esc(mn||'-')}</td>`;
+  }
+  if(c.special==='paperMaker'){
+    const info=productInfo[code]||{};
+    return`<td style="font-size:10px;text-align:center">${esc(info['제지사']||'-')}</td>`;
+  }
+  if(c.special==='cutSpec'){
+    const info=productInfo[code]||{};
+    return`<td class="n" style="font-size:11px">${esc(info['절']||'-')}</td>`;
+  }
+  if(c.special==='jopanSpec'){
+    const info=productInfo[code]||{};
+    return`<td class="n" style="font-size:11px">${esc(info['조판']||'-')}</td>`;
+  }
+  if(c.special==='matPrice'){
+    const info=productInfo[code]||{};
+    const mc=info['원자재코드']||'';
+    const mp=window._materialPrices||{};
+    const price=mp[mc]?.apply_price||0;
+    if(!price) return\`<td class="n" style="color:#ccc;font-size:10px">-</td>\`;
+    return\`<td class="n" style="font-size:10px">\${price.toLocaleString()}</td>\`;
+  }
+  if(c.special==='estAmount'){
+    const info=productInfo[code]||{};
+    const mc=info['원자재코드']||'';
+    const mp=window._materialPrices||{};
+    const price=mp[mc]?.apply_price||0;
+    const qty=orderQty[code]||0;
+    const jeol=parseFloat(info['절'])||1;
+    const jpn=parseFloat(info['조판'])||1;
+    const reams=(jeol>0&&jpn>0&&qty>0)?(qty/500/jeol/jpn):0;
+    const amt=Math.round(reams*price);
+    if(!amt) return\`<td class="n" style="color:#ccc;font-size:10px">-</td>\`;
+    return\`<td class="n" style="font-size:10px;font-weight:600;color:#0f172a">\${amt.toLocaleString()}</td>\`;
+  }
+  if(c.special==='postChain'){
+    const info=productInfo[code]||{};
+    const steps=info._steps||[];
+    let chain='';
+    if(steps.length){
+      chain=steps.map(st=>st.vendor+'('+st.process+')').join(' → ');
+    } else {
+      const pc=typeof getPostCols==='function'?getPostCols():[];
+      const parts=[];
+      pc.forEach(col=>{if(info[col]&&info[col]!=='0'&&!/^[\d,.]+$/.test(String(info[col]).trim()))parts.push(info[col]+'('+col+')');});
+      chain=parts.join(' → ');
+    }
+    if(!chain) return\`<td style="color:#ccc;font-size:10px">-</td>\`;
+    return\`<td style="font-size:9px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="\${esc(chain)}">\${esc(chain)}</td>\`;
+  }
+  if(c.special==='productSpec'){
+    const info=productInfo[code]||{};
+    const spec=info['제품사양']||'';
+    return\`<td style="font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="\${esc(spec)}">\${esc(spec||'-')}</td>\`;
+  }
   const v=p[c.k];
   if(c.num){
     const n=typeof v==='number'?v:0;
-    return`<td class="n">${fN(v)}</td>`;
+    return\`<td class="n">\${fN(v)}</td>\`;
   }
-  return`<td>${esc(v)}</td>`;
+  return\`<td>\${esc(v)}</td>\`;
 }
 
 // ===== RENDER: 재고현황 테이블 =====
