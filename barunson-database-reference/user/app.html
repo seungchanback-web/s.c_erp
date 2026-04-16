@@ -7209,14 +7209,28 @@ fetch('/api/xerp-monthly-usage').then(r=>r.json()).then(d=>{
 // 품목관리 origin 매핑 로드
 let originMap={}; // {product_code: '한국'|'중국'|'더기프트'}
 let currentOrigin='all';
-fetch('/api/products').then(r=>r.json()).then(d=>{
-  const list=d.data||d;
+Promise.all([
+  fetch('/api/products').then(r=>r.json()).catch(()=>({data:[]})),
+  fetch('/api/product-post-vendor').then(r=>r.json()).catch(()=>({data:[]}))
+]).then(([prodResp, ppvResp])=>{
+  const list=prodResp.data||prodResp||[];
+  const ppvList=ppvResp.data||ppvResp||[];
+  // product_post_vendor → code별 그룹 (step_order 정렬)
+  const ppvByCode={};
+  ppvList.forEach(r=>{
+    if(!r.product_code||!r.process_type||!r.vendor_name) return;
+    if(!ppvByCode[r.product_code]) ppvByCode[r.product_code]=[];
+    ppvByCode[r.product_code].push(r);
+  });
+  for(const code in ppvByCode) ppvByCode[code].sort((a,b)=>(a.step_order||1)-(b.step_order||1));
+  // products 기본정보 머지
   list.forEach(p=>{
     if(!p.product_code) return;
     if(p.origin) originMap[p.product_code]=p.origin;
-    // R(연) 단위 계산을 위해 절/조판 정보를 productInfo에 머지
-    // (product_info.json 정적 파일에 누락된 디디 품목 등 보완)
     const existing = productInfo[p.product_code] || {};
+    // 레거시 후공정 키 제거 (product_post_vendor가 유일한 소스)
+    const postTypes=typeof getPostCols==='function'?getPostCols():['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+    postTypes.forEach(pt=>{delete existing[pt];});
     productInfo[p.product_code] = {
       ...existing,
       '품명': p.product_name || existing['품명'] || '',
@@ -7229,6 +7243,11 @@ fetch('/api/products').then(r=>r.json()).then(d=>{
       '제지사': p.paper_maker || existing['제지사'] || '',
     };
   });
+  // product_post_vendor → productInfo에 후공정 키 설정
+  for(const[code, steps] of Object.entries(ppvByCode)){
+    if(!productInfo[code]) productInfo[code]={};
+    steps.forEach(s=>{ productInfo[code][s.process_type]=s.vendor_name; });
+  }
 }).catch(()=>{});
 fetch('/api/product-notes').then(r=>r.json()).then(d=>{if(d.ok)productNotes=d.data||{};}).catch(()=>{});
 fetch('/api/order-history?mode=today').then(r=>r.json()).then(d=>{if(d.ok)orderedToday=d.data||{};}).catch(()=>{});
