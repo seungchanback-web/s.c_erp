@@ -7934,6 +7934,7 @@ function renderOrderTab(){
   ['urgent','nohistory','danger','safe','nosale'].forEach(s=>{
     (classified[s]||[]).forEach(p=>{
       const code=p['제품코드']||'';
+      if(dataSet.has(code)) return;
       if(p._needOrder||p._pendingQty>0||orderQty[code]>0||orderedToday[code]||manualOrderCodes.has(code)) { data.push(p); dataSet.add(code); }
     });
   });
@@ -8649,12 +8650,16 @@ function refreshData(){
 }
 
 // ===== XERP 재고 자동 로드 =====
+let _lastLoadedCompany = null;
 async function loadXerpInventory(forceRefresh) {
-  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵 (정규화된 데이터만)
+  // 법인 변경 감지 — 캐시 무효화
+  if (_currentCompany !== _lastLoadedCompany) forceRefresh = true;
+  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵
   if (!forceRefresh && RAW && RAW.length > 0 && RAW[0]['제품코드']) {
     console.log('XERP 재고: 캐시 사용 (' + RAW.length + '개)');
     return;
   }
+  _lastLoadedCompany = _currentCompany;
 
   const bar = document.getElementById('erpStatusBar');
   const icon = document.getElementById('erpStatusIcon');
@@ -8665,10 +8670,12 @@ async function loadXerpInventory(forceRefresh) {
   const badge = document.getElementById('erpSyncBadge');
   const refreshBtn = document.getElementById('refreshBtn');
 
-  // 강제 갱신 시 기존 데이터 초기화
+  // 강제 갱신 시 기존 데이터 초기화 + 테이블 로딩 표시
   if (forceRefresh) {
     RAW = [];
     classified = {urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
+    const tb=document.getElementById('tb');
+    if(tb) tb.innerHTML='<tr><td colspan="20" style="text-align:center;padding:40px;color:#64748b">데이터 동기화 중...</td></tr>';
   }
 
   // 로딩 상태 — 헤더 뱃지
