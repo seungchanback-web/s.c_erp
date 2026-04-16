@@ -8773,13 +8773,14 @@ async function loadXerpInventory(forceRefresh) {
     const data = d.data || d;
 
     if (!data.products || !data.products.length) {
-      // 빈 데이터 (품목관리 미등록)
+      // 빈 데이터 — 백업 복원
+      if (_rawBackup && _rawBackup.length > 0) { RAW = _rawBackup; classified = _classifiedBackup; buildHeader(); render(); }
       if(bar) bar.style.cssText = 'margin-bottom:8px;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;background:#fffbeb;border:1px solid #fde68a';
       if(icon) icon.textContent = '⚠️';
-      if(title){ title.textContent = 'ERP 연동 실패'; title.style.color = '#92400e'; }
-      if(detail) detail.textContent = data.message || '품목관리에 등록된 제품이 없습니다';
+      if(title){ title.textContent = 'XERP 연동 실패 — 기존 데이터 유지'; title.style.color = '#92400e'; }
+      if(detail) detail.textContent = data.message || 'XERP 서버 응답 없음';
       if(btn) btn.disabled = false;
-      if(badge){ badge.textContent='⚠️ 데이터 없음'; badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#fef3c7;color:#92400e'; }
+      if(badge){ badge.textContent='⚠️ XERP 실패'; badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#fef3c7;color:#92400e'; }
       if(refreshBtn) refreshBtn.disabled = false;
       return;
     }
@@ -8832,10 +8833,11 @@ async function loadXerpInventory(forceRefresh) {
       await processData(data.products);
     }
   } catch (e) {
-    // 에러
+    // 에러 — 백업 복원
+    if (_rawBackup && _rawBackup.length > 0) { RAW = _rawBackup; classified = _classifiedBackup; buildHeader(); render(); }
     if(bar) bar.style.cssText = 'margin-bottom:8px;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;background:#fef2f2;border:1px solid #fecaca';
     if(icon) icon.textContent = '❌';
-    if(title){ title.textContent = 'ERP 연결 실패'; title.style.color = '#dc2626'; }
+    if(title){ title.textContent = 'XERP 연결 실패 — 기존 데이터 유지'; title.style.color = '#dc2626'; }
     if(detail) detail.textContent = e.message;
     if(btn) btn.disabled = false;
     if(badge){ badge.textContent='❌ 연결 실패'; badge.style.cssText='display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#fee2e2;color:#dc2626'; }
