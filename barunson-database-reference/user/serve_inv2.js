@@ -603,7 +603,7 @@ async function reloadProductInfoFromDB() {
       if (r.process_type && r.vendor_name) ppvByCode[r.product_code][r.process_type] = r.vendor_name;
     }
     // 후공정 타입 목록 (이 키들은 product_post_vendor에서만 관리)
-    let postProcessTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착'];
+    let postProcessTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
     try { const pt = await getPostProcessTypes(); if (pt.length) postProcessTypes = pt; } catch(_) {}
     const postTypeSet = new Set(postProcessTypes);
 
@@ -663,7 +663,7 @@ function scheduleProductInfoReload() {
 function getProductInfo() {
   if (productInfoCache) return productInfoCache;
   // 첫 호출 — 레거시 파일에서 기본정보만 로드 (후공정 키는 즉시 제거)
-  const _defaultPostTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착'];
+  const _defaultPostTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(__dir, 'product_info.json'), 'utf8'));
     const cleaned = {};
@@ -1336,7 +1336,7 @@ async function getPostProcessTypes() {
     _cachedPostCols = _processTypesInMemory.filter(p => p.category === 'post' && p.is_active).sort((a,b) => a.sort_order - b.sort_order).map(p => p.name);
     return _cachedPostCols;
   }
-  return ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착'];
+  return ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
 }
 function invalidatePostColsCache() { _cachedPostCols = null; }
 
@@ -1601,7 +1601,7 @@ try {
   const seedPost = [
     {name:'재단',sort:1},{name:'인쇄',sort:2},{name:'박/형압',sort:3},{name:'톰슨',sort:4},
     {name:'봉투가공',sort:5},{name:'세아리',sort:6},{name:'레이져',sort:7},{name:'실크',sort:8},
-    {name:'임가공',sort:9},{name:'우찌누끼',sort:10,vendor:'예지가'},
+    {name:'임가공',sort:9},{name:'우찌누끼',sort:10,vendor:'예지가'},{name:'코팅',sort:13},
     {name:'접지',sort:11},{name:'단면접착',sort:12}
   ];
   const seedBom = [
