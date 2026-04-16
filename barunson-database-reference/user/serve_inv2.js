@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { URL } = require('url');
+const zlib = require('zlib');
 const pgAdapter = require('./pg-adapter');
 const nodemailer = require('nodemailer');
 const sql = require('mssql');
@@ -3402,8 +3403,19 @@ const CORS = {
 };
 
 function jsonRes(res, statusCode, payload) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', ...CORS });
-  res.end(JSON.stringify(payload));
+  const body = JSON.stringify(payload);
+  const _req = res._req;
+  const acceptEncoding = (_req && _req.headers && _req.headers['accept-encoding']) || '';
+  if (acceptEncoding.includes('gzip')) {
+    const hdrs = { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', ...CORS };
+    res.writeHead(statusCode, hdrs);
+    zlib.gzip(Buffer.from(body), (err, compressed) => {
+      if (err) { res.end(body); } else { res.end(compressed); }
+    });
+  } else {
+    res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', ...CORS });
+    res.end(body);
+  }
 }
 
 function ok(res, data) { jsonRes(res, 200, { ok: true, data }); }
@@ -3589,6 +3601,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function handleRequest(req, res) {
+  res._req = req; // gzip 판단용 req 참조 보관
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = parsed.pathname;
   const method = req.method;
@@ -6878,12 +6891,24 @@ async function handleRequest(req, res) {
     if (!vendor) { fail(res, 404, '등록된 업체가 아닙니다'); return; }
 
     const rows = await db.prepare('SELECT * FROM po_header WHERE vendor_name = ? ORDER BY po_date DESC, po_id DESC').all(vendor.name);
+    // ── N+1 제거: po_items 일괄 조회 후 그룹핑 ──
+    const poIds = rows.map(r => r.po_id);
+    let allItems = [];
+    if (poIds.length) {
+      const placeholders = poIds.map(() => '?').join(',');
+      allItems = await db.prepare(`SELECT * FROM po_items WHERE po_id IN (${placeholders})`).all(...poIds);
+    }
+    const itemsByPoId = {};
+    for (const it of allItems) {
+      if (!itemsByPoId[it.po_id]) itemsByPoId[it.po_id] = [];
+      itemsByPoId[it.po_id].push(it);
+    }
     const _postCols = await getPostProcessTypes();
     for (const r of rows) {
       r.status = PO_STATUS_EN_TO_KO[r.status] || r.status;
       r.material_status_label = MATERIAL_STATUS_KO[r.material_status] || r.material_status;
       r.process_status_label = PROCESS_STATUS_KO[r.process_status] || r.process_status;
-      r.items = await db.prepare('SELECT * FROM po_items WHERE po_id = ?').all(r.po_id);
+      r.items = itemsByPoId[r.po_id] || [];
       // product_info 데이터 보강 (원자재코드, 원재료용지명, 절, 조판, 후공정체인)
       const pInfo = getProductInfo();
       const postCols = _postCols;
@@ -17631,8 +17656,15 @@ async function handleRequest(req, res) {
     headers['Pragma'] = 'no-cache';
     headers['Expires'] = '0';
   }
-  res.writeHead(200, headers);
-  fs.createReadStream(filePath).pipe(res);
+  const acceptEncoding = (req && req.headers && req.headers['accept-encoding']) || '';
+  if (acceptEncoding.includes('gzip')) {
+    headers['Content-Encoding'] = 'gzip';
+    res.writeHead(200, headers);
+    fs.createReadStream(filePath).pipe(zlib.createGzip()).pipe(res);
+  } else {
+    res.writeHead(200, headers);
+    fs.createReadStream(filePath).pipe(res);
+  }
 }
 
 // ── 자동발주 스케줄러 ──────────────────────────────────
