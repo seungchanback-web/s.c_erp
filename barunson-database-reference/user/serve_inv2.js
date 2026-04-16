@@ -4708,25 +4708,24 @@ async function handleRequest(req, res) {
     const body = await readJSON(req);
     const { mappings } = body; // [{product_code, process_type, vendor_name, step_order}, ...]
     if (!mappings || !mappings.length) { fail(res, 400, 'mappings 필요'); return; }
-    // replace-all-for-code: mappings에 포함된 product_code들의 기존 행을 모두 삭제한 뒤 새로 INSERT
-    // 기존 UPSERT 방식은 사용자가 UI에서 지운 행이 DB에 남아있던 버그가 있었음.
-    const codes = [...new Set(mappings.map(m => m.product_code).filter(Boolean))];
+    // replace-all-for-code: 유효한 매핑이 1건 이상인 product_code만 기존 행 삭제 후 INSERT
+    // 유효한 매핑 없는 코드는 건드리지 않음 (다른 품목 저장 시 기존 등록 날아가는 것 방지)
+    const validMappings = mappings.filter(m => m.product_code && m.process_type && m.vendor_name);
+    const codesWithValid = [...new Set(validMappings.map(m => m.product_code))];
     const insert = db.prepare(`INSERT INTO product_post_vendor (product_code, process_type, vendor_name, step_order, updated_at)
       VALUES (?, ?, ?, ?, datetime('now','localtime'))`);
     const delByCode = db.prepare('DELETE FROM product_post_vendor WHERE product_code=?');
     const tx = db.transaction(async () => {
-      for (const code of codes) {
+      for (const code of codesWithValid) {
         await delByCode.run(code);
       }
-      for (const m of mappings) {
-        if (m.product_code && m.process_type && m.vendor_name) {
-          await insert.run(m.product_code, m.process_type, m.vendor_name, m.step_order || 1);
-        }
+      for (const m of validMappings) {
+        await insert.run(m.product_code, m.process_type, m.vendor_name, m.step_order || 1);
       }
     });
     await tx();
     scheduleProductInfoReload();
-    ok(res, { ok: true, saved: mappings.length, replaced_codes: codes.length });
+    ok(res, { ok: true, saved: validMappings.length, replaced_codes: codesWithValid.length });
     return;
   }
 
