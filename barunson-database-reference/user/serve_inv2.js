@@ -1417,6 +1417,17 @@ for (const tbl of _entityTables) {
     await db.prepare(`UPDATE ${tbl} SET legal_entity='barunson' WHERE legal_entity IS NULL OR legal_entity=''`).run();
   } catch(e) { /* 컬럼 없으면 무시 */ }
 }
+// product_code 공백/제어문자 정제 (XERP nchar(40) padding + 엑셀 복사 시 유입된 보이지 않는 문자)
+// 1회 실행으로 끝나면 이후엔 변경 0건이라 no-op
+try {
+  const trimUpd = await db.prepare("UPDATE products SET product_code = TRIM(product_code) WHERE product_code != TRIM(product_code)").run();
+  if (trimUpd.changes > 0) console.log(`[code-clean] products.product_code 공백 제거: ${trimUpd.changes}건`);
+} catch(e) { console.warn('[code-clean] products trim 실패:', e.message); }
+try {
+  const trimUpdPi = await db.prepare("UPDATE po_items SET product_code = TRIM(product_code) WHERE product_code != TRIM(product_code)").run();
+  if (trimUpdPi.changes > 0) console.log(`[code-clean] po_items.product_code 공백 제거: ${trimUpdPi.changes}건`);
+} catch(e) { /* 테이블/컬럼 없으면 무시 */ }
+
 // DD 제품 마킹: product_code가 DD로 시작하는 품목 → legal_entity='dd'
 try {
   const ddUpdated = await db.prepare("UPDATE products SET legal_entity='dd' WHERE product_code LIKE 'DD%' AND (legal_entity IS NULL OR legal_entity='barunson')").run();
@@ -4777,7 +4788,11 @@ async function handleRequest(req, res) {
         `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${statusFilter} AND ${originFilter}`
       ).all();
       if (!registeredProducts.length) return [];
-      const productCodes = registeredProducts.map(p => p.product_code);
+      // product_code 정제: trim + 보이지 않는 유니코드 공백 제거 (XERP nchar(40) padding 대응)
+      for (const p of registeredProducts) {
+        p.product_code = (p.product_code || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+      }
+      const productCodes = registeredProducts.map(p => p.product_code).filter(Boolean);
       // IN절용 (SQL Injection 방지: 영숫자_만 허용)
       const safeCodeList = productCodes
         .filter(c => /^[A-Za-z0-9_\-]+$/.test(c))
