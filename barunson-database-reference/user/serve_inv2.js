@@ -4849,7 +4849,7 @@ async function handleRequest(req, res) {
           const inClause = chunk.map(c => `'${c}'`).join(',');
           try {
             const req = workPool.request();
-            if (typeof req.timeout === 'function') req.timeout = 8000;
+            req.timeout = 7000;
             const r = await req.query(`
               SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty
               FROM mmInventory WITH (NOLOCK)
@@ -4880,7 +4880,7 @@ async function handleRequest(req, res) {
             const req = workPool.request()
               .input('start3m', sql.NChar(16), fmt(start3m))
               .input('today', sql.NChar(16), fmt(today));
-            if (typeof req.timeout === 'function') req.timeout = 8000;
+            req.timeout = 7000;
             const r = await req.query(`
               SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
               FROM mmInoutItem WITH (NOLOCK)
@@ -4915,7 +4915,7 @@ async function handleRequest(req, res) {
               const inClause = chunk.map(c => `'${c}'`).join(',');
               try {
                 const req = bar1Pool.request();
-                if (typeof req.timeout === 'function') req.timeout = 8000;
+                req.timeout = 7000;
                 const r = await req.query(`SELECT Card_Code, Card_Name FROM S2_Card WHERE RTRIM(Card_Code) IN (${inClause})`);
                 r.recordset.forEach(row => {
                   itemNames[(row.Card_Code || '').trim().toUpperCase()] = (row.Card_Name || '').trim();
@@ -5311,7 +5311,7 @@ async function handleRequest(req, res) {
           const req = xerpPool.request()
             .input('start3m', sql.NChar(16), fmt(start3m))
             .input('today', sql.NChar(16), fmt(today));
-          if (typeof req.timeout === 'function') req.timeout = 8000;
+          req.timeout = 7000;
           const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty, COUNT(DISTINCT RTRIM(InoutDate)) AS ship_days
             FROM mmInoutItem WITH (NOLOCK)
@@ -18604,7 +18604,7 @@ async function fetchXerpInventoryForSync(legalEntity) {
       const inClause = chunk.map(c => `'${c}'`).join(',');
       try {
         const req = workPool.request();
-        if (typeof req.timeout === 'function') req.timeout = 8000; // 8초 (10초 한도 여유)
+        req.timeout = 7000; // 7초 (10초 한도에 3초 여유)
         const r = await req.query(`SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
         for (const row of r.recordset) invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
         invSuccess++;
@@ -18627,7 +18627,7 @@ async function fetchXerpInventoryForSync(legalEntity) {
         const req = workPool.request()
           .input('start3m', sql.NChar(16), fmt(start3m))
           .input('today', sql.NChar(16), fmt(today));
-        if (typeof req.timeout === 'function') req.timeout = 8000;
+        req.timeout = 7000;
         const r = await req.query(`SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND InoutGubun='SO' AND InoutDate>=@start3m AND InoutDate<@today AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
         for (const row of r.recordset) {
           const code = (row.item_code || '').trim().toUpperCase();
