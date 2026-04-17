@@ -8892,6 +8892,13 @@ function isMenuEnabled(pageId) {
   return _menuEnabled[pageId] !== 0;
 }
 function showPage(page, opts){
+  // ── 거래처 포털 모드 가드: 포털 페이지 외 진입 전면 차단 ──
+  if (typeof vendorPortalMode !== 'undefined' && vendorPortalMode) {
+    if (page !== 'vendor-portal') {
+      // 포털 전용 페이지 외 어떤 메뉴도 접근 불가 (홈/대시보드/재고 모두 차단)
+      return;
+    }
+  }
   // 메뉴 비활성화 체크
   if (!isMenuEnabled(page)) {
     alert('비활성화된 메뉴입니다. 관리자에게 문의하세요.');
@@ -20580,12 +20587,28 @@ function initVendorPortal(){
   // 사이드바 숨김, 메인 풀스크린
   const _sb=document.getElementById('sidebarNav')||document.querySelector('.sidebar-nav')||document.querySelector('.sidebar');
   if(_sb) _sb.style.display='none';
+  // 전체 사이드바 요소(.sidebar) 완전 숨김 — 로고 포함
+  document.querySelectorAll('.sidebar').forEach(el=>{el.style.display='none';});
   const _main=document.querySelector('.main');
   if(_main){_main.style.marginLeft='0';_main.style.maxWidth='100%';}
 
+  // ── 보안: 홈/대시보드 진입 경로 전부 차단 ──
+  // 1) 브레드크럼 "홈" 링크 제거
+  const _bc=document.getElementById('breadcrumb');
+  if(_bc) _bc.style.display='none';
+  // 2) 로고 클릭(sbCompanyLogo)의 showPage 비활성
+  const _logo=document.getElementById('sbCompanyLogo');
+  if(_logo){ _logo.onclick=null; _logo.style.cursor='default'; _logo.removeAttribute('title'); }
+  // 3) 상단 메가메뉴/햄버거 버튼 숨김 (있다면)
+  document.querySelectorAll('.megamenu-btn, .hamburger, #megaMenuBtn').forEach(el=>{el.style.display='none';});
+
   // 헤더 변경: 포탈 전용
   const _pt=document.getElementById('pageTitle');
-  if(_pt) _pt.textContent='업체 발주 포털';
+  if(_pt){
+    _pt.textContent='업체 발주 포털';
+    // 즐겨찾기 별표 등 제거
+    _pt.innerHTML='업체 발주 포털';
+  }
   const _hr=document.querySelector('.header-right');
   if(_hr) _hr.innerHTML=`<a href="#" onclick="showVendorGuide();return false;" style="font-size:12px;color:#0369a1;margin-right:12px;text-decoration:underline">📖 사용안내</a><span style="font-size:14px;font-weight:600;color:var(--text-primary)">${vendorPortalName||''}</span> <span style="font-size:12px;color:var(--text-muted);margin-left:8px">${vendorPortalEmail||''}</span>`;
 
