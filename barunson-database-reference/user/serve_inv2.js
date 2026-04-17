@@ -4840,34 +4840,48 @@ async function handleRequest(req, res) {
 
       try {
         if (!workPool) throw new Error('XERP pool not connected');
-        // 1. 현재고 — 100개씩 배치 병렬 조회 (readonly 10초 타임아웃 대응)
+        // ★ readonly 계정 10초 타임아웃 대응: 순차 실행 + chunk 실패해도 계속 진행
+        // 1. 현재고
         const invMap = {};
-        const invResults = await Promise.all(codeChunks.map(chunk => {
+        let invSuccess = 0, invFail = 0;
+        for (let i = 0; i < codeChunks.length; i++) {
+          const chunk = codeChunks[i];
           const inClause = chunk.map(c => `'${c}'`).join(',');
-          return workPool.request().query(`
-            SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty
-            FROM mmInventory WITH (NOLOCK)
-            WHERE SiteCode = '${siteCode}' AND RTRIM(ItemCode) IN (${inClause})
-            GROUP BY RTRIM(ItemCode)
-          `);
-        }));
-        for (const r of invResults) {
-          for (const row of r.recordset) {
-            invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
+          try {
+            const req = workPool.request();
+            if (typeof req.timeout === 'function') req.timeout = 8000;
+            const r = await req.query(`
+              SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty
+              FROM mmInventory WITH (NOLOCK)
+              WHERE SiteCode = '${siteCode}' AND RTRIM(ItemCode) IN (${inClause})
+              GROUP BY RTRIM(ItemCode)
+            `);
+            for (const row of r.recordset) {
+              invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
+            }
+            invSuccess++;
+          } catch (e) {
+            invFail++;
+            console.warn(`[xerp-inventory] 현재고 chunk ${i+1}/${codeChunks.length} 실패: ${e.message}`);
           }
         }
+        console.log(`[xerp-inventory] ${legalEntity} 현재고: ${invSuccess}/${codeChunks.length} chunk 성공 (실패 ${invFail})`);
 
-        // 2. 최근 3개월 출고 — 100개씩 배치 병렬 조회
+        // 2. 최근 3개월 출고 — 순차
         const today = new Date();
         const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
         const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
         const shipMap = {};
-        const shipResults = await Promise.all(codeChunks.map(chunk => {
+        let shipSuccess = 0, shipFail = 0;
+        for (let i = 0; i < codeChunks.length; i++) {
+          const chunk = codeChunks[i];
           const inClause = chunk.map(c => `'${c}'`).join(',');
-          return workPool.request()
-            .input('start3m', sql.NChar(16), fmt(start3m))
-            .input('today', sql.NChar(16), fmt(today))
-            .query(`
+          try {
+            const req = workPool.request()
+              .input('start3m', sql.NChar(16), fmt(start3m))
+              .input('today', sql.NChar(16), fmt(today));
+            if (typeof req.timeout === 'function') req.timeout = 8000;
+            const r = await req.query(`
               SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
               FROM mmInoutItem WITH (NOLOCK)
               WHERE SiteCode = '${siteCode}' AND InoutGubun = 'SO'
@@ -4875,33 +4889,38 @@ async function handleRequest(req, res) {
                 AND RTRIM(ItemCode) IN (${inClause})
               GROUP BY RTRIM(ItemCode)
             `);
-        }));
-        for (const r of shipResults) {
-          for (const row of r.recordset) {
-            const code = (row.item_code || '').trim().toUpperCase();
-            if (code) {
-              const total = Math.round(row.total_qty || 0);
-              shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
+            for (const row of r.recordset) {
+              const code = (row.item_code || '').trim().toUpperCase();
+              if (code) {
+                const total = Math.round(row.total_qty || 0);
+                shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
+              }
             }
+            shipSuccess++;
+          } catch (e) {
+            shipFail++;
+            console.warn(`[xerp-inventory] 출고 chunk ${i+1}/${codeChunks.length} 실패: ${e.message}`);
           }
         }
+        console.log(`[xerp-inventory] ${legalEntity} 출고: ${shipSuccess}/${codeChunks.length} chunk 성공 (실패 ${shipFail})`);
 
-        // 3. 품목명 (S2_Card) — 100개씩 배치 병렬 조회 (바른손 모드만)
+        // 3. 품목명 (S2_Card) — 순차, 실패해도 무시 (품목명 없어도 동작은 함)
         let itemNames = {};
         if (!isDd) {
           try {
             const bar1Pool = new sql.ConnectionPool({ ...xerpConfig, database: 'bar_shop1' });
             await bar1Pool.connect();
-            const nameResults = await Promise.all(codeChunks.map(chunk => {
+            for (let i = 0; i < codeChunks.length; i++) {
+              const chunk = codeChunks[i];
               const inClause = chunk.map(c => `'${c}'`).join(',');
-              return bar1Pool.request().query(
-                `SELECT Card_Code, Card_Name FROM S2_Card WHERE RTRIM(Card_Code) IN (${inClause})`
-              );
-            }));
-            for (const r of nameResults) {
-              r.recordset.forEach(row => {
-                itemNames[(row.Card_Code || '').trim().toUpperCase()] = (row.Card_Name || '').trim();
-              });
+              try {
+                const req = bar1Pool.request();
+                if (typeof req.timeout === 'function') req.timeout = 8000;
+                const r = await req.query(`SELECT Card_Code, Card_Name FROM S2_Card WHERE RTRIM(Card_Code) IN (${inClause})`);
+                r.recordset.forEach(row => {
+                  itemNames[(row.Card_Code || '').trim().toUpperCase()] = (row.Card_Name || '').trim();
+                });
+              } catch (e) { /* 품목명 chunk 실패는 조용히 무시 */ }
             }
             await bar1Pool.close();
           } catch (e) { console.warn('품목명 로드 실패:', e.message); }
@@ -5058,12 +5077,21 @@ async function handleRequest(req, res) {
     await ensureXerpPool().catch(() => null);
 
     try {
-      // 바른손 + DD 모두 조회 (각각 실패해도 다른 쪽은 계속)
-      const [bs, dd] = await Promise.all([
-        fetchCompanyInventoryFromXerp('barunson').catch(e => { console.error('[sync] barunson 실패:', e.message); return []; }),
-        fetchCompanyInventoryFromXerp('dd').catch(e => { console.error('[sync] dd 실패:', e.message); return []; })
-      ]);
+      // 바른손 + DD 각각 순차 (동시 쿼리 부하 회피)
+      let bs = [], dd = [];
+      try { bs = await fetchCompanyInventoryFromXerp('barunson'); } catch(e) { console.error('[sync] barunson 실패:', e.message); }
+      try { dd = await fetchCompanyInventoryFromXerp('dd'); } catch(e) { console.error('[sync] dd 실패:', e.message); }
       const all = [...bs, ...dd];
+      // fallback:products로 모두 찍혔거나 all이 비었으면 기존 snapshot 보존하고 실패 표기
+      const allFallback = all.length > 0 && all.every(p => p['_invSource'] === 'fallback:products');
+      if (allFallback || all.length === 0) {
+        console.warn('[sync] 모든 데이터가 fallback/empty — snapshot 갱신 스킵하고 기존 유지');
+        if (syncLogId) {
+          try { await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run('XERP 전체 실패 — 기존 snapshot 유지', syncLogId); } catch(_){}
+        }
+        fail(res, 503, 'XERP 동기화 실패 — 기존 재고 데이터 유지');
+        return;
+      }
 
       // snapshot에 UPSERT — 배치로
       let successCount = 0;
@@ -5268,18 +5296,23 @@ async function handleRequest(req, res) {
       const safeCodes = cleanedCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
       if (!safeCodes.length) { ok(res, {}); return; }
 
-      // readonly 10초 타임아웃 대응: 100개씩 배치 병렬 조회
+      // ★ readonly 10초 타임아웃 대응: 순차 실행 + chunk 실패 내성
       const CHUNK_SIZE = 100;
       const codeChunks = [];
       for (let i = 0; i < safeCodes.length; i += CHUNK_SIZE) {
         codeChunks.push(safeCodes.slice(i, i + CHUNK_SIZE));
       }
-      const batchResults = await Promise.all(codeChunks.map(chunk => {
+      const usage = {};
+      let successCnt = 0, failCnt = 0;
+      for (let i = 0; i < codeChunks.length; i++) {
+        const chunk = codeChunks[i];
         const inClause = chunk.map(c => `'${c}'`).join(',');
-        return xerpPool.request()
-          .input('start3m', sql.NChar(16), fmt(start3m))
-          .input('today', sql.NChar(16), fmt(today))
-          .query(`
+        try {
+          const req = xerpPool.request()
+            .input('start3m', sql.NChar(16), fmt(start3m))
+            .input('today', sql.NChar(16), fmt(today));
+          if (typeof req.timeout === 'function') req.timeout = 8000;
+          const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty, COUNT(DISTINCT RTRIM(InoutDate)) AS ship_days
             FROM mmInoutItem WITH (NOLOCK)
             WHERE SiteCode = 'BK10' AND InoutGubun = 'SO'
@@ -5287,17 +5320,19 @@ async function handleRequest(req, res) {
               AND RTRIM(ItemCode) IN (${inClause})
             GROUP BY RTRIM(ItemCode)
           `);
-      }));
-
-      const usage = {};
-      for (const r of batchResults) {
-        for (const row of r.recordset) {
-          const code = (row.item_code || '').trim();
-          if (!code || !registeredCodes.has(code)) continue;
-          const total = Math.round(row.total_qty || 0);
-          usage[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
+          for (const row of r.recordset) {
+            const code = (row.item_code || '').trim();
+            if (!code || !registeredCodes.has(code)) continue;
+            const total = Math.round(row.total_qty || 0);
+            usage[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
+          }
+          successCnt++;
+        } catch (e) {
+          failCnt++;
+          console.warn(`[xerp-monthly-usage] chunk ${i+1}/${codeChunks.length} 실패: ${e.message}`);
         }
       }
+      console.log(`[xerp-monthly-usage] ${successCnt}/${codeChunks.length} chunk 성공 (실패 ${failCnt})`);
 
       xerpUsageCache = usage;
       xerpUsageCacheTime = now;
@@ -18473,11 +18508,20 @@ async function runXerpSnapshotSync(triggeredBy = 'scheduler') {
 
   try {
     await ensureXerpPool().catch(()=>null);
-    const [bs, dd] = await Promise.all([
-      fetchXerpInventoryForSync('barunson').catch(e => { console.error('[XERP 동기화] barunson 실패:', e.message); return []; }),
-      fetchXerpInventoryForSync('dd').catch(e => { console.error('[XERP 동기화] dd 실패:', e.message); return []; })
-    ]);
+    // 바른손 → DD 순차 (동시 쿼리 부하 회피)
+    let bs = [], dd = [];
+    try { bs = await fetchXerpInventoryForSync('barunson'); } catch(e) { console.error('[XERP 동기화] barunson 실패:', e.message); }
+    try { dd = await fetchXerpInventoryForSync('dd'); } catch(e) { console.error('[XERP 동기화] dd 실패:', e.message); }
     const all = [...bs, ...dd];
+    // 전원 재고 0 && 전원 출고 0이면 전체 실패로 간주 → snapshot 갱신 스킵
+    const allZero = all.length > 0 && all.every(p => (p.current_stock || 0) === 0 && (p.total_3m || 0) === 0);
+    if (allZero) {
+      console.warn('[XERP 동기화] 전체 재고/출고 0 — XERP 실패 의심, snapshot 갱신 스킵하고 기존 유지');
+      if (syncLogId) {
+        try { await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run('XERP 전체 실패 — 기존 snapshot 유지', syncLogId); } catch(_){}
+      }
+      return;
+    }
     let successCount = 0;
     if (all.length) {
       const upsert = db.prepare(`INSERT INTO inventory_snapshot
@@ -18552,32 +18596,50 @@ async function fetchXerpInventoryForSync(legalEntity) {
 
   try {
     if (!workPool) throw new Error('XERP pool not connected');
+    // ★ readonly 계정 10초 타임아웃 대응: 순차 실행 + 실패한 chunk는 스킵하고 계속 진행
     const invMap = {};
-    const invResults = await Promise.all(chunks.map(chunk => {
+    let invSuccess = 0, invFail = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
       const inClause = chunk.map(c => `'${c}'`).join(',');
-      return workPool.request().query(`SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
-    }));
-    for (const r of invResults) {
-      for (const row of r.recordset) invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
+      try {
+        const req = workPool.request();
+        if (typeof req.timeout === 'function') req.timeout = 8000; // 8초 (10초 한도 여유)
+        const r = await req.query(`SELECT RTRIM(ItemCode) AS item_code, SUM(OhQty) AS oh_qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
+        for (const row of r.recordset) invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
+        invSuccess++;
+      } catch (e) {
+        invFail++;
+        console.warn(`[XERP 동기화] 현재고 chunk ${i+1}/${chunks.length} 실패: ${e.message}`);
+      }
     }
+    console.log(`[XERP 동기화] ${legalEntity} 현재고: ${invSuccess}/${chunks.length} chunk 성공 (실패 ${invFail})`);
 
     const today = new Date();
     const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
     const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
     const shipMap = {};
-    const shipResults = await Promise.all(chunks.map(chunk => {
+    let shipSuccess = 0, shipFail = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
       const inClause = chunk.map(c => `'${c}'`).join(',');
-      return workPool.request()
-        .input('start3m', sql.NChar(16), fmt(start3m))
-        .input('today', sql.NChar(16), fmt(today))
-        .query(`SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND InoutGubun='SO' AND InoutDate>=@start3m AND InoutDate<@today AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
-    }));
-    for (const r of shipResults) {
-      for (const row of r.recordset) {
-        const code = (row.item_code || '').trim().toUpperCase();
-        if (code) shipMap[code] = Math.round(row.total_qty || 0);
+      try {
+        const req = workPool.request()
+          .input('start3m', sql.NChar(16), fmt(start3m))
+          .input('today', sql.NChar(16), fmt(today));
+        if (typeof req.timeout === 'function') req.timeout = 8000;
+        const r = await req.query(`SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='${siteCode}' AND InoutGubun='SO' AND InoutDate>=@start3m AND InoutDate<@today AND RTRIM(ItemCode) IN (${inClause}) GROUP BY RTRIM(ItemCode)`);
+        for (const row of r.recordset) {
+          const code = (row.item_code || '').trim().toUpperCase();
+          if (code) shipMap[code] = Math.round(row.total_qty || 0);
+        }
+        shipSuccess++;
+      } catch (e) {
+        shipFail++;
+        console.warn(`[XERP 동기화] 출고 chunk ${i+1}/${chunks.length} 실패: ${e.message}`);
       }
     }
+    console.log(`[XERP 동기화] ${legalEntity} 3개월출고: ${shipSuccess}/${chunks.length} chunk 성공 (실패 ${shipFail})`);
 
     const out = [];
     for (const p of registered) {
