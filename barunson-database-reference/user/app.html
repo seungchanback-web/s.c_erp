@@ -8742,16 +8742,12 @@ async function loadXerpInventory(forceRefresh) {
   const badge = document.getElementById('erpSyncBadge');
   const refreshBtn = document.getElementById('refreshBtn');
 
-  // 강제 갱신 시 백업 후 초기화
+  // 강제 갱신 시 백업만 수행 (화면은 응답 받을 때까지 유지 — 사라지는 증상 방지)
   let _rawBackup = null;
   let _classifiedBackup = null;
   if (forceRefresh) {
     _rawBackup = RAW.slice();
     _classifiedBackup = JSON.parse(JSON.stringify(classified));
-    RAW = [];
-    classified = {urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
-    const tb=document.getElementById('tb');
-    if(tb) tb.innerHTML='<tr><td colspan="20" style="text-align:center;padding:40px;color:#64748b">데이터 동기화 중...</td></tr>';
   }
 
   // 로딩 상태 — 헤더 뱃지
