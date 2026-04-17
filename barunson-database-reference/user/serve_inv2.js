@@ -5091,10 +5091,12 @@ async function handleRequest(req, res) {
       const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
       const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
 
-      // 등록 제품만 조회 (속도 최적화)
-      const registeredProducts = await db.prepare("SELECT product_code FROM products WHERE status = 'active'").all();
-      const registeredCodes = new Set(registeredProducts.map(r => r.product_code));
-      const safeCodeList = registeredProducts.map(p => p.product_code).filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
+      // 등록 제품만 조회 (속도 최적화) + product_code 공백/제어문자 정제
+      const registeredProductsRaw = await db.prepare("SELECT product_code FROM products WHERE status = 'active'").all();
+      const cleanCode = s => (s || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+      const cleanedCodes = registeredProductsRaw.map(r => cleanCode(r.product_code)).filter(Boolean);
+      const registeredCodes = new Set(cleanedCodes);
+      const safeCodeList = cleanedCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
       if (!safeCodeList) { ok(res, {}); return; }
 
       const result = await xerpPool.request()
@@ -7026,9 +7028,9 @@ async function handleRequest(req, res) {
         try {
           if (await ensureXerpPool()) {
             const codes = new Set();
-            for (const po of rows) { for (const it of (po.items||[])) { if (it.product_code) codes.add(it.product_code); } }
+            for (const po of rows) { for (const it of (po.items||[])) { if (it.product_code) codes.add((it.product_code||'').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g,'').trim()); } }
             if (codes.size > 0) {
-              const safeList = [...codes].filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
+              const safeList = [...codes].filter(c => c && /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
               if (safeList) {
                 const invR = await xerpPool.request().query(`SELECT RTRIM(ItemCode) AS code, SUM(OhQty) AS qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='BK10' AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
                 for (const r of (invR.recordset||[])) { invMap[r.code.trim()] = { stock: Math.round(r.qty||0), monthly: 0 }; }
