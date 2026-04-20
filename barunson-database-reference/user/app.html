@@ -734,6 +734,36 @@ tbody tr:nth-child(even):hover { background: var(--sidebar-bg); }
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
+/* ── PO Progress Mini Bar (발주현황 목록) ── */
+.po-mini-bar { display:flex; align-items:center; gap:0; min-width:180px; font-size:10px; }
+.po-mini-node { position:relative; width:12px; height:12px; border-radius:50%; background:#e2e8f0; flex-shrink:0; border:1.5px solid #cbd5e1; }
+.po-mini-node.done { background:#2563eb; border-color:#1d4ed8; }
+.po-mini-node.active { background:#f59e0b; border-color:#d97706; animation:po-pulse 1.5s ease-in-out infinite; }
+.po-mini-node.skip { background:#fff; border-color:#cbd5e1; }
+.po-mini-conn { height:2px; flex:1; background:#e2e8f0; min-width:14px; }
+.po-mini-conn.done { background:#2563eb; }
+@keyframes po-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,0.6); } 50% { box-shadow:0 0 0 4px rgba(245,158,11,0); } }
+
+/* ── PO Timeline (상세 모달) ── */
+.po-timeline { padding:12px 0; font-size:12px; }
+.po-timeline-header { font-weight:700; font-size:14px; margin-bottom:12px; color:#1e293b; border-bottom:1px solid #e2e8f0; padding-bottom:6px; }
+.po-timeline-node { position:relative; padding:6px 0 6px 28px; border-left:2px solid #e2e8f0; margin-left:8px; }
+.po-timeline-node:last-child { border-left-color:transparent; }
+.po-timeline-node::before { content:''; position:absolute; left:-9px; top:10px; width:14px; height:14px; border-radius:50%; background:#fff; border:2px solid #cbd5e1; }
+.po-timeline-node.done::before { background:#2563eb; border-color:#1d4ed8; }
+.po-timeline-node.active::before { background:#f59e0b; border-color:#d97706; animation:po-pulse 1.5s ease-in-out infinite; }
+.po-timeline-node.warn::before { background:#ef4444; border-color:#dc2626; }
+.po-timeline-icon { display:inline-block; width:20px; text-align:center; margin-right:4px; }
+.po-timeline-label { font-weight:600; color:#1e293b; }
+.po-timeline-meta { color:#64748b; font-size:11px; margin-left:4px; }
+.po-timeline-details { color:#475569; font-size:11px; margin-top:2px; padding-left:24px; }
+.po-timeline-sub { margin-top:8px; margin-left:12px; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; }
+.po-timeline-sub-header { font-weight:600; font-size:12px; color:#334155; margin-bottom:4px; }
+.po-timeline-sub-header .step-badge { display:inline-block; padding:1px 6px; border-radius:8px; font-size:10px; font-weight:700; color:#fff; background:#7c3aed; margin-right:6px; }
+.po-timeline-sub .po-timeline-node { font-size:11px; padding:4px 0 4px 22px; }
+.po-timeline-sub .po-timeline-node::before { width:10px; height:10px; left:-7px; top:9px; }
+.po-timeline-empty { color:#94a3b8; font-style:italic; padding:6px 0 6px 28px; font-size:11px; }
+
 /* ── PO Wizard Stepper ── */
 .pw-step {
   padding: 4px 10px;
@@ -15622,7 +15652,7 @@ function renderPOStatusPipeline(po) {
 
 // ===== PO LIST (카드 기반 발주진행 현황) =====
 function loadPOList(callback){
-  let poUrl = '/api/po?include=items';
+  let poUrl = '/api/po?include=items,progress';
   if (currentOriginContext) poUrl += '&origin=' + encodeURIComponent(currentOriginContext);
   // 법인 필터 (발주현황 페이지에서 토글한 _procEntity 사용)
   if (typeof _procEntity !== 'undefined' && _procEntity) poUrl += '&entity=' + encodeURIComponent(_procEntity);
@@ -15999,12 +16029,14 @@ function renderPOSubCard(po, idx, steps, icon) {
           <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${typeColor}15;color:${typeColor};font-weight:700;border:1px solid ${typeColor}30">${esc(po.po_type||'')}</span>
           <span style="font-size:13px;color:${typeColor};font-weight:600">${esc(po.vendor_name||'')}</span>
           <span style="font-size:11px;padding:2px 6px;border-radius:3px;background:${stColor}20;color:${stColor};font-weight:600">${esc(po.status)}</span>
+          ${renderPOProgressMini(po)}
           <span style="font-size:12px;color:#6b7280">${items.length}품목 · ${totalOrdered.toLocaleString()}매</span>
           <span style="font-size:12px;color:#6b7280">입고 <span class="recv-text ${overallCls}" style="font-weight:600">${overallPct}%</span></span>
           ${po.os_number ? `<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#e8f5e9;color:#2e7d32;font-weight:600">OS: ${esc(po.os_number)}</span>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:4px">
           ${actions}
+          <button onclick="event.stopPropagation();showPOTimeline(${po.po_id})" title="진행 타임라인" style="padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;font-size:11px;color:#1d4ed8">🕒</button>
           <button onclick="event.stopPropagation();toggleActivityLog(${po.po_id})" style="padding:3px 8px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-size:11px;color:#475569">📋</button>
         </div>
       </div>
@@ -16012,6 +16044,186 @@ function renderPOSubCard(po, idx, steps, icon) {
       <div style="margin-top:8px">${itemsHtml}</div>
       <div id="activityLog_${po.po_id}" style="display:none;margin-top:8px;padding:8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0"></div>
     </div>`;
+}
+
+// ── 발주현황 목록용 미니 진행도 바 (발주→확인→출고→입고→후공정→마감) ──
+function renderPOProgressMini(po) {
+  // 단계 계산: 현재 po 상태 + _children (후공정 체인)
+  // 5단계: 발주 · 확인 · 출고 · 입고 · 후공정(있으면) · 마감
+  const steps = [];
+  // 1. 발주 생성 — po_date가 있으면 완료
+  steps.push({ label: '발주', done: !!po.po_date, tip: po.po_date ? `발주 ${po.po_date}` : '대기' });
+  // 2. 거래처 확인 — status가 확인/발송/OS등록대기/완료 계열이면 완료
+  const confirmedStatuses = ['확인','OS등록대기','OS등록','수령중','완료'];
+  steps.push({ label: '확인', done: confirmedStatuses.includes(po.status), tip: confirmedStatuses.includes(po.status) ? `확인 (${po.vendor_name||''})` : '대기' });
+  // 3. 출고 — shipped_at 있으면 완료
+  const shipped = !!po.shipped_at;
+  steps.push({ label: '출고', done: shipped, tip: shipped ? `출고 ${String(po.shipped_at).slice(5,16)}` : '대기' });
+  // 4. 입고 — 원재료: 직접 입고 / 후공정: 무시 (체인 마지막 PO 입고가 최종 입고)
+  //     간이 기준: status === '완료' 또는 'OS등록' 계열이면 입고 완료
+  const received = ['완료','OS등록','OS등록대기','수령중'].includes(po.status);
+  steps.push({ label: '입고', done: received, tip: received ? '입고' : '대기' });
+  // 5. 후공정 (체인이 있을 때만 표시) — 자식 PO 중 마지막 step의 진행도
+  const children = po._children || [];
+  if (children.length) {
+    const allPostDone = children.every(c => ['완료','OS등록','OS등록대기','수령중','received'].includes(c.status));
+    const anyPostActive = children.some(c => ['발송','확인','sent','confirmed'].includes(c.status));
+    const tip = children.map(c => `[${c.step}] ${c.vendor||''} ${c.status}`).join(' / ');
+    steps.push({ label: `후공정 (${children.length})`, done: allPostDone, active: !allPostDone && anyPostActive, tip: tip });
+  }
+  // 6. 마감 — os_number 있으면 완료
+  steps.push({ label: '마감', done: !!po.os_number, tip: po.os_number ? `OS ${po.os_number}` : (po.status==='완료' ? '완료' : '대기') });
+
+  // 현재 단계 = 첫 "미완료" 노드 위치
+  let activeIdx = -1;
+  for (let i = 0; i < steps.length; i++) {
+    if (!steps[i].done) { activeIdx = i; break; }
+  }
+
+  let html = '<span class="po-mini-bar" title="' + esc(steps.map(s => s.label + ':' + (s.tip||'')).join(' | ')) + '">';
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const cls = s.done ? 'done' : (i === activeIdx ? 'active' : 'skip');
+    html += `<span class="po-mini-node ${cls}" title="${esc(s.label)} — ${esc(s.tip||'')}"></span>`;
+    if (i < steps.length - 1) {
+      html += `<span class="po-mini-conn ${s.done ? 'done' : ''}"></span>`;
+    }
+  }
+  html += '</span>';
+  return html;
+}
+
+// ── PO 진행 타임라인 모달 ──
+async function showPOTimeline(poId) {
+  // 기존 모달 제거
+  const existing = document.getElementById('poTimelineModal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'poTimelineModal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;max-width:720px;width:90%;max-height:85vh;overflow-y:auto;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #e2e8f0">
+        <div style="font-weight:700;font-size:16px">🕒 발주 진행 타임라인</div>
+        <button onclick="document.getElementById('poTimelineModal').remove()" style="padding:4px 12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;font-size:12px">✕ 닫기</button>
+      </div>
+      <div id="poTimelineBody" style="font-size:12px">
+        <div style="text-align:center;color:#64748b;padding:40px">불러오는 중...</div>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  try {
+    const resp = await fetch('/api/po/' + poId + '/timeline');
+    const j = await resp.json();
+    const body = document.getElementById('poTimelineBody');
+    if (!j.ok) { body.innerHTML = `<div style="color:#ef4444;padding:20px;text-align:center">조회 실패: ${esc(j.error||'')}</div>`; return; }
+    const d = j.data || j;
+    body.innerHTML = renderTimelineHtml(d);
+  } catch (e) {
+    const body = document.getElementById('poTimelineBody');
+    if (body) body.innerHTML = `<div style="color:#ef4444;padding:20px;text-align:center">네트워크 오류: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderTimelineHtml(d) {
+  const mat = d.material_po || {};
+  const chain = d.process_chain || [];
+  const closing = d.closing || {};
+
+  let html = '';
+  // 원재료 PO 헤더
+  html += `<div class="po-timeline-header">📦 원재료 PO · ${esc(mat.po_number||'')} · ${esc(mat.vendor_name||'')}</div>`;
+  html += '<div class="po-timeline">';
+  if (!mat.events || !mat.events.length) {
+    html += '<div class="po-timeline-empty">기록된 이벤트 없음</div>';
+  } else {
+    for (const ev of mat.events) {
+      html += renderTimelineNode(ev, 'done');
+    }
+  }
+  // 원재료 상태 기반 다음 단계 힌트
+  const matNext = _nextHint(mat);
+  if (matNext) html += renderTimelineNode(matNext, 'active');
+  html += '</div>';
+
+  // 후공정 체인 (들여쓰기)
+  if (chain.length) {
+    html += `<div class="po-timeline-header" style="margin-top:16px">🔗 후공정 체인 (${chain.length}단계)</div>`;
+    for (const node of chain) {
+      html += `<div class="po-timeline-sub">
+        <div class="po-timeline-sub-header">
+          <span class="step-badge">Step ${esc(String(node.step||0))}</span>
+          ${esc(node.process||'')} @ <span style="color:#7c3aed">${esc(node.vendor_name||'')}</span>
+          <span style="float:right;font-size:11px;color:#64748b">${esc(node.status||'')}</span>
+        </div>
+        <div class="po-timeline">`;
+      if (!node.events || !node.events.length) {
+        html += '<div class="po-timeline-empty">이벤트 없음 — 이전 공정 완료 대기 중</div>';
+      } else {
+        for (const ev of node.events) {
+          html += renderTimelineNode(ev, 'done');
+        }
+      }
+      const nodeNext = _nextHint(node);
+      if (nodeNext) html += renderTimelineNode(nodeNext, 'active');
+      html += `</div></div>`;
+    }
+  }
+
+  // 마감
+  html += `<div class="po-timeline-header" style="margin-top:16px">🏁 마감</div>`;
+  html += '<div class="po-timeline">';
+  if (closing.os_number) {
+    html += renderTimelineNode({
+      icon: '🏷️', label: 'OS 등록',
+      at: closing.os_registered_at || '',
+      actor: '', details: `OS: ${closing.os_number}`
+    }, 'done');
+  } else {
+    html += renderTimelineNode({
+      icon: '🏷️', label: 'OS 등록 대기',
+      at: '', actor: '', details: ''
+    }, 'active');
+  }
+  if (closing.final_status === '완료' || closing.final_status === 'received') {
+    html += renderTimelineNode({ icon: '🏁', label: '마감 완료', at: '', actor: '', details: '' }, 'done');
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function renderTimelineNode(ev, cls) {
+  const at = ev.at ? String(ev.at).slice(0, 16) : '';
+  return `<div class="po-timeline-node ${cls||''}">
+    <span class="po-timeline-icon">${esc(ev.icon||'•')}</span>
+    <span class="po-timeline-label">${esc(ev.label||ev.action||'')}</span>
+    ${at ? `<span class="po-timeline-meta">${esc(at)}</span>` : ''}
+    ${ev.actor ? `<span class="po-timeline-meta">· ${esc(ev.actor)}</span>` : ''}
+    ${ev.details ? `<div class="po-timeline-details">${esc(ev.details)}</div>` : ''}
+  </div>`;
+}
+
+// 상태 기반 다음 단계 힌트 (active 노드로 표시)
+function _nextHint(node) {
+  const events = node.events || [];
+  const actions = events.map(e => e.action);
+  const status = node.status || '';
+  if (status === '완료' || status === 'received' || status === 'OS등록' || actions.includes('os_registered')) return null;
+  if (!actions.includes('vendor_confirm') && !['확인','발송','sent','confirmed'].includes(status)) {
+    return { icon: '✅', label: '거래처 확인 대기', at: '', actor: node.vendor_name || '' };
+  }
+  if (!actions.includes('vendor_ship') && !actions.includes('ship') && !node.shipped_at) {
+    return { icon: '🚚', label: '출고 대기', at: '', actor: node.vendor_name || '' };
+  }
+  if (!actions.includes('received')) {
+    return { icon: '📦', label: '입고 대기', at: '', actor: '' };
+  }
+  return null;
 }
 
 async function toggleActivityLog(poId) {

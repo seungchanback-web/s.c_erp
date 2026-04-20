@@ -4817,8 +4817,8 @@ async function handleRequest(req, res) {
       // IN절용 (SQL Injection 방지: 영숫자_만 허용)
       const safeCodes = productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
       if (!safeCodes.length) return [];
-      // readonly 계정 10초 쿼리 타임아웃 대응: 100개씩 배치로 분할하여 병렬 실행
-      const CHUNK_SIZE = 100;
+      // readonly 계정 10초 쿼리 타임아웃 대응: 50개씩 배치 + req.timeout=7초 (3초 여유)
+      const CHUNK_SIZE = 50;
       const codeChunks = [];
       for (let i = 0; i < safeCodes.length; i += CHUNK_SIZE) {
         codeChunks.push(safeCodes.slice(i, i + CHUNK_SIZE));
@@ -5297,7 +5297,7 @@ async function handleRequest(req, res) {
       if (!safeCodes.length) { ok(res, {}); return; }
 
       // ★ readonly 10초 타임아웃 대응: 순차 실행 + chunk 실패 내성
-      const CHUNK_SIZE = 100;
+      const CHUNK_SIZE = 50;
       const codeChunks = [];
       for (let i = 0; i < safeCodes.length; i += CHUNK_SIZE) {
         codeChunks.push(safeCodes.slice(i, i + CHUNK_SIZE));
@@ -7426,7 +7426,7 @@ async function handleRequest(req, res) {
               const safeArr = [...codes].filter(c => c && /^[A-Za-z0-9_\-]+$/.test(c));
               if (safeArr.length) {
                 // readonly 10초 타임아웃 대응: 100개씩 배치 병렬
-                const CHUNK = 100;
+                const CHUNK = 50;
                 const chunks = [];
                 for (let i = 0; i < safeArr.length; i += CHUNK) chunks.push(safeArr.slice(i, i + CHUNK));
                 const invResults = await Promise.all(chunks.map(ch => {
@@ -8617,6 +8617,113 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /api/po/:id/timeline — PO 전체 공정체인 타임라인 (원재료 + 후공정 N단계)
+  const timelineMatch = pathname.match(/^\/api\/po\/(\d+)\/timeline$/);
+  if (timelineMatch && method === 'GET') {
+    try {
+      const poId = parseInt(timelineMatch[1]);
+      // 본인 PO
+      const po = await db.prepare('SELECT * FROM po_header WHERE po_id=?').get(poId);
+      if (!po) { fail(res, 404, 'PO not found'); return; }
+
+      // root 찾기 — parent_po_id가 있으면 부모(원재료) PO로 이동, 없으면 본인이 root
+      let rootPo = po;
+      if (po.parent_po_id) {
+        const parent = await db.prepare('SELECT * FROM po_header WHERE po_id=?').get(po.parent_po_id);
+        if (parent) rootPo = parent;
+      }
+
+      // root의 모든 자식(후공정 체인) 수집
+      const chainRows = await db.prepare('SELECT * FROM po_header WHERE parent_po_id=? ORDER BY process_step ASC, po_id ASC').all(rootPo.po_id);
+
+      // 모든 관련 PO의 activity_log 일괄 조회
+      const allPoIds = [rootPo.po_id, ...chainRows.map(r => r.po_id)];
+      const placeholders = allPoIds.map(() => '?').join(',');
+      const logs = await db.prepare(`SELECT * FROM po_activity_log WHERE po_id IN (${placeholders}) ORDER BY created_at ASC, id ASC`).all(...allPoIds);
+      const logsByPo = {};
+      for (const lg of logs) {
+        if (!logsByPo[lg.po_id]) logsByPo[lg.po_id] = [];
+        logsByPo[lg.po_id].push(lg);
+      }
+
+      // action → 라벨/아이콘 매핑
+      const ACTION_META = {
+        created:           { label: '발주 생성',        icon: '📝' },
+        vendor_confirm:    { label: '거래처 확인',      icon: '✅' },
+        vendor_ship:       { label: '출고 완료',        icon: '🚚' },
+        material_shipped:  { label: '원재료 출고',      icon: '🚚' },
+        auto_chain_create: { label: '다음 공정 자동 생성', icon: '🔗' },
+        auto_sent:         { label: '자동 발송',        icon: '📧' },
+        received:          { label: '바른손 입고',      icon: '📦' },
+        os_registered:     { label: 'OS 등록',          icon: '🏷️' },
+        force_complete:    { label: '강제 완료',        icon: '⚠️' },
+        reset_ship:        { label: '출고 취소/수정',   icon: '↩️' },
+        cancelled:         { label: '발주 취소',        icon: '❌' },
+        delivery_date_confirmed: { label: '입고일 확정', icon: '📅' },
+        sent:              { label: '거래처 발송',      icon: '📤' },
+        ship:              { label: '출고 완료',        icon: '🚚' }
+      };
+      function mapLog(lg) {
+        const meta = ACTION_META[lg.action] || { label: lg.action || '이벤트', icon: '•' };
+        return {
+          action: lg.action,
+          at: lg.created_at || '',
+          actor: lg.actor || lg.actor_type || '',
+          label: meta.label,
+          icon: meta.icon,
+          details: lg.details || ''
+        };
+      }
+
+      const materialPo = {
+        po_id: rootPo.po_id,
+        po_number: rootPo.po_number,
+        po_type: rootPo.po_type,
+        vendor_name: rootPo.material_vendor_name || rootPo.vendor_name,
+        po_date: rootPo.po_date,
+        status: rootPo.status,
+        shipped_at: rootPo.shipped_at,
+        events: (logsByPo[rootPo.po_id] || []).map(mapLog)
+      };
+
+      const processChain = chainRows.map(r => ({
+        step: r.process_step || 0,
+        process: (() => {
+          try {
+            const chain = r.process_chain ? JSON.parse(r.process_chain) : [];
+            return (Array.isArray(chain) && chain[0]?.process) || r.po_type || '';
+          } catch(_) { return r.po_type || ''; }
+        })(),
+        po_id: r.po_id,
+        po_number: r.po_number,
+        vendor_name: r.process_vendor_name || r.vendor_name,
+        status: r.status,
+        parent_po_id: r.parent_po_id,
+        shipped_at: r.shipped_at,
+        events: (logsByPo[r.po_id] || []).map(mapLog)
+      }));
+
+      // 마감 정보 — 마지막 단계(마지막 chainRow) 또는 root에 OS가 있으면 반영
+      const lastNode = chainRows.length ? chainRows[chainRows.length - 1] : rootPo;
+      const closing = {
+        os_number: lastNode.os_number || rootPo.os_number || '',
+        os_registered_at: (logsByPo[lastNode.po_id] || []).filter(l => l.action === 'os_registered').map(l => l.created_at)[0] || '',
+        final_status: lastNode.status
+      };
+
+      ok(res, {
+        material_po: materialPo,
+        process_chain: processChain,
+        closing,
+        requested_po_id: poId
+      });
+    } catch (e) {
+      console.error('[timeline] 조회 실패:', e.message);
+      fail(res, 500, '타임라인 조회 실패: ' + e.message);
+    }
+    return;
+  }
+
   // GET /api/activity-log — 전체 활동 로그 (최근 100건)
   if (pathname === '/api/activity-log' && method === 'GET') {
     const limit = parseInt(parsed.searchParams.get('limit') || '100');
@@ -9060,10 +9167,37 @@ async function handleRequest(req, res) {
       row.status = PO_STATUS_EN_TO_KO[row.status] || row.status;
     }
     // include=items 시 품목 정보 포함
-    if (parsed.searchParams.get('include') === 'items') {
+    const includeParam = parsed.searchParams.get('include') || '';
+    if (includeParam === 'items' || includeParam.includes('items')) {
       const itemStmt = db.prepare('SELECT * FROM po_items WHERE po_id = ?');
       for (const row of rows) {
         row.items = await itemStmt.all(row.po_id);
+      }
+    }
+    // include=progress 시 후공정 체인(자식 PO) 요약 포함 — 목록 미니바용
+    if (includeParam === 'progress' || includeParam.includes('progress')) {
+      // 모든 자식 PO를 한 번에 조회 (N+1 방지)
+      const rootIds = rows.filter(r => !r.parent_po_id).map(r => r.po_id);
+      let childrenByParent = {};
+      if (rootIds.length) {
+        const placeholders = rootIds.map(() => '?').join(',');
+        const children = await db.prepare(
+          `SELECT po_id, parent_po_id, process_step, status, po_type, vendor_name, process_vendor_name, shipped_at FROM po_header WHERE parent_po_id IN (${placeholders}) ORDER BY process_step ASC, po_id ASC`
+        ).all(...rootIds);
+        for (const c of children) {
+          if (!childrenByParent[c.parent_po_id]) childrenByParent[c.parent_po_id] = [];
+          childrenByParent[c.parent_po_id].push({
+            po_id: c.po_id,
+            step: c.process_step || 0,
+            status: PO_STATUS_EN_TO_KO[c.status] || c.status,
+            raw_status: c.status,
+            vendor: c.process_vendor_name || c.vendor_name || '',
+            shipped_at: c.shipped_at || ''
+          });
+        }
+      }
+      for (const row of rows) {
+        row._children = childrenByParent[row.po_id] || [];
       }
     }
     ok(res, rows);
@@ -18578,7 +18712,7 @@ async function fetchXerpInventoryForSync(legalEntity) {
   }
   const codes = registered.map(p => p.product_code).filter(c => c && /^[A-Za-z0-9_\-]+$/.test(c));
   if (!codes.length) return [];
-  const CHUNK = 100;
+  const CHUNK = 50;
   const chunks = [];
   for (let i = 0; i < codes.length; i += CHUNK) chunks.push(codes.slice(i, i + CHUNK));
 
