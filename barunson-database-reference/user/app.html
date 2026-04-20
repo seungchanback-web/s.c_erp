@@ -9029,9 +9029,22 @@ let _lastLoadedCompany = null;
 async function loadXerpInventory(forceRefresh) {
   // 법인 변경 감지 — 캐시 무효화 (첫 로드 제외)
   if (_lastLoadedCompany !== null && _currentCompany !== _lastLoadedCompany) forceRefresh = true;
-  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵
+  // 캐시된 데이터가 있고 강제 갱신이 아니면 스킵 + 에러 배너 잔재 정리 (녹색으로 복원)
   if (!forceRefresh && RAW && RAW.length > 0 && (RAW[0]['제품코드'] || RAW[0]['품목코드'])) {
     console.log('XERP 재고: 캐시 사용 (' + RAW.length + '개)');
+    // 이전 실패 배너 잔재 제거 — 데이터 있으면 녹색 정상 상태로
+    try {
+      const bar2 = document.getElementById('erpStatusBar');
+      const icon2 = document.getElementById('erpStatusIcon');
+      const title2 = document.getElementById('erpStatusTitle');
+      const detail2 = document.getElementById('erpStatusDetail');
+      const badge2 = document.getElementById('erpSyncBadge');
+      if (bar2) bar2.style.cssText = 'margin-bottom:8px;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1px solid #bbf7d0';
+      if (icon2) icon2.textContent = '✅';
+      if (title2) { title2.textContent = `ERP 연동 완료 — ${RAW.length.toLocaleString()}개 제품`; title2.style.color = '#16a34a'; }
+      if (detail2) detail2.textContent = `마지막 동기화: ${loadTime || '캐시됨'}`;
+      if (badge2) { badge2.textContent = `✅ ${RAW.length}개 연동`; badge2.style.cssText = 'display:inline-block;font-size:12px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap;background:#dcfce7;color:#16a34a'; }
+    } catch(_) {}
     return;
   }
   _lastLoadedCompany = _currentCompany;
