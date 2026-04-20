@@ -4705,6 +4705,150 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  //  POST /api/products/bulk-import-korea
+  //  바른컴퍼니 한국 생산품목 TSV 일괄 업데이트 + 카테고리별 기본 후공정 체인 매칭
+  //
+  //  요청: { tsv: "품목코드\t카드구분\t브랜드\t계정\t상태\n1\tBC1602\t청첩장\t...", dry_run?: true }
+  //  동작:
+  //    1) TSV 파싱 (헤더/번호 무시, 컬럼 5개)
+  //    2) product_code 기준 중복 제거 (첫 행 유지)
+  //    3) products 테이블에 UPSERT: category, brand, origin='한국', status='active', legal_entity='barunson'
+  //       - 브랜드의 (D_내)/(D_외) 접미사 제거
+  //    4) product_post_vendor 에 카테고리별 기본 체인 insert (기존 체인 있으면 skip)
+  //    5) 요약 반환: 파싱/중복제거/신규/업데이트/카테고리별 집계
+  // ════════════════════════════════════════════════════════════════════
+
+  // 카드구분 → 기본 후공정 체인 (vendor 는 비어있음. 사용자가 품목별/발주별로 나중에 지정)
+  const KOREA_CATEGORY_POST_CHAIN = {
+    '청첩장':  [{step:1,process:'인쇄'}, {step:2,process:'재단'}, {step:3,process:'톰슨'}, {step:4,process:'접지'}, {step:5,process:'조립'}],
+    '봉투':    [{step:1,process:'인쇄'}, {step:2,process:'재단'}, {step:3,process:'봉투가공'}],
+    '내지':    [{step:1,process:'인쇄'}, {step:2,process:'재단'}],
+    '감사장':  [{step:1,process:'인쇄'}, {step:2,process:'재단'}, {step:3,process:'톰슨'}],
+    '부속':    [{step:1,process:'재단'}],
+    '리본':    [{step:1,process:'재단'}],
+    '답례품':  [],
+    '용지':    [],
+    '기타':    [{step:1,process:'인쇄'}, {step:2,process:'재단'}]
+  };
+
+  if (pathname === '/api/products/bulk-import-korea' && method === 'POST') {
+    const body = await readJSON(req);
+    const tsv = body?.tsv || '';
+    const dryRun = !!body?.dry_run;
+    if (!tsv) { fail(res, 400, 'tsv required'); return; }
+
+    // 1) 파싱
+    const lines = tsv.split(/\r?\n/).filter(l => l.trim());
+    const rows = [];
+    for (const line of lines) {
+      const cols = line.split('\t');
+      // 헤더 스킵
+      if (cols[0] === 'No' || cols[1] === '품목코드') continue;
+      // 최소 2개 컬럼 (번호 + 품목코드) 요구
+      if (cols.length < 2) continue;
+      // 컬럼 매핑: [번호, 품목코드, 카드구분, 브랜드, 계정, 상태]
+      let idx = 0;
+      // 첫 컬럼이 숫자면 번호로 취급하고 skip, 아니면 품목코드로 취급
+      if (/^\d+$/.test(cols[0])) idx = 1;
+      const code = (cols[idx] || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+      const category = (cols[idx+1] || '').trim();
+      const brandRaw = (cols[idx+2] || '').trim();
+      if (!code) continue;
+      // 브랜드에서 (D_내)/(D_외) 접미사 제거 → 원본 브랜드와 변형 플래그 추출
+      const dInner = /\(D_내\)/.test(brandRaw);
+      const dOuter = /\(D_외\)/.test(brandRaw);
+      const brand = brandRaw.replace(/\s*\(D_[내외]\)\s*/g, '').trim();
+      const memo = (dInner ? 'D_내' : dOuter ? 'D_외' : '').trim();
+      rows.push({ code, category, brand, memo });
+    }
+
+    // 2) product_code 기준 중복 제거
+    const seen = new Map();
+    for (const r of rows) if (!seen.has(r.code)) seen.set(r.code, r);
+    const unique = Array.from(seen.values());
+
+    // 카테고리별 집계
+    const categoryCount = {};
+    for (const r of unique) categoryCount[r.category || '(빈값)'] = (categoryCount[r.category || '(빈값)'] || 0) + 1;
+
+    if (dryRun) {
+      ok(res, {
+        dry_run: true,
+        parsed: rows.length,
+        unique: unique.length,
+        duplicates_removed: rows.length - unique.length,
+        category_breakdown: categoryCount,
+        sample: unique.slice(0, 10)
+      });
+      return;
+    }
+
+    // 3) products UPSERT + product_post_vendor 기본 체인 INSERT
+    let inserted = 0, updated = 0, chainInserted = 0, chainSkipped = 0, errors = 0;
+
+    // product_post_vendor 테이블 존재 여부 확인
+    let ppvOK = true;
+    try { await db.prepare('SELECT 1 FROM product_post_vendor LIMIT 1').get(); } catch(_) { ppvOK = false; }
+
+    for (const r of unique) {
+      try {
+        const existing = await db.prepare('SELECT id FROM products WHERE product_code=?').get(r.code);
+        if (existing) {
+          await db.prepare(`UPDATE products SET
+            category=CASE WHEN ?='' THEN category ELSE ? END,
+            brand=CASE WHEN ?='' THEN brand ELSE ? END,
+            origin='한국',
+            status='active',
+            memo=CASE WHEN ?='' THEN memo ELSE ? END,
+            updated_at=datetime('now','localtime')
+            WHERE product_code=?`).run(r.category, r.category, r.brand, r.brand, r.memo, r.memo, r.code);
+          updated++;
+        } else {
+          await db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, category, status, memo)
+            VALUES (?, '', ?, '한국', ?, 'active', ?)`).run(r.code, r.brand, r.category, r.memo);
+          inserted++;
+        }
+
+        // 기본 후공정 체인 INSERT (기존 체인 있으면 skip)
+        if (ppvOK) {
+          const chain = KOREA_CATEGORY_POST_CHAIN[r.category] || [];
+          if (chain.length) {
+            const hasExisting = await db.prepare('SELECT 1 FROM product_post_vendor WHERE product_code=? LIMIT 1').get(r.code);
+            if (hasExisting) {
+              chainSkipped++;
+            } else {
+              for (const step of chain) {
+                try {
+                  await db.prepare('INSERT INTO product_post_vendor (product_code, process_type, vendor_name, step_order) VALUES (?, ?, \'\', ?)').run(r.code, step.process, step.step);
+                } catch(_) {}
+              }
+              chainInserted++;
+            }
+          }
+        }
+      } catch (e) {
+        errors++;
+        if (errors < 5) console.error('[bulk-import-korea] row 오류:', r.code, e.message);
+      }
+    }
+
+    scheduleProductInfoReload();
+    console.log(`[bulk-import-korea] 완료: 신규 ${inserted} / 업데이트 ${updated} / 체인신설 ${chainInserted} / 체인유지 ${chainSkipped} / 오류 ${errors}`);
+    ok(res, {
+      parsed: rows.length,
+      unique: unique.length,
+      duplicates_removed: rows.length - unique.length,
+      inserted, updated,
+      chain_inserted: chainInserted,
+      chain_skipped_existing: chainSkipped,
+      ppv_table_available: ppvOK,
+      errors,
+      category_breakdown: categoryCount
+    });
+    return;
+  }
+
   // PUT /api/products/:code/field — 개별 필드 업데이트
   const prodFieldMatch = pathname.match(/^\/api\/products\/(.+)\/field$/);
   if (prodFieldMatch && method === 'PUT') {
