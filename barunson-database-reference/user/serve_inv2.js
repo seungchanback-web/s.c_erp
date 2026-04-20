@@ -6864,7 +6864,9 @@ async function handleRequest(req, res) {
     await db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(
       body.po_id, 'material_date_confirmed', body.actor || 'vendor',
       `자재 출고일 확정: ${body.material_send_date}`);
-    // 후공정 업체에 이메일 자동 발송
+    // 후공정 업체에 이메일 자동 발송 (자재 출고일 확정 시)
+    // 법인별 발송 명의: DD → 바른디자인, 바른손 → 바른컴퍼니
+    const _senderCompany = (po.legal_entity === 'dd') ? '바른디자인' : '바른컴퍼니';
     let emailResult = null;
     const processVendor = po.process_vendor_name || '';
     if (processVendor) {
@@ -6872,13 +6874,13 @@ async function handleRequest(req, res) {
       if (vendor && vendor.email && smtpTransporter) {
         const items = await db.prepare('SELECT * FROM po_items WHERE po_id=?').all(body.po_id);
         const itemsList = items.map(i => `<tr><td>${i.product_code}</td><td>${i.brand||''}</td><td>${i.ordered_qty}</td><td>${i.spec||''}</td></tr>`).join('');
-        const html = `<h3>바른컴퍼니 - 자재 출고 안내</h3>
+        const html = `<h3>${_senderCompany} - 자재 출고 안내</h3>
           <p>발주번호: <b>${po.po_number}</b></p>
           <p>원재료 업체(${po.material_vendor_name||po.vendor_name})에서 <b>${body.material_send_date}</b>에 자재를 출고합니다.</p>
           <table border="1" cellpadding="6" style="border-collapse:collapse"><thead><tr><th>품목코드</th><th>브랜드</th><th>수량</th><th>규격</th></tr></thead><tbody>${itemsList}</tbody></table>
           <p>작업 일정 확인 부탁드립니다.</p>`;
         try {
-          await smtpTransporter.sendMail({ from: `바른컴퍼니 <${SMTP_FROM}>`, to: vendor.email, cc: vendor.email_cc || undefined, subject: `[바른컴퍼니] 자재 출고 안내 - ${po.po_number}`, html });
+          await smtpTransporter.sendMail({ from: `${_senderCompany} <${SMTP_FROM}>`, to: vendor.email, cc: vendor.email_cc || undefined, subject: `[${_senderCompany}] 자재 출고 안내 - ${po.po_number}`, html });
           await db.prepare("UPDATE po_header SET process_email_sent=1 WHERE po_id=?").run(body.po_id);
           emailResult = { sent: true, to: vendor.email };
         } catch(e) { emailResult = { sent: false, error: e.message }; }
