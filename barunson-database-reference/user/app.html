@@ -8947,16 +8947,15 @@ async function loadXerpInventory(forceRefresh) {
   const badge = document.getElementById('erpSyncBadge');
   const refreshBtn = document.getElementById('refreshBtn');
 
-  // 강제 갱신 시 백업 후 초기화
+  // 강제 갱신 시 백업만 하고 테이블은 유지 (동기화 중에도 이전 데이터 계속 보이게)
+  // 이전에는 테이블을 clear → "데이터 동기화 중..." 빈 화면 → 사용자 혼란.
+  // 신규 데이터가 성공적으로 도착하면 교체, 실패하면 백업으로 복원.
   let _rawBackup = null;
   let _classifiedBackup = null;
   if (forceRefresh) {
     _rawBackup = RAW.slice();
     _classifiedBackup = JSON.parse(JSON.stringify(classified));
-    RAW = [];
-    classified = {urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
-    const tb=document.getElementById('tb');
-    if(tb) tb.innerHTML='<tr><td colspan="20" style="text-align:center;padding:40px;color:#64748b">데이터 동기화 중...</td></tr>';
+    // RAW/classified/테이블 유지 — 사용자는 기존 데이터 계속 볼 수 있음
   }
 
   // 로딩 상태 — 헤더 뱃지
