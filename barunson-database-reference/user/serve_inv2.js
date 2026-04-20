@@ -4788,6 +4788,15 @@ async function handleRequest(req, res) {
         `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${statusFilter} AND ${originFilter}`
       ).all();
       if (!registeredProducts.length) return [];
+
+      // ★ 핵심 매칭 보정: product_code 공백 + 보이지 않는 유니코드 문자 제거
+      // XERP ItemCode 는 nchar(40) 패딩이라 SQL RTRIM 으로 받아오지만,
+      // 로컬 products.product_code 에 ZWSP/NBSP 등이 섞여 있으면 IN절 필터에서 탈락해서
+      // 조용히 매칭 실패 (재고 0). 양쪽 다 cleanProductCode 처리.
+      for (const p of registeredProducts) {
+        p.product_code = (p.product_code || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+      }
+
       const productCodes = registeredProducts.map(p => p.product_code);
       // IN절용 (SQL Injection 방지: 영숫자_만 허용)
       const safeCodeList = productCodes
@@ -5089,6 +5098,10 @@ async function handleRequest(req, res) {
 
       // 등록 제품만 조회 (속도 최적화)
       const registeredProducts = await db.prepare("SELECT product_code FROM products WHERE status = 'active'").all();
+      // ★ product_code 공백/보이지않는문자 정제 (XERP 매칭 성공률 유지)
+      for (const p of registeredProducts) {
+        p.product_code = (p.product_code || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+      }
       const registeredCodes = new Set(registeredProducts.map(r => r.product_code));
       const safeCodeList = registeredProducts.map(p => p.product_code).filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
       if (!safeCodeList) { ok(res, {}); return; }

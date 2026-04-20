@@ -7778,7 +7778,8 @@ function switchTab(tab){
 
 // ===== RENDER: 셀 렌더러 (공용) =====
 function renderCell(c, p){
-  const code=p['제품코드']||'';
+  // XERP는 품목코드(ItemCode), 웹은 제품코드(product_code) — 둘 다 대응
+  const code = p['제품코드'] || p['품목코드'] || '';
   const oq=orderQty[code]||'';
 
   if(c.special==='statusBadge'){
