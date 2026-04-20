@@ -5019,29 +5019,73 @@ async function handleRequest(req, res) {
         ok(res, { products: [], updated: new Date().toISOString(), count: 0, source: 'empty-snapshot', message: '아직 동기화된 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요.' });
         return;
       } catch (e) {
-        // 테이블 자체가 없는 경우만 live 폴백 (권한 이슈)
+        // 테이블 자체가 없는 경우 — live 폴백도 nginx 60s 넘어 HTML 504 나므로 회피
+        // refresh=1 (관리자 셀프콜) 일 때만 live 허용, 일반 페이지 로드는 캐시/products만
         if (/does not exist|relation.*not exist/i.test(e.message)) {
           snapTableExists = false;
-          console.warn('[xerp-inventory] snapshot 테이블 미존재 → live 폴백:', e.message);
+          console.warn('[xerp-inventory] snapshot 테이블 미존재:', e.message);
         } else {
-          // 그 외 에러는 그대로 실패 반환
           fail(res, 500, 'snapshot 조회 오류: ' + e.message);
           return;
         }
       }
     }
 
-    // ★ 2단계: Live XERP 쿼리 — snapshot 테이블 없을 때 또는 refresh=1 (관리자 셀프콜)
-    // nginx 60s 초과 가능성 있으므로 가급적 피함. 정상 경로는 snapshot.
-    await ensureXerpPool().catch(()=>null);
-
-    // 10분 캐시 — 법인별 분리 (live 응답용)
+    // ★ 2단계: Live XERP 쿼리 경로
+    // - refresh=1 (DB 동기화 버튼의 백그라운드 self-call): 끝까지 live 수행
+    // - 일반 페이지 로드: 캐시 있으면 캐시, 없으면 products-only 응답 (nginx 504 방지)
     const now = Date.now();
     if (!xerpInventoryCaches) xerpInventoryCaches = {};
     const cacheEntry = xerpInventoryCaches[company];
     if (!forceRefresh && cacheEntry && now - cacheEntry.time < 600000) {
       ok(res, cacheEntry.data);
       return;
+    }
+
+    // snapshot 도 없고 캐시도 없고 refresh=1 도 아니면 → products-only 응답으로 빠르게 종료
+    // (nginx 타임아웃 방지). 사용자는 'DB 동기화' 버튼으로 명시적 live 트리거해야 함.
+    if (!forceRefresh && !snapTableExists) {
+      try {
+        const productFilterParts = ["status IN ('active','inactive')"];
+        if (company === 'barunson') productFilterParts.push("(product_code NOT LIKE 'DD%' AND origin != 'DD')");
+        else if (company === 'dd') productFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
+        const productFilter = productFilterParts.join(' AND ');
+        const products = await db.prepare(
+          `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${productFilter}`
+        ).all();
+        const out = products.map(p => {
+          const code = (p.product_code || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim();
+          const isDD = code.startsWith('DD') || p.origin === 'DD';
+          return {
+            '제품코드': code,
+            '품목명': p.product_name || '',
+            '브랜드': p.brand || '',
+            '생산지': p.origin || '',
+            '현재고': 0, '가용재고': 0, '요청량': 0,
+            '_xerpMonthly': 0, '_xerpDaily': 0, '_xerpTotal3m': 0,
+            '_원자재코드': p.material_code || '',
+            '_원재료용지명': p.material_name || '',
+            '_절': p.cut_spec || '', '_조판': p.jopan || '',
+            '_원지사': p.paper_maker || '',
+            '_후공정업체': p.post_vendor || '',
+            'legal_entity': isDD ? 'dd' : 'barunson',
+            '_invSource': 'products-only',
+            '_siteCode': isDD ? 'BHC2' : 'BK10'
+          };
+        });
+        console.log(`[xerp-inventory] snapshot 없음 + 캐시 없음 → products-only 응답: ${out.length}개`);
+        ok(res, { products: out, updated: new Date().toISOString(), count: out.length, source: 'empty-snapshot', message: 'XERP 재고/출고 데이터 없음. 상단 [DB 동기화] 버튼을 눌러주세요.' });
+        return;
+      } catch (e) {
+        console.error('[xerp-inventory] products-only 조회 실패:', e.message);
+      }
+    }
+
+    // 여기까지 왔다면 refresh=1 (DB 동기화의 백그라운드 self-call). live XERP 쿼리 진행.
+    await ensureXerpPool().catch(()=>null);
+    // live 경로 진입 조건: forceRefresh 또는 snapTableExists (empty 경우는 위에서 이미 return 됨)
+    {
+      /* 공백 블록 — 아래 fetchCompanyInventory 흐름으로 진입 */
     }
 
     // ── 내부 헬퍼: 특정 법인의 재고/출고를 해당 DB+SiteCode에서 조회 ──
