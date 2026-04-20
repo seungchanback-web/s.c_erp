@@ -1913,6 +1913,11 @@ function closeMegaMenu() { /* no-op */ }
     <!-- 구매관리 -->
     <div class="hm-card">
       <div class="hm-card-title">구매관리</div>
+      <div class="hm-item" data-page="order-todo" onclick="showPage('order-todo')" style="background:linear-gradient(135deg,#fff1f2 0%,#fef3c7 100%)">
+        <div class="hm-icon" style="background:#fee2e2;color:#dc2626">🎯</div>
+        <div><div class="hm-name">발주 할 일</div><div class="hm-desc">지금 발주해야 하는 품목 한눈에</div></div>
+        <div class="hm-right"><span class="hm-badge" style="background:#fee2e2;color:#dc2626" id="qmOrderTodo">0</span></div>
+      </div>
       <div class="hm-item" data-page="auto-order" onclick="showPage('auto-order')">
         <div class="hm-icon" style="background:#eef2ff;color:#6366f1">🔄</div>
         <div><div class="hm-name">자동발주</div><div class="hm-desc">전략발주 + 단가 최적화</div></div>
@@ -2527,6 +2532,95 @@ function closeMegaMenu() { /* no-op */ }
         <tbody id="ilTb"></tbody>
         <tfoot id="ilTfoot"></tfoot>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PAGE: 발주 할 일 (오늘의 발주 To-Do) -->
+<!-- ============================================================ -->
+<div class="page" id="page-order-todo">
+  <!-- 상단: 타이틀 + 요약 카드 -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <h2 style="margin:0;font-size:22px;font-weight:700;color:#1e293b">🎯 발주 할 일</h2>
+      <div style="font-size:12px;color:#64748b;margin-top:4px" id="otTimestamp">불러오는 중...</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="loadOrderTodo()">🔄 새로고침</button>
+      <button class="btn btn-sm btn-primary" onclick="showPage('create-po')">✍️ 발주서 작성</button>
+    </div>
+  </div>
+
+  <!-- 요약 카드 4개 -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    <div onclick="document.getElementById('otUrgentSection').scrollIntoView({behavior:'smooth'})"
+         style="cursor:pointer;padding:16px 20px;border-radius:10px;background:linear-gradient(135deg,#fee2e2,#fecaca);border:1px solid #fca5a5">
+      <div style="font-size:11px;font-weight:700;color:#7f1d1d;letter-spacing:1px">🔴 지금 발주</div>
+      <div style="font-size:32px;font-weight:800;color:#dc2626;margin:6px 0" id="otCntUrgent">-</div>
+      <div style="font-size:11px;color:#991b1b">가용일수 ≤ 15일</div>
+    </div>
+    <div onclick="document.getElementById('otSoonSection').scrollIntoView({behavior:'smooth'})"
+         style="cursor:pointer;padding:16px 20px;border-radius:10px;background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #fcd34d">
+      <div style="font-size:11px;font-weight:700;color:#78350f;letter-spacing:1px">🟠 이번주 예정</div>
+      <div style="font-size:32px;font-weight:800;color:#d97706;margin:6px 0" id="otCntSoon">-</div>
+      <div style="font-size:11px;color:#92400e">가용일수 16 ~ 30일</div>
+    </div>
+    <div onclick="document.getElementById('otPendingSection').scrollIntoView({behavior:'smooth'})"
+         style="cursor:pointer;padding:16px 20px;border-radius:10px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);border:1px solid #93c5fd">
+      <div style="font-size:11px;font-weight:700;color:#1e3a8a;letter-spacing:1px">🔵 진행 중 (미입고)</div>
+      <div style="font-size:32px;font-weight:800;color:#2563eb;margin:6px 0" id="otCntPending">-</div>
+      <div style="font-size:11px;color:#1e40af">발주됐지만 미입고</div>
+    </div>
+    <div onclick="document.getElementById('otTodaySection').scrollIntoView({behavior:'smooth'})"
+         style="cursor:pointer;padding:16px 20px;border-radius:10px;background:linear-gradient(135deg,#dcfce7,#bbf7d0);border:1px solid #86efac">
+      <div style="font-size:11px;font-weight:700;color:#14532d;letter-spacing:1px">✅ 오늘 발주</div>
+      <div style="font-size:32px;font-weight:800;color:#16a34a;margin:6px 0" id="otCntToday">-</div>
+      <div style="font-size:11px;color:#166534">오늘 생성된 PO</div>
+    </div>
+  </div>
+
+  <!-- 섹션 1: 긴급 카드 그리드 -->
+  <div id="otUrgentSection" style="margin-bottom:28px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px">
+      <div style="font-size:16px;font-weight:700;color:#7f1d1d">🔴 지금 발주해야 할 품목</div>
+      <div style="font-size:12px;color:#991b1b">가용일수가 15일 이하 — 이미 부족하거나 곧 품절</div>
+    </div>
+    <div id="otUrgentGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+      <div style="grid-column:1/-1;text-align:center;padding:40px;color:#94a3b8;font-size:14px">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 섹션 2: 이번주 예정 (리스트) -->
+  <div id="otSoonSection" style="margin-bottom:28px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:#fffbeb;border-left:4px solid #d97706;border-radius:6px">
+      <div style="font-size:16px;font-weight:700;color:#78350f">🟠 이번주 발주 예정</div>
+      <div style="font-size:12px;color:#92400e">가용일수 16~30일 — 여유 있을 때 미리 준비</div>
+    </div>
+    <div id="otSoonList" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 섹션 3: 진행 중 (미입고) -->
+  <div id="otPendingSection" style="margin-bottom:28px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:#eff6ff;border-left:4px solid #2563eb;border-radius:6px">
+      <div style="font-size:16px;font-weight:700;color:#1e3a8a">🔵 진행 중인 발주 (미입고)</div>
+      <div style="font-size:12px;color:#1e40af">이미 발주했지만 아직 입고 전 — 중복 발주 주의</div>
+    </div>
+    <div id="otPendingList" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 섹션 4: 오늘 발주 완료 -->
+  <div id="otTodaySection" style="margin-bottom:28px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border-left:4px solid #16a34a;border-radius:6px">
+      <div style="font-size:16px;font-weight:700;color:#14532d">✅ 오늘 발주한 건</div>
+      <div style="font-size:12px;color:#166534">오늘 생성/발송된 PO 요약</div>
+    </div>
+    <div id="otTodayList" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">불러오는 중...</div>
     </div>
   </div>
 </div>
@@ -9060,6 +9154,273 @@ async function loadXerpInventory(forceRefresh) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ===== 발주 할 일 (Order To-Do) 페이지 =====
+// 혼자 발주하는 담당자가 "지금 뭘 발주해야 하지?" 3초 내 판단 가능한 뷰
+// ═══════════════════════════════════════════════════════════════════
+async function loadOrderTodo() {
+  // 타임스탬프 갱신
+  const ts = document.getElementById('otTimestamp');
+  if (ts) ts.textContent = new Date().toLocaleString('ko-KR') + ' 기준';
+
+  // RAW 없으면 로드 대기
+  if (!RAW || RAW.length === 0) {
+    await loadXerpInventory(false);
+    // 그래도 비어있으면 안내
+    if (!RAW || RAW.length === 0) {
+      document.getElementById('otUrgentGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#94a3b8">재고 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요.</div>';
+      return;
+    }
+  }
+
+  // ===== 분류 =====
+  // 긴급: 가용일수 ≤ 15일 (또는 음수) + 월출고 있음
+  // 주의: 16~30일
+  // 진행중: 미입고(pending) > 0
+  const urgent = [];
+  const soon = [];
+  const pending = [];
+
+  for (const p of RAW) {
+    const code = p['제품코드'] || '';
+    if (!code) continue;
+    const monthly = Number(p['월출고'] || p._xerpMonthly || p._monthly || 0);
+    const daily = Number(p._dailyUsage || (monthly > 0 ? Math.round(monthly/30) : 0));
+    const avail = Number(p['가용재고'] || p['현재고'] || 0);
+    const days = daily > 0 ? Math.floor(avail / daily) : null;
+    const pq = Number(p._pendingQty || 0);
+
+    // 운영 구분 필터 — '이력없음' / '기타' / '디지털인쇄용' 은 긴급/주의에서 제외
+    const note = (productNotes[code] && productNotes[code].note_type) || '';
+    const isExcluded = (note === '디지털인쇄용' || note === '기타' || note === '이력없음');
+
+    if (pq > 0) pending.push({ ...p, _days: days, _pq: pq, _monthly: monthly, _daily: daily, _avail: avail });
+
+    if (isExcluded) continue;
+    if (monthly <= 0) continue; // 월출고 없는 건 건너뜀
+
+    if (days !== null && days <= 15) urgent.push({ ...p, _days: days, _pq: pq, _monthly: monthly, _daily: daily, _avail: avail });
+    else if (days !== null && days > 15 && days <= 30) soon.push({ ...p, _days: days, _pq: pq, _monthly: monthly, _daily: daily, _avail: avail });
+  }
+
+  // 정렬: 가용일수 오름차순 (급한 것 먼저)
+  urgent.sort((a, b) => (a._days ?? 9999) - (b._days ?? 9999));
+  soon.sort((a, b) => (a._days ?? 9999) - (b._days ?? 9999));
+  pending.sort((a, b) => (a._days ?? 9999) - (b._days ?? 9999));
+
+  // 요약 카드 카운트 업데이트
+  const urgentCntEl = document.getElementById('otCntUrgent');
+  const soonCntEl = document.getElementById('otCntSoon');
+  const pendingCntEl = document.getElementById('otCntPending');
+  const todayCntEl = document.getElementById('otCntToday');
+  if (urgentCntEl) urgentCntEl.textContent = urgent.length;
+  if (soonCntEl) soonCntEl.textContent = soon.length;
+  if (pendingCntEl) pendingCntEl.textContent = pending.length;
+
+  // 사이드바 뱃지도 긴급 카운트로 갱신
+  const sidebarBadge = document.getElementById('qmOrderTodo');
+  if (sidebarBadge) sidebarBadge.textContent = urgent.length;
+
+  // ===== 섹션 1: 긴급 카드 =====
+  const urgentGrid = document.getElementById('otUrgentGrid');
+  if (urgentGrid) {
+    if (!urgent.length) {
+      urgentGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#16a34a;font-weight:600">✅ 지금 긴급 발주가 필요한 품목이 없습니다!</div>';
+    } else {
+      urgentGrid.innerHTML = urgent.slice(0, 30).map(p => renderOrderTodoCard(p, 'urgent')).join('');
+    }
+  }
+
+  // ===== 섹션 2: 이번주 예정 (리스트) =====
+  const soonList = document.getElementById('otSoonList');
+  if (soonList) {
+    if (!soon.length) {
+      soonList.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">이번주 발주 예정 품목 없음</div>';
+    } else {
+      soonList.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#fef3c7;color:#78350f">
+              <th style="padding:8px 12px;text-align:left;font-weight:700">제품코드</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:700">용지명</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">가용재고</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">월출고</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">가용일수</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">추천(R)</th>
+              <th style="padding:8px 12px;text-align:center;width:100px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${soon.map(p => renderOrderTodoRow(p)).join('')}
+          </tbody>
+        </table>`;
+    }
+  }
+
+  // ===== 섹션 3: 진행 중 (미입고) =====
+  const pendingList = document.getElementById('otPendingList');
+  if (pendingList) {
+    if (!pending.length) {
+      pendingList.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">진행 중인 발주 없음</div>';
+    } else {
+      pendingList.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#dbeafe;color:#1e3a8a">
+              <th style="padding:8px 12px;text-align:left;font-weight:700">제품코드</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:700">용지명</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">가용재고</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">미입고</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:700">가용일수</th>
+              <th style="padding:8px 12px;text-align:center;width:100px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pending.map(p => `
+              <tr style="border-top:1px solid #e5e7eb">
+                <td style="padding:8px 12px;font-family:monospace;font-weight:600">${esc(p['제품코드']||'')}</td>
+                <td style="padding:8px 12px;color:#475569">${esc((productInfo[p['제품코드']]||{})['원재료용지명']||'-')}</td>
+                <td style="padding:8px 12px;text-align:right">${(p._avail||0).toLocaleString()}</td>
+                <td style="padding:8px 12px;text-align:right;color:#2563eb;font-weight:700">${(p._pq||0).toLocaleString()}</td>
+                <td style="padding:8px 12px;text-align:right">${p._days!==null ? p._days+'일' : '-'}</td>
+                <td style="padding:8px 12px;text-align:center"><button onclick="showPage('po-list');setTimeout(()=>{const s=document.getElementById('poSearchInput');if(s){s.value='${esc(p['제품코드']||'')}';s.dispatchEvent(new Event('keyup'));}},200)" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">발주현황 →</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+  }
+
+  // ===== 섹션 4: 오늘 발주 완료 =====
+  const todayList = document.getElementById('otTodayList');
+  if (todayList) {
+    try {
+      const todayStr = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+      const resp = await fetch('/api/po?include=items&limit=200');
+      const j = await resp.json();
+      const pos = (j.data || j || []).filter(po => (po.po_date || '').startsWith(todayStr) || (po.created_at || '').startsWith(todayStr));
+      if (todayCntEl) todayCntEl.textContent = pos.length;
+      if (!pos.length) {
+        todayList.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px">오늘 발주한 건 없음</div>';
+      } else {
+        todayList.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:#dcfce7;color:#14532d">
+                <th style="padding:8px 12px;text-align:left;font-weight:700">발주번호</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:700">거래처</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:700">구분</th>
+                <th style="padding:8px 12px;text-align:right;font-weight:700">품목수</th>
+                <th style="padding:8px 12px;text-align:right;font-weight:700">총 수량</th>
+                <th style="padding:8px 12px;text-align:center;font-weight:700">상태</th>
+                <th style="padding:8px 12px;text-align:center;width:100px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pos.map(po => {
+                const itemCnt = (po.items || []).length;
+                const totalQty = (po.items || []).reduce((s, i) => s + (i.ordered_qty || 0), 0);
+                const stColors = {'대기':'#60a5fa','발송':'#f97316','확인':'#a78bfa','완료':'#22c55e','취소':'#ef4444','OS등록대기':'#fbbf24','OS검증대기':'#fbbf24'};
+                const stC = stColors[po.status] || '#94a3b8';
+                return `
+                  <tr style="border-top:1px solid #e5e7eb">
+                    <td style="padding:8px 12px;font-family:monospace;font-weight:600">${esc(po.po_number||'')}</td>
+                    <td style="padding:8px 12px">${esc(po.vendor_name||'-')}</td>
+                    <td style="padding:8px 12px;color:#64748b">${esc(po.po_type||'-')}</td>
+                    <td style="padding:8px 12px;text-align:right">${itemCnt}</td>
+                    <td style="padding:8px 12px;text-align:right">${totalQty.toLocaleString()}</td>
+                    <td style="padding:8px 12px;text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:${stC}">${esc(po.status||'')}</span></td>
+                    <td style="padding:8px 12px;text-align:center"><button onclick="showPage('po-list')" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">상세</button></td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+      }
+    } catch(e) {
+      console.warn('[loadOrderTodo] 오늘 발주 조회 실패:', e.message);
+      todayList.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px">발주 이력 조회 실패</div>';
+      if (todayCntEl) todayCntEl.textContent = '?';
+    }
+  }
+}
+
+// 긴급 카드 렌더러
+function renderOrderTodoCard(p, level) {
+  const code = p['제품코드'] || '';
+  const info = productInfo[code] || {};
+  const paperName = info['원재료용지명'] || info['용지명'] || '-';
+  const brand = p['브랜드'] || '';
+  const category = p['category'] || (productNotes[code] && productNotes[code].op_category) || '';
+
+  // 추천 발주수량 (2개월치 - 가용 - 미입고)
+  const needPieces = Math.max(0, Math.ceil((p._monthly || 0) * 2 - (p._avail || 0) - (p._pq || 0)));
+  const jeol = (function(v){ if(!v) return 0; const n=parseFloat(v); if(!isNaN(n)&&n>0) return n; const m=String(v).match(/(\d+)/); return m?parseFloat(m[1]):0; })(info['절']);
+  const jopan = (function(v){ if(!v) return 0; const n=parseFloat(v); if(!isNaN(n)&&n>0) return n; const m=String(v).match(/(\d+)/); return m?parseFloat(m[1]):0; })(info['조판']);
+  const needR = (jeol > 0 && jopan > 0 && needPieces > 0) ? (needPieces / 500 / jeol / jopan) : 0;
+  const needRStr = needR > 0 ? (needR % 1 === 0 ? String(needR) : needR.toFixed(1)) + 'R' : '';
+
+  // 가용일수 색상
+  const d = p._days;
+  const dColor = d === null ? '#64748b' : d <= 0 ? '#dc2626' : d <= 7 ? '#dc2626' : d <= 15 ? '#f59e0b' : '#0f172a';
+  const dText = d === null ? '-' : (d + '일');
+  const borderColor = level === 'urgent' ? '#fca5a5' : '#fcd34d';
+  const bgColor = level === 'urgent' ? '#fef2f2' : '#fffbeb';
+
+  return `
+    <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-family:monospace;font-size:14px;font-weight:800;color:#0f172a">${esc(code)}</div>
+        ${category ? `<span style="font-size:10px;padding:2px 7px;border-radius:8px;background:#e0e7ff;color:#3730a3;font-weight:600">${esc(category)}</span>` : ''}
+      </div>
+      <div style="font-size:12px;color:#475569;line-height:1.4;max-height:32px;overflow:hidden">${esc(paperName)}${brand ? ` <span style="color:#94a3b8">· ${esc(brand)}</span>` : ''}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:4px;padding:8px 10px;background:#fff;border-radius:6px">
+        <div style="text-align:center">
+          <div style="font-size:9px;color:#64748b;letter-spacing:0.5px">가용재고</div>
+          <div style="font-size:13px;font-weight:700;color:#0f172a">${(p._avail||0).toLocaleString()}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:#64748b;letter-spacing:0.5px">월출고</div>
+          <div style="font-size:13px;font-weight:700;color:#0f172a">${(p._monthly||0).toLocaleString()}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:#64748b;letter-spacing:0.5px">가용일수</div>
+          <div style="font-size:14px;font-weight:800;color:${dColor}">${dText}</div>
+        </div>
+      </div>
+      ${p._pq > 0 ? `<div style="font-size:11px;color:#2563eb;background:#dbeafe;padding:4px 8px;border-radius:4px">🔵 미입고 ${p._pq.toLocaleString()}매 진행 중</div>` : ''}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px">
+        <div style="font-size:12px;color:#7f1d1d">
+          <span style="color:#64748b">추천:</span> <b style="color:#dc2626">${needPieces.toLocaleString()}매</b>${needRStr ? ` <span style="color:#64748b">(${needRStr})</span>` : ''}
+        </div>
+        <button onclick="quickAddOrder('${esc(code)}')" style="background:#dc2626;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(220,38,38,0.3)">+ 바로 발주</button>
+      </div>
+    </div>`;
+}
+
+// 이번주 예정 리스트 행
+function renderOrderTodoRow(p) {
+  const code = p['제품코드'] || '';
+  const info = productInfo[code] || {};
+  const paperName = info['원재료용지명'] || info['용지명'] || '-';
+
+  const needPieces = Math.max(0, Math.ceil((p._monthly || 0) * 2 - (p._avail || 0) - (p._pq || 0)));
+  const jeol = (function(v){ if(!v) return 0; const n=parseFloat(v); if(!isNaN(n)&&n>0) return n; const m=String(v).match(/(\d+)/); return m?parseFloat(m[1]):0; })(info['절']);
+  const jopan = (function(v){ if(!v) return 0; const n=parseFloat(v); if(!isNaN(n)&&n>0) return n; const m=String(v).match(/(\d+)/); return m?parseFloat(m[1]):0; })(info['조판']);
+  const needR = (jeol > 0 && jopan > 0 && needPieces > 0) ? (needPieces / 500 / jeol / jopan) : 0;
+  const needRStr = needR > 0 ? (needR % 1 === 0 ? String(needR) : needR.toFixed(1)) + 'R' : '-';
+
+  return `
+    <tr style="border-top:1px solid #e5e7eb">
+      <td style="padding:8px 12px;font-family:monospace;font-weight:600">${esc(code)}</td>
+      <td style="padding:8px 12px;color:#475569;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(paperName)}</td>
+      <td style="padding:8px 12px;text-align:right">${(p._avail||0).toLocaleString()}</td>
+      <td style="padding:8px 12px;text-align:right">${(p._monthly||0).toLocaleString()}</td>
+      <td style="padding:8px 12px;text-align:right;color:#d97706;font-weight:600">${p._days!==null ? p._days+'일' : '-'}</td>
+      <td style="padding:8px 12px;text-align:right;color:#d97706">${needRStr}</td>
+      <td style="padding:8px 12px;text-align:center"><button onclick="quickAddOrder('${esc(code)}')" style="background:#f59e0b;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">+ 발주</button></td>
+    </tr>`;
+}
+
 // ===== 재고현황 페이지 진입 =====
 function loadInventoryPage(){
   // 캐시된 데이터가 있으면 재로드 없이 바로 렌더링 (단, 정규화된 데이터만)
@@ -9201,6 +9562,7 @@ function showPage(page, opts){
   if(page==='dashboard') { renderDashFavorites(); filterHomeMegaByCompany(); }
   if(page==='analytics') loadDashboard();
   if(page==='inventory') loadInventoryPage();
+  if(page==='order-todo') loadOrderTodo();
   if(page==='create-po') loadCreatePO();
   if(page==='po-list') loadPOList();
   if(page==='receipts') loadReceipts();
