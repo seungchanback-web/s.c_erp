@@ -4864,6 +4864,72 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  //  POST /api/admin/products/dedupe
+  //  products 테이블 product_code 중복 row 정리 (최신 id 유지, 나머지 삭제)
+  //
+  //  Body: { dry_run?: true }  — dry_run=true 면 미리보기만, 삭제 안 함
+  //
+  //  동작:
+  //    1) product_code 별 중복 그룹 조회
+  //    2) 각 그룹에서 MAX(id) 제외한 나머지 id 들 수집
+  //    3) dry_run=false 면 DELETE. dry_run=true 면 목록만 반환
+  // ════════════════════════════════════════════════════════════════════
+  if (pathname === '/api/admin/products/dedupe' && method === 'POST') {
+    const body = await readJSON(req).catch(() => ({}));
+    const dryRun = !!body?.dry_run;
+
+    try {
+      // 중복 그룹 탐지
+      const dupGroups = await db.prepare(`
+        SELECT product_code, COUNT(*) AS cnt, STRING_AGG(CAST(id AS TEXT), ',' ORDER BY id) AS ids
+        FROM products
+        GROUP BY product_code
+        HAVING COUNT(*) > 1
+      `).all();
+
+      const summary = dupGroups.map(g => {
+        const ids = (g.ids || '').split(',').map(x => parseInt(x, 10)).filter(Boolean);
+        const keepId = ids[ids.length - 1]; // 최대 id = 가장 최근 row
+        const deleteIds = ids.slice(0, -1);
+        return { product_code: g.product_code, cnt: Number(g.cnt), keep_id: keepId, delete_ids: deleteIds };
+      });
+
+      const allDeleteIds = summary.flatMap(s => s.delete_ids);
+
+      if (dryRun || allDeleteIds.length === 0) {
+        ok(res, {
+          dry_run: true,
+          total_dup_groups: summary.length,
+          total_rows_to_delete: allDeleteIds.length,
+          sample: summary.slice(0, 20)
+        });
+        return;
+      }
+
+      // 실제 삭제 (배치)
+      let deleted = 0;
+      for (const id of allDeleteIds) {
+        try {
+          await db.prepare('DELETE FROM products WHERE id=?').run(id);
+          deleted++;
+        } catch (_) {}
+      }
+
+      console.log(`[dedupe] products 중복 정리 완료: ${deleted}/${allDeleteIds.length}`);
+      ok(res, {
+        dry_run: false,
+        total_dup_groups: summary.length,
+        requested_delete: allDeleteIds.length,
+        actually_deleted: deleted
+      });
+    } catch (e) {
+      console.error('[dedupe] 실패:', e.message);
+      fail(res, 500, '중복 정리 실패: ' + e.message);
+    }
+    return;
+  }
+
   // PUT /api/products/:code/field — 개별 필드 업데이트
   const prodFieldMatch = pathname.match(/^\/api\/products\/(.+)\/field$/);
   if (prodFieldMatch && method === 'PUT') {
