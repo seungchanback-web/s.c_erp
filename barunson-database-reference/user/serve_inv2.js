@@ -5224,12 +5224,15 @@ async function handleRequest(req, res) {
   }
 
   // ── GET /api/sync/status : 마지막 동기화 시각 / 진행 상태 ──
+  // 각 쿼리를 독립 try/catch로 감싸서 한 부분 실패가 전체 500으로 번지지 않게 함
   if (pathname === '/api/sync/status' && method === 'GET') {
+    let lastSuccess = null, running = null, lastFailed = null, count = null;
+    const errs = [];
+    try { lastSuccess = await db.prepare("SELECT started_at, finished_at, success_count, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='success' ORDER BY id DESC LIMIT 1").get(); } catch(e){ errs.push('lastSuccess:'+e.message); console.error('[sync status] lastSuccess:', e.message); }
+    try { running = await db.prepare("SELECT started_at, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='running' ORDER BY id DESC LIMIT 1").get(); } catch(e){ errs.push('running:'+e.message); console.error('[sync status] running:', e.message); }
+    try { lastFailed = await db.prepare("SELECT started_at, finished_at, error_msg, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='failed' ORDER BY id DESC LIMIT 1").get(); } catch(e){ errs.push('lastFailed:'+e.message); console.error('[sync status] lastFailed:', e.message); }
+    try { count = await db.prepare("SELECT COUNT(*) AS cnt FROM inventory_snapshot").get(); } catch(e){ errs.push('count:'+e.message); console.error('[sync status] count:', e.message); }
     try {
-      const lastSuccess = await db.prepare("SELECT started_at, finished_at, success_count, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='success' ORDER BY id DESC LIMIT 1").get();
-      const running = await db.prepare("SELECT started_at, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='running' ORDER BY id DESC LIMIT 1").get();
-      const lastFailed = await db.prepare("SELECT started_at, finished_at, error_msg, triggered_by FROM sync_log WHERE sync_type='xerp_inventory' AND status='failed' ORDER BY id DESC LIMIT 1").get();
-      const count = await db.prepare("SELECT COUNT(*) AS cnt FROM inventory_snapshot").get();
       ok(res, {
         is_running: !!running,
         running_since: running?.started_at || null,
@@ -5238,10 +5241,12 @@ async function handleRequest(req, res) {
         last_success_by: lastSuccess?.triggered_by || null,
         last_failed_at: lastFailed?.finished_at || null,
         last_failed_error: lastFailed?.error_msg || null,
-        snapshot_count: count?.cnt || 0
+        snapshot_count: count?.cnt || 0,
+        _errors: errs.length ? errs : undefined
       });
     } catch (e) {
-      fail(res, 500, '상태 조회 실패: ' + e.message);
+      console.error('[sync status] response write 실패:', e.message);
+      fail(res, 500, '상태 조회 실패: ' + e.message + (errs.length ? ' | 쿼리오류: ' + errs.join('; ') : ''));
     }
     return;
   }
