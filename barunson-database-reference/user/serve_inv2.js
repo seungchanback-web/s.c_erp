@@ -145,6 +145,8 @@ let xerpUsageCacheTime = 0;
 let xerpInventoryCache = null;
 let xerpInventoryCacheTime = 0;
 let xerpInventoryCaches = {};     // { barunson: {data, time}, dd: {data, time} }
+// In-memory 동기화 상태 (sync_log 테이블 없을 때 대체)
+let inMemorySyncState = { running: false, done_at: null, count: 0, error: null };
 let giftSetShipmentCache = {};    // { xerp_code: total_qty }
 let giftSetShipmentCacheTime = 0;
 // ── 매출관리 캐시 ──
@@ -5296,30 +5298,46 @@ async function handleRequest(req, res) {
       if (running) { fail(res, 409, '이미 동기화 진행 중 (시작: ' + running.started_at + ')'); return; }
     } catch (_) {}
 
-    // sync_log 시작 기록
+    // sync_log 시작 기록. 테이블 없으면 (권한 이슈) snapshot 기능 비활성 + live 리프레시 모드로 폴백.
     let syncLogId = null;
     let triggeredBy = 'manual';
+    let snapshotDisabled = false;
+    const body = await readJSON(req).catch(() => ({}));
+    triggeredBy = body?.triggered_by || 'manual';
     try {
-      const body = await readJSON(req).catch(() => ({}));
-      triggeredBy = body?.triggered_by || 'manual';
       const info = await db.prepare("INSERT INTO sync_log (sync_type, status, triggered_by) VALUES (?,?,?)").run('xerp_inventory', 'running', triggeredBy);
       syncLogId = info.lastInsertRowid;
       console.log('[sync] 시작 sync_log_id=' + syncLogId + ' (trigger=' + triggeredBy + ')');
     } catch (e) {
-      console.error('[sync] sync_log INSERT 실패 — 테이블 미존재?:', e.message);
-      fail(res, 500, 'sync_log 기록 실패: ' + e.message + ' (DB 권한 확인)');
-      return;
+      if (/does not exist|relation.*not exist/i.test(e.message)) {
+        console.warn('[sync] sync_log 테이블 미존재 → snapshot 비활성, live 리프레시 모드로 진행');
+        snapshotDisabled = true;
+      } else {
+        console.error('[sync] sync_log INSERT 실패:', e.message);
+        fail(res, 500, 'sync_log 기록 실패: ' + e.message);
+        return;
+      }
     }
 
     // 즉시 202 반환
     try {
       res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, data: { sync_log_id: syncLogId, status: 'started', triggered_by: triggeredBy } }));
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          sync_log_id: syncLogId,
+          status: snapshotDisabled ? 'started-live-only' : 'started',
+          triggered_by: triggeredBy,
+          snapshot_disabled: snapshotDisabled,
+          hint: snapshotDisabled ? 'snapshot 테이블 미존재 — live 리프레시만 수행. 관리자에게 CREATE TABLE + GRANT 요청 필요' : undefined
+        }
+      }));
     } catch (_) {}
 
     // 백그라운드 실행 (fetchCompanyInventory 는 이미 chunk+timeout 적용돼 있음)
     (async () => {
       const t0 = Date.now();
+      if (snapshotDisabled) { inMemorySyncState = { running: true, done_at: null, count: 0, error: null }; }
       try {
         await ensureXerpPool().catch(()=>null);
 
@@ -5331,13 +5349,23 @@ async function handleRequest(req, res) {
         if (r.__err) throw r.__err;
         const j = await r.json();
         if (!j.ok) throw new Error('xerp-inventory live 호출 실패: ' + (j.error || ''));
-        const rows = j.data || [];
+        // 응답 포맷: { products: [...], updated, count, source }
+        const rows = (j.data && Array.isArray(j.data.products)) ? j.data.products : (Array.isArray(j.data) ? j.data : []);
 
         // 전부 fallback:products 면 실패 처리 (기존 snapshot 보존)
         const allFallback = rows.length > 0 && rows.every(p => p['_invSource'] === 'fallback:products');
         if (allFallback || rows.length === 0) {
           console.warn('[sync bg] 모든 데이터 fallback/empty — snapshot 갱신 스킵');
-          try { await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run('XERP 전체 실패 — 기존 snapshot 유지', syncLogId); } catch(_) {}
+          if (!snapshotDisabled) {
+            try { await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run('XERP 전체 실패 — 기존 snapshot 유지', syncLogId); } catch(_) {}
+          }
+          return;
+        }
+
+        // Snapshot 비활성 모드(테이블 없음) — UPSERT 스킵, live 캐시 리프레시만 수행한 셈
+        if (snapshotDisabled) {
+          inMemorySyncState = { running: false, done_at: new Date().toISOString(), count: rows.length, error: null };
+          console.log(`[sync bg] snapshot 비활성 모드 — live 리프레시만 수행 (${rows.length}개 받음, 테이블 없어 UPSERT 스킵)`);
           return;
         }
 
@@ -5372,9 +5400,13 @@ async function handleRequest(req, res) {
         console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
       } catch (e) {
         console.error('[sync bg] 실패:', e.message);
-        try {
-          await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run(e.message.slice(0, 500), syncLogId);
-        } catch (_) {}
+        if (snapshotDisabled) {
+          inMemorySyncState = { running: false, done_at: new Date().toISOString(), count: 0, error: e.message };
+        } else {
+          try {
+            await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run(e.message.slice(0, 500), syncLogId);
+          } catch (_) {}
+        }
       }
     })().catch(e => console.error('[sync bg] IIFE reject:', e?.message || e));
     return;
@@ -5394,7 +5426,13 @@ async function handleRequest(req, res) {
       last_success_by: lastSuccess?.triggered_by || null,
       last_failed_at: lastFailed?.finished_at || null,
       last_failed_error: lastFailed?.error_msg || null,
-      snapshot_count: snapCount
+      snapshot_count: snapCount,
+      // in-memory 상태 (snapshot 테이블 없을 때 대체 경로에서 사용)
+      in_memory_running: !!inMemorySyncState.running,
+      in_memory_done: !!inMemorySyncState.done_at,
+      in_memory_done_at: inMemorySyncState.done_at,
+      in_memory_count: inMemorySyncState.count || 0,
+      in_memory_error: inMemorySyncState.error || null
     });
     return;
   }

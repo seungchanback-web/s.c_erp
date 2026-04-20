@@ -20254,6 +20254,29 @@ async function syncAllDB() {
       return;
     }
 
+    // snapshot 비활성 모드 (테이블 없음) — in-memory 상태 폴링으로 전환
+    // 서버가 백그라운드 self-call 로 live 데이터 받아 메모리 캐시 채우는 중
+    if (startJson.data && startJson.data.snapshot_disabled) {
+      console.log('[DB 동기화] snapshot 비활성 — in-memory 상태 폴링 모드');
+      const start0 = Date.now();
+      const MAX0 = 7 * 60 * 1000;
+      while (true) {
+        if (Date.now() - start0 > MAX0) { alert('live 리프레시 타임아웃 (7분).'); return; }
+        await new Promise(r => setTimeout(r, 3000));
+        const el0 = Math.round((Date.now() - start0) / 1000);
+        setBtn(`live 리프레시 중... (${el0}s)`, true);
+        try {
+          const s = await fetch('/api/sync/status').then(r=>r.json());
+          if (s?.data?.in_memory_done) {
+            console.log('[DB 동기화] in-memory 완료 감지');
+            await loadXerpInventory(true);
+            alert('live 리프레시 완료.\n\n⚠️ snapshot 테이블이 없어 저장은 안 됐습니다. 관리자에게 테이블 생성 요청 필요.');
+            return;
+          }
+        } catch (_) {}
+      }
+    }
+
     // 3. 상태 폴링 (2초 간격, 최대 7분)
     const startedAt = Date.now();
     const MAX_MS = 7 * 60 * 1000;
