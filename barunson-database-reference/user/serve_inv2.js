@@ -5206,6 +5206,23 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── GET /api/sync/status/:id : 특정 sync_log 한 건의 상태 조회 ──
+  // 프론트가 본인이 시작한 sync의 종료를 타임스탬프 비교 없이 확실히 감지하기 위한 엔드포인트
+  {
+    const matchId = pathname.match(/^\/api\/sync\/status\/(\d+)$/);
+    if (matchId && method === 'GET') {
+      try {
+        const id = parseInt(matchId[1], 10);
+        const row = await db.prepare("SELECT id, sync_type, status, started_at, finished_at, success_count, error_msg, triggered_by FROM sync_log WHERE id=?").get(id);
+        if (!row) { fail(res, 404, 'sync_log 없음'); return; }
+        ok(res, row);
+      } catch (e) {
+        fail(res, 500, '조회 실패: ' + e.message);
+      }
+      return;
+    }
+  }
+
   // ── GET /api/sync/status : 마지막 동기화 시각 / 진행 상태 ──
   if (pathname === '/api/sync/status' && method === 'GET') {
     try {

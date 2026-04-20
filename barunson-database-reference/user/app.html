@@ -20347,23 +20347,31 @@ async function syncAllDB() {
       return;
     }
     const startJson = await startResp.json();
+    let mySyncLogId = null;
     if (!startJson.ok) {
       if (startResp.status === 409) {
-        // 이미 진행중 → 그냥 상태 폴링으로 넘어감
-        console.log('[DB 동기화] 이미 진행 중 — 상태 폴링');
+        // 이미 진행중 — 진행 중인 ID를 알 수 없으므로, 전체 status API로 last running id 찾아 그걸 추적
+        console.log('[DB 동기화] 이미 진행 중 — 현재 러닝 ID 조회');
+        try {
+          const ssr = await fetch('/api/sync/status');
+          const ssj = await ssr.json();
+          // status API는 running_since만 주므로 sync_log_id가 없음 — fallback: 최신 running 하나를 sync_log_id로 사용하기 어려움
+          // 간단 대응: 일단 status의 is_running 기반으로 폴링 (fallback 모드)
+        } catch(_) {}
       } else {
         alert('XERP 동기화 시작 실패: ' + (startJson.error || '알 수 없음'));
         return;
       }
     } else {
-      console.log('[DB 동기화] XERP snapshot 시작 (sync_log_id=' + (startJson.data?.sync_log_id) + ')');
+      mySyncLogId = startJson.data?.sync_log_id;
+      console.log('[DB 동기화] XERP snapshot 시작 (sync_log_id=' + mySyncLogId + ')');
     }
 
-    // 3. /api/sync/status 폴링 — 2초 간격, 최대 7분 (서버가 7분 넘으면 stale로 자동 정리)
+    // 3. 폴링 — sync_log_id가 있으면 그 행 상태를 직접 확인 (가장 확실)
+    //        없으면 전체 status API의 is_running fallback
     const startedAt = Date.now();
     const MAX_MS = 7 * 60 * 1000;  // 7분
     const POLL_MS = 2000;
-    let lastSnapshot = null;
     while (true) {
       if (Date.now() - startedAt > MAX_MS) {
         const go = confirm('XERP 동기화 폴링 타임아웃 (7분)\n\n서버에 고스트 running 상태가 남아있을 수 있습니다.\n강제 리셋하시겠습니까?\n\n[확인] 리셋 시도 / [취소] 그냥 닫기');
@@ -20379,47 +20387,53 @@ async function syncAllDB() {
         return;
       }
       await new Promise(r => setTimeout(r, POLL_MS));
-      let stResp, stJson;
-      try {
-        stResp = await fetch('/api/sync/status');
-        stJson = await stResp.json();
-      } catch (e) {
-        console.warn('[DB 동기화] status 폴링 실패, 재시도:', e.message);
-        continue;
-      }
-      if (!stJson.ok) continue;
-      const d = stJson.data;
-      lastSnapshot = d;
 
-      // 진행 중 버튼 문구 갱신 (snapshot_count는 이번 sync 이전의 건수라 참고용)
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
       setBtn(`동기화 중... (${elapsed}s)`, true);
 
-      if (d.is_running) continue;  // 아직 실행 중
+      // 내 sync_log_id 직접 조회
+      if (mySyncLogId) {
+        try {
+          const r = await fetch('/api/sync/status/' + mySyncLogId);
+          const j = await r.json();
+          if (!j.ok) continue;
+          const row = j.data;
+          if (row.status === 'running') continue;  // 아직 진행 중
+          if (row.status === 'success') {
+            console.log(`[DB 동기화] XERP snapshot 완료: ${row.success_count}개 (sync_log_id=${mySyncLogId})`);
+            await loadXerpInventory(true);
+            await updateSyncStatus();
+            return;
+          }
+          if (row.status === 'failed') {
+            alert('XERP 동기화 실패: ' + (row.error_msg || '알 수 없음') + '\n기존 재고 데이터는 유지됩니다.');
+            await updateSyncStatus();
+            return;
+          }
+          // 알 수 없는 상태
+          console.warn('[DB 동기화] 알 수 없는 상태:', row.status);
+          continue;
+        } catch (e) {
+          console.warn('[DB 동기화] status/:id 폴링 오류:', e.message);
+          continue;
+        }
+      }
 
-      // 실행 종료 — 성공/실패 판정 (finished_at 기준이 startedAt 이후인지)
-      const parseTs = (s) => s ? new Date(String(s).replace(' ', 'T')).getTime() : 0;
-      const okTs = parseTs(d.last_success_at);
-      const failTs = parseTs(d.last_failed_at);
-
-      if (okTs >= startedAt - 5000 && okTs >= failTs) {
-        console.log(`[DB 동기화] XERP snapshot 완료: ${d.last_success_count}개`);
+      // Fallback (sync_log_id 없을 때) — is_running 기반
+      try {
+        const stResp = await fetch('/api/sync/status');
+        const stJson = await stResp.json();
+        if (!stJson.ok) continue;
+        const d = stJson.data;
+        if (d.is_running) continue;
+        // running이 끝남 — UI만 갱신하고 종료
+        console.log('[DB 동기화] running 종료 감지 (fallback)');
         await loadXerpInventory(true);
         await updateSyncStatus();
         return;
-      }
-      if (failTs >= startedAt - 5000) {
-        alert('XERP 동기화 실패: ' + (d.last_failed_error || '알 수 없음') + '\n기존 재고 데이터는 유지됩니다.');
-        await updateSyncStatus();
-        return;
-      }
-      // 완료 시각이 이번 요청 이전이면(가끔 DB clock skew 등) 한 번 더 루프 (짧게 대기)
-      if (elapsed > 30 && okTs < startedAt - 5000 && failTs < startedAt - 5000) {
-        // running도 아니고 이번 sync의 로그도 아직 안 보이면, sync_log가 예기치 않게 날아갔을 가능성 — UI 갱신 후 종료
-        console.warn('[DB 동기화] 상태 불명확 — UI만 갱신');
-        await loadXerpInventory(true);
-        await updateSyncStatus();
-        return;
+      } catch (e) {
+        console.warn('[DB 동기화] fallback status 오류:', e.message);
+        continue;
       }
     }
   } catch (e) {
