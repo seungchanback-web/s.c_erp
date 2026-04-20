@@ -14351,7 +14351,9 @@ let _pwCurrentStep = 1;
 let _pwItems = [];          // 선택된 품목 원본 (getOrderItems 결과 복사)
 let _pwMaterialVendors = {}; // { product_code: 'vendor_name' }
 let _pwPostChains = {};      // { product_code: [{step, process, vendor}, ...] }
-const PROCESS_TYPES_POOL = ['재단','인쇄','톰슨','박','형압','코팅','접지','합지','단면접착','오시','재단/접지'];
+// 후가공 공정 타입 — 서버 _defaultPostTypes 와 동일하게 유지 (serve_inv2.js 참조)
+// 놓쳤던 공정: 봉투가공, 우찌누끼, 세아리, 레이져, 실크, 임가공
+const PROCESS_TYPES_POOL = ['재단','인쇄','박/형압','톰슨','봉투가공','우찌누끼','세아리','레이져','실크','임가공','접지','단면접착','코팅','오시','합지','재단/접지'];
 
 function enterPOWizard(items) {
   _pwItems = items.slice();
