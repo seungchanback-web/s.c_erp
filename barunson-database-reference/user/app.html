@@ -2257,34 +2257,7 @@ function closeMegaMenu() { /* no-op */ }
       <button class="btn btn-sm" onclick="loadXerpInventory(true)" style="font-size:11px" id="erpRefreshBtn">새로고침</button>
     </div>
 
-    <!-- KPI 카드 (5개) -->
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">
-      <div class="kpi-card urgent" onclick="switchInvMainTab('stock');switchTab('urgent')" style="cursor:pointer">
-        <div class="kpi-label">긴급발주</div>
-        <div class="kpi-value" id="cUrgent">-</div>
-        <div class="kpi-sub">14일 이내 소진</div>
-      </div>
-      <div class="kpi-card danger" onclick="switchInvMainTab('stock');switchTab('danger')" style="cursor:pointer">
-        <div class="kpi-label">위험재고</div>
-        <div class="kpi-value" id="cDanger">-</div>
-        <div class="kpi-sub">21일 이내 소진</div>
-      </div>
-      <div class="kpi-card safe" onclick="switchInvMainTab('stock');switchTab('safe')" style="cursor:pointer">
-        <div class="kpi-label">안전재고</div>
-        <div class="kpi-value" id="cSafe">-</div>
-        <div class="kpi-sub">21일 이상 여유</div>
-      </div>
-      <div class="kpi-card" style="cursor:pointer;--card-accent:#6366f1" onclick="switchInvMainTab('order')">
-        <div class="kpi-label" style="color:#6366f1">미입고 추적</div>
-        <div class="kpi-value" id="cPending" style="color:#6366f1">-</div>
-        <div class="kpi-sub">발주 진행 중</div>
-      </div>
-      <div class="kpi-card nosale" onclick="switchInvMainTab('stock');switchTab('nosale')" style="cursor:pointer">
-        <div class="kpi-label">출고없음</div>
-        <div class="kpi-value" id="cNosale">-</div>
-        <div class="kpi-sub">3개월 출고 0</div>
-      </div>
-    </div>
+    <!-- KPI 카드 제거됨 (2026-04): 상태는 재고현황 테이블의 '상태' 컬럼에서 확인. 상단 탭으로 필터. -->
 
     <!-- 중국 쇼트 위험 영역 -->
     <div id="chinaShortageArea" style="display:none;background:#fff5f5;border:1px solid #ffcdd2;border-radius:8px;padding:10px 14px;margin-bottom:8px"></div>
@@ -2298,9 +2271,10 @@ function closeMegaMenu() { /* no-op */ }
 
     <!-- 필터 툴바 (재고현황/발주제안 공통) -->
     <div id="invFilterBar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-      <!-- 상태 필터 (재고현황 탭에서만) -->
+      <!-- 상태 필터 (재고현황 탭에서만) — '전체' 기본 + 상태별 필터 -->
       <div id="invStatusFilters" class="tab-bar" style="margin:0;flex-shrink:0">
-        <div class="tab urgent active" data-tab="urgent" onclick="switchTab('urgent')">긴급 <span class="badge" id="tUrgent">0</span></div>
+        <div class="tab active" data-tab="all" onclick="switchTab('all')" style="font-weight:700">전체 <span class="badge" id="tAll" style="background:#334155;color:#fff">0</span></div>
+        <div class="tab urgent" data-tab="urgent" onclick="switchTab('urgent')">긴급 <span class="badge" id="tUrgent">0</span></div>
         <div class="tab" data-tab="nohistory" onclick="switchTab('nohistory')" style="color:#b45309">이력없음 <span class="badge" id="tNoHistory" style="background:#fef3c7;color:#b45309">0</span></div>
         <div class="tab danger" data-tab="danger" onclick="switchTab('danger')">위험 <span class="badge" id="tDanger">0</span></div>
         <div class="tab safe" data-tab="safe" onclick="switchTab('safe')">안전 <span class="badge" id="tSafe">0</span></div>
@@ -7268,7 +7242,7 @@ var pageTitles={
 
 // ===== GLOBAL STATE =====
 let RAW=[], classified={urgent:[],nohistory:[],danger:[],safe:[],nosale:[],printwarehouse:[],etc:[]};
-let currentTab='urgent', sortK='', sortD='asc', orderQty={}, orderChecked={}, loadTime='';
+let currentTab='all', sortK='', sortD='asc', orderQty={}, orderChecked={}, loadTime='';
 let manualOrderCodes=new Set(); // 재고현황 탭에서 '+ 발주'로 수동 추가한 품목코드
 let productInfo={}, productNotes={}, orderedToday={}, postVendorMap={}; // postVendorMap: {code_process: vendorName}
 let vendors=JSON.parse(localStorage.getItem('vendors')||'[]');
@@ -7717,10 +7691,13 @@ function updateStatusCounts(){
     else if((p._status === 'urgent' || p._status === 'danger' || p._status === 'safe') && allPOItems && !allPOItems.has(code)) counts.nohistory++;
     else counts[p._status]++;
   });
-  document.getElementById('cUrgent').textContent=counts.urgent;
-  document.getElementById('cDanger').textContent=counts.danger;
-  document.getElementById('cSafe').textContent=counts.safe;
-  document.getElementById('cNosale').textContent=counts.nosale;
+  // cUrgent/cDanger/cSafe/cNosale KPI 카드는 제거됨 (2026-04). 누락 참조 방어.
+  const _cU=document.getElementById('cUrgent'); if(_cU) _cU.textContent=counts.urgent;
+  const _cD=document.getElementById('cDanger'); if(_cD) _cD.textContent=counts.danger;
+  const _cS=document.getElementById('cSafe'); if(_cS) _cS.textContent=counts.safe;
+  const _cN=document.getElementById('cNosale'); if(_cN) _cN.textContent=counts.nosale;
+  const total = counts.urgent + counts.nohistory + counts.danger + counts.safe + counts.nosale + counts.printwarehouse + counts.etc;
+  const tA=document.getElementById('tAll'); if(tA) tA.textContent=total;
   const tU=document.getElementById('tUrgent'); if(tU) tU.textContent=counts.urgent;
   const tNH=document.getElementById('tNoHistory'); if(tNH) tNH.textContent=counts.nohistory;
   const tD=document.getElementById('tDanger'); if(tD) tD.textContent=counts.danger;
@@ -7789,7 +7766,8 @@ function switchInvMainTab(tab){
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('#invStatusFilters .tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
-  if(tab==='urgent'){sortK='가용재고';sortD='asc';}
+  if(tab==='all'){sortK='_dailyUsage';sortD='desc';}
+  else if(tab==='urgent'){sortK='가용재고';sortD='asc';}
   else if(tab==='danger'){sortK='_remainDays';sortD='asc';}
   else if(tab==='safe'){sortK='_remainDays';sortD='asc';}
   else if(tab==='printwarehouse'||tab==='etc'){sortK='제품코드';sortD='asc';}
@@ -7802,11 +7780,26 @@ function switchTab(tab){
 function renderCell(c, p){
   const code=p['제품코드']||'';
   const oq=orderQty[code]||'';
-  const statusMap={urgent:['긴급','sb-urgent'],danger:['위험','sb-danger'],safe:['안전','sb-safe'],nosale:['-','sb-nosale']};
 
   if(c.special==='statusBadge'){
-    const [sLabel,sCls]=statusMap[p._status]||['',''];
-    return`<td style="text-align:center"><span class="status-badge ${sCls}">${sLabel}</span></td>`;
+    // 7개 상태: 긴급/이력없음/위험/안전/출고없음/인쇄자재/기타
+    const note = productNotes[code]?.note_type || '';
+    let key;
+    if (note === '디지털인쇄용') key = 'printwarehouse';
+    else if (note === '기타') key = 'etc';
+    else if ((p._status === 'urgent' || p._status === 'danger' || p._status === 'safe') && allPOItems && !allPOItems.has(code)) key = 'nohistory';
+    else key = p._status; // urgent / danger / safe / nosale
+    const sMap = {
+      urgent:         { label:'긴급',     fg:'#fff',    bg:'#dc2626' },
+      nohistory:      { label:'이력없음', fg:'#b45309', bg:'#fef3c7' },
+      danger:         { label:'위험',     fg:'#fff',    bg:'#f59e0b' },
+      safe:           { label:'안전',     fg:'#fff',    bg:'#22c55e' },
+      nosale:         { label:'출고없음', fg:'#64748b', bg:'#f1f5f9' },
+      printwarehouse: { label:'인쇄자재', fg:'#fff',    bg:'#6366f1' },
+      etc:            { label:'기타',     fg:'#fff',    bg:'#78716c' }
+    };
+    const s = sMap[key] || { label:'-', fg:'#94a3b8', bg:'#f8fafc' };
+    return `<td style="text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;color:${s.fg};background:${s.bg};white-space:nowrap">${s.label}</span></td>`;
   }
   if(c.special==='opCategory'){
     const cat=productNotes[code]?.op_category||'';
@@ -8045,7 +8038,20 @@ function render(){
   const opCat=document.getElementById('opCategoryFilter')?.value||'';
   const shipFilter=document.getElementById('shipmentFilter')?.value||'';
   const legalEntity=document.getElementById('legalEntityFilter')?.value||'';
-  let data=classified[currentTab]||[];
+  // '전체' 탭이면 모든 classified 합치기, 아니면 해당 탭만
+  let data;
+  if (currentTab === 'all') {
+    data = []
+      .concat(classified.urgent || [])
+      .concat(classified.nohistory || [])
+      .concat(classified.danger || [])
+      .concat(classified.safe || [])
+      .concat(classified.nosale || [])
+      .concat(classified.printwarehouse || [])
+      .concat(classified.etc || []);
+  } else {
+    data = classified[currentTab] || [];
+  }
 
   let f=data.filter(p=>{
     if(currentOrigin!=='all'&&p._origin!==currentOrigin)return false;
