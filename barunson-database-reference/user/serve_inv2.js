@@ -4807,7 +4807,10 @@ async function handleRequest(req, res) {
 
     // ★ 1단계: Snapshot 우선 조회 (2026-04 재도입)
     // 매번 XERP 호출하지 않음. POST /api/sync/xerp-inventory 로 갱신된 데이터만 반환.
-    // refresh=1 이 아닐 때만 snapshot 사용. snapshot 비었으면 live 경로로 폴백.
+    // refresh=1 이 아닐 때만 snapshot 사용.
+    // snapshot 테이블 자체가 없으면(권한 문제) live 로 폴백. 테이블은 있는데 비어있으면
+    // 빈 배열 + _needsSync=true 반환 (live 폴백 금지 — nginx 60s 한도 초과 방지)
+    let snapTableExists = true;
     if (!forceRefresh) {
       try {
         const snapCount = await db.prepare("SELECT COUNT(*) AS cnt FROM inventory_snapshot").get();
@@ -4861,16 +4864,29 @@ async function handleRequest(req, res) {
             });
           }
           console.log(`[xerp-inventory] snapshot 조회: ${out.length}개 반환 (snap 보유 ${snapRows.length}, 최종 sync: ${latestSync || '-'})`);
-          ok(res, out);
+          ok(res, { products: out, updated: latestSync || new Date().toISOString(), count: out.length, source: 'snapshot' });
           return;
         }
+        // 테이블은 있는데 비어있음 → live 폴백 금지 (nginx 60s 넘음).
+        // 빈 products + message 반환. 프론트는 "동기화 필요" 배너로 안내.
+        console.log('[xerp-inventory] snapshot 테이블 비어있음 — DB 동기화 버튼 유도');
+        ok(res, { products: [], updated: new Date().toISOString(), count: 0, source: 'empty-snapshot', message: '아직 동기화된 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요.' });
+        return;
       } catch (e) {
-        // 테이블 없음/권한 문제 → live 경로로 자동 폴백
-        console.warn('[xerp-inventory] snapshot 조회 실패 → live 쿼리로 폴백:', e.message);
+        // 테이블 자체가 없는 경우만 live 폴백 (권한 이슈)
+        if (/does not exist|relation.*not exist/i.test(e.message)) {
+          snapTableExists = false;
+          console.warn('[xerp-inventory] snapshot 테이블 미존재 → live 폴백:', e.message);
+        } else {
+          // 그 외 에러는 그대로 실패 반환
+          fail(res, 500, 'snapshot 조회 오류: ' + e.message);
+          return;
+        }
       }
     }
 
-    // ★ 2단계: Live XERP 쿼리 (snapshot 없거나 refresh=1)
+    // ★ 2단계: Live XERP 쿼리 — snapshot 테이블 없을 때 또는 refresh=1 (관리자 셀프콜)
+    // nginx 60s 초과 가능성 있으므로 가급적 피함. 정상 경로는 snapshot.
     await ensureXerpPool().catch(()=>null);
 
     // 10분 캐시 — 법인별 분리 (live 응답용)
