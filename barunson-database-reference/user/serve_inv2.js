@@ -5074,17 +5074,44 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── POST /api/sync/xerp-inventory/reset : 고스트 running 강제 해제 ──
+  // 서버 크래시/컨테이너 재시작으로 sync_log가 'running'에 묶였을 때 수동 복구용.
+  if (pathname === '/api/sync/xerp-inventory/reset' && method === 'POST') {
+    try {
+      const info = await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE sync_type='xerp_inventory' AND status='running'").run('수동 리셋 — 고스트 running 해제');
+      console.log('[sync reset] running 고스트 해제:', info?.changes || 0, '건');
+      ok(res, { reset_count: info?.changes || 0 });
+    } catch (e) {
+      fail(res, 500, '리셋 실패: ' + e.message);
+    }
+    return;
+  }
+
   // ── POST /api/sync/xerp-inventory : XERP 전체 동기화 (snapshot 갱신) ──
   // 2026-04 변경: nginx proxy_read_timeout(기본 60s) 초과로 HTML 504 응답되던 문제 해결.
   //              202 Accepted로 즉시 반환하고 백그라운드에서 실행, 프론트는 /api/sync/status 폴링.
+  //              추가: 7분 이상 'running' 상태면 고스트로 판단하여 자동 정리 후 새로 시작.
   if (pathname === '/api/sync/xerp-inventory' && method === 'POST') {
-    // 중복 실행 방지 — 진행 중이면 409
+    // 1) 오래된 running 자동 정리 (7분 이상)
     try {
-      const running = await db.prepare("SELECT id FROM sync_log WHERE sync_type='xerp_inventory' AND status='running'").get();
-      if (running) { fail(res, 409, '이미 동기화가 진행 중입니다'); return; }
+      const stale = await db.prepare("SELECT id, started_at FROM sync_log WHERE sync_type='xerp_inventory' AND status='running' AND started_at < datetime('now','localtime','-7 minutes')").all();
+      if (stale && stale.length) {
+        await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE sync_type='xerp_inventory' AND status='running' AND started_at < datetime('now','localtime','-7 minutes')").run('자동 정리 — 7분 초과 고스트 running');
+        console.warn('[sync] 고스트 running', stale.length, '건 자동 정리');
+      }
+    } catch(e) { console.warn('[sync] stale cleanup 실패:', e.message); }
+
+    // 2) 중복 실행 방지 — 아직 진행 중이면 409
+    try {
+      const running = await db.prepare("SELECT id, started_at FROM sync_log WHERE sync_type='xerp_inventory' AND status='running'").get();
+      if (running) {
+        console.log('[sync] 이미 진행 중 (sync_log_id=' + running.id + ', started_at=' + running.started_at + ')');
+        fail(res, 409, '이미 동기화가 진행 중입니다 (시작: ' + running.started_at + ')');
+        return;
+      }
     } catch(_) {}
 
-    // sync_log에 시작 기록
+    // 3) sync_log 시작 기록
     let syncLogId = null;
     let triggeredBy = 'manual';
     try {
@@ -5092,23 +5119,30 @@ async function handleRequest(req, res) {
       triggeredBy = body?.triggered_by || 'manual';
       const info = await db.prepare("INSERT INTO sync_log (sync_type, status, triggered_by) VALUES (?,?,?)").run('xerp_inventory', 'running', triggeredBy);
       syncLogId = info.lastInsertRowid;
+      console.log('[sync] 시작 — sync_log_id=' + syncLogId + ', trigger=' + triggeredBy);
     } catch(e) { console.warn('[sync] 시작 기록 실패:', e.message); }
 
-    // 즉시 202 응답 (클라이언트는 /api/sync/status 폴링)
+    // 4) 즉시 202 응답 (클라이언트는 /api/sync/status 폴링)
     try {
       res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, data: { sync_log_id: syncLogId, status: 'started', triggered_by: triggeredBy } }));
     } catch(_) {}
 
-    // 백그라운드 실행 (fire-and-forget)
+    // 5) 백그라운드 실행 (fire-and-forget) — 단계별 로깅으로 멈춘 지점 식별 가능
     (async () => {
+      const t0 = Date.now();
+      const mark = (stage) => console.log(`[sync bg][${((Date.now()-t0)/1000).toFixed(1)}s] ${stage}`);
       try {
-        await ensureXerpPool().catch(() => null);
+        mark('ensureXerpPool 시작');
+        await ensureXerpPool().catch((e) => { console.error('[sync bg] xerp pool 실패:', e.message); });
+        mark('ensureXerpPool 완료');
 
         // 바른손 + DD 각각 순차 (동시 쿼리 부하 회피)
         let bs = [], dd = [];
-        try { bs = await fetchCompanyInventoryFromXerp('barunson'); } catch(e) { console.error('[sync bg] barunson 실패:', e.message); }
-        try { dd = await fetchCompanyInventoryFromXerp('dd'); } catch(e) { console.error('[sync bg] dd 실패:', e.message); }
+        mark('barunson fetch 시작');
+        try { bs = await fetchCompanyInventoryFromXerp('barunson'); mark('barunson fetch 완료 ' + bs.length + '건'); } catch(e) { console.error('[sync bg] barunson 실패:', e.message); mark('barunson fetch 예외'); }
+        mark('dd fetch 시작');
+        try { dd = await fetchCompanyInventoryFromXerp('dd'); mark('dd fetch 완료 ' + dd.length + '건'); } catch(e) { console.error('[sync bg] dd 실패:', e.message); mark('dd fetch 예외'); }
         const all = [...bs, ...dd];
 
         // fallback:products로 모두 찍혔거나 all이 비었으면 기존 snapshot 보존하고 실패 표기
@@ -5121,7 +5155,8 @@ async function handleRequest(req, res) {
           return;
         }
 
-        // snapshot에 UPSERT — 배치로
+        // snapshot에 UPSERT
+        mark('snapshot upsert 시작 (' + all.length + '건)');
         let successCount = 0;
         if (all.length) {
           const upsert = db.prepare(`INSERT INTO inventory_snapshot
@@ -5136,37 +5171,37 @@ async function handleRequest(req, res) {
               total_3m=excluded.total_3m,
               item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
               synced_at=excluded.synced_at`);
-          const tx = db.transaction(async () => {
-            for (const p of all) {
-              try {
-                await upsert.run(
-                  p['제품코드'], p['legal_entity'], p['_siteCode'],
-                  p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
-                  p['품목명'] || ''
-                );
-                successCount++;
-              } catch(_) {}
-            }
-          });
-          await tx();
+          // 개별 UPSERT (pg-adapter의 db.transaction(async) 이 동기 함수만 지원할 수 있으므로 트랜잭션 없이 순차)
+          for (const p of all) {
+            try {
+              await upsert.run(
+                p['제품코드'], p['legal_entity'], p['_siteCode'],
+                p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
+                p['품목명'] || ''
+              );
+              successCount++;
+            } catch(_) {}
+          }
         }
+        mark('snapshot upsert 완료 ' + successCount + '/' + all.length);
 
         // sync_log 완료 기록
         if (syncLogId) {
           try {
             await db.prepare("UPDATE sync_log SET status='success', success_count=?, finished_at=datetime('now','localtime') WHERE id=?").run(successCount, syncLogId);
-          } catch(_) {}
+            mark('sync_log=success 기록');
+          } catch(e) { console.error('[sync bg] sync_log 성공 기록 실패:', e.message); }
         }
-        console.log(`[sync bg] XERP 재고 동기화 완료: ${successCount}/${all.length}개 snapshot 저장 (bs ${bs.length}, dd ${dd.length})`);
+        console.log(`[sync bg] XERP 재고 동기화 완료: ${successCount}/${all.length}개 snapshot 저장 (bs ${bs.length}, dd ${dd.length}) 총 ${((Date.now()-t0)/1000).toFixed(1)}s`);
       } catch (e) {
-        console.error('[sync bg] 동기화 실패:', e.message);
+        console.error('[sync bg] 동기화 실패(outer catch):', e.message, e.stack);
         if (syncLogId) {
           try {
             await db.prepare("UPDATE sync_log SET status='failed', error_msg=?, finished_at=datetime('now','localtime') WHERE id=?").run(e.message.slice(0, 500), syncLogId);
-          } catch(_) {}
+          } catch(ue) { console.error('[sync bg] sync_log 실패 기록도 실패:', ue.message); }
         }
       }
-    })();
+    })().catch(e => console.error('[sync bg] IIFE reject:', e?.message || e));
     return;
   }
 

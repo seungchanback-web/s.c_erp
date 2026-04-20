@@ -20359,14 +20359,23 @@ async function syncAllDB() {
       console.log('[DB 동기화] XERP snapshot 시작 (sync_log_id=' + (startJson.data?.sync_log_id) + ')');
     }
 
-    // 3. /api/sync/status 폴링 — 2초 간격, 최대 10분
+    // 3. /api/sync/status 폴링 — 2초 간격, 최대 7분 (서버가 7분 넘으면 stale로 자동 정리)
     const startedAt = Date.now();
-    const MAX_MS = 10 * 60 * 1000;  // 10분
+    const MAX_MS = 7 * 60 * 1000;  // 7분
     const POLL_MS = 2000;
     let lastSnapshot = null;
     while (true) {
       if (Date.now() - startedAt > MAX_MS) {
-        alert('XERP 동기화 폴링 타임아웃 (10분) — 서버 로그를 확인하세요.');
+        const go = confirm('XERP 동기화 폴링 타임아웃 (7분)\n\n서버에 고스트 running 상태가 남아있을 수 있습니다.\n강제 리셋하시겠습니까?\n\n[확인] 리셋 시도 / [취소] 그냥 닫기');
+        if (go) {
+          try {
+            const rr = await authFetch('/api/sync/xerp-inventory/reset', { method: 'POST' });
+            const rj = await rr.json();
+            alert('리셋 완료: ' + (rj.data?.reset_count || 0) + '건\n동기화 버튼을 다시 눌러주세요.');
+          } catch (e) {
+            alert('리셋 실패: ' + e.message);
+          }
+        }
         return;
       }
       await new Promise(r => setTimeout(r, POLL_MS));
