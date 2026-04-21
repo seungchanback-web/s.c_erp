@@ -7385,7 +7385,7 @@ async function loadProcessTypes() {
 }
 function getPostCols() {
   if (window._postProcessTypes.length > 0) return window._postProcessTypes.map(p => p.name);
-  return ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+  return ['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
 }
 loadProcessTypes().then(() => { if(typeof buildHistoryTableHeader==='function') buildHistoryTableHeader(); });
 
@@ -7425,7 +7425,7 @@ Promise.all([
     if(p.origin) originMap[p.product_code]=p.origin;
     const existing = productInfo[p.product_code] || {};
     // 레거시 후공정 키 제거 (product_post_vendor가 유일한 소스)
-    const postTypes=typeof getPostCols==='function'?getPostCols():['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+    const postTypes=typeof getPostCols==='function'?getPostCols():['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
     postTypes.forEach(pt=>{delete existing[pt];});
     productInfo[p.product_code] = {
       ...existing,
@@ -16505,14 +16505,35 @@ function renderPOSubCard(po, idx, steps, icon) {
             </tr>`;
           }
         }).join('')}</tbody></table>`;
+      // 공정 datalist 는 원재료/후공정 모두에서 사용 (인라인 입력에서 자동완성)
+      {
+        const _pc = typeof getPostCols==='function'?getPostCols():[];
+        itemsHtml += `<datalist id="poProcessDL_${po.po_id}">${_pc.map(p=>'<option value="'+esc(p)+'">').join('')}</datalist>`;
+      }
       if (isMat) {
         itemsHtml += `<datalist id="poMatVendorDL_${po.po_id}"></datalist>`;
         itemsHtml += `<datalist id="poPostVendorDL_${po.po_id}"></datalist>`;
+        // ★ 원재료 PO 에서 후공정 항목 사후 추가 — 자식 후공정 PO 자동 생성/추가
+        const canEditMat = (currentAuthUser && currentAuthUser.role==='admin') || (po.status!=='완료'&&po.status!=='취소');
+        if (canEditMat) {
+          const uniqueCodesMat = [...new Set(items.map(it=>it.product_code).filter(Boolean))];
+          const cbMatHtml = uniqueCodesMat.map(code =>
+            `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;background:#fff">
+              <input type="checkbox" class="inlineAddCbMat_${po.po_id}" value="${esc(code)}" style="margin:0;cursor:pointer"> ${esc(code)}
+            </label>`
+          ).join('');
+          itemsHtml += `<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding:6px 8px;flex-wrap:wrap;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:6px" onclick="event.stopPropagation()">
+            <span style="font-size:11px;color:#6b21a8;font-weight:700;white-space:nowrap">+ 후공정 추가:</span>
+            ${cbMatHtml}
+            <input id="inlineAddProcMat_${po.po_id}" placeholder="공정" list="poProcessDL_${po.po_id}" style="width:90px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px">
+            <input id="inlineAddVendorMat_${po.po_id}" placeholder="후공정업체" list="poPostVendorDL_${po.po_id}" style="width:120px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px">
+            <button onclick="inlineAddPostFromMat(${po.po_id})" style="padding:3px 10px;background:#7c3aed;color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap">추가</button>
+            <span style="font-size:10px;color:#7c3aed">자식 후공정 PO 자동 생성/추가</span>
+          </div>`;
+        }
       }
-      // 후공정 PO: datalist + 후공정 추가 인라인 폼
+      // 후공정 PO: vendor datalist + 후공정 추가 인라인 폼
       if (!isMat) {
-        const _pc = typeof getPostCols==='function'?getPostCols():[];
-        itemsHtml += `<datalist id="poProcessDL_${po.po_id}">${_pc.map(p=>'<option value="'+esc(p)+'">').join('')}</datalist>`;
         itemsHtml += `<datalist id="poVendorDL_${po.po_id}"></datalist>`;
         // 후공정 추가 행 — 체크박스로 기존 품목 선택
         const canEdit = (currentAuthUser && currentAuthUser.role==='admin') || (po.status!=='완료'&&po.status!=='취소');
@@ -16731,7 +16752,7 @@ function _poItemRenderList(items, isMat) {
 
   const edits = window._poItemEdits;
   // 공정 선택지 (동적 로드된 후공정 타입)
-  const procOptions = typeof getPostCols === 'function' ? getPostCols() : ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+  const procOptions = typeof getPostCols === 'function' ? getPostCols() : ['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
 
   let html = `<table style="width:100%;font-size:12px;border-collapse:collapse">
     <thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
@@ -16952,6 +16973,32 @@ async function inlinePOProcess(poId, itemId, newProcess) {
     const d = await resp.json();
     if (d.ok !== false && !d.error) { loadPOList(); }
     else { alert('공정 변경 실패: '+(d.error||'')); }
+  } catch(e) { alert('오류: '+e.message); }
+}
+
+// 원재료 PO 행에서 후공정 사후 추가 — 자식 후공정 PO 자동 생성/추가
+async function inlineAddPostFromMat(matPoId) {
+  const cbs = document.querySelectorAll('.inlineAddCbMat_'+matPoId+':checked');
+  const codes = [...cbs].map(cb => cb.value);
+  const proc = document.getElementById('inlineAddProcMat_'+matPoId)?.value?.trim();
+  const vendor = document.getElementById('inlineAddVendorMat_'+matPoId)?.value?.trim();
+  if (!codes.length) { alert('품목을 선택하세요.'); return; }
+  if (!proc) { alert('공정명을 입력하세요.'); return; }
+  if (!vendor) { alert('후공정 업체를 입력하세요.'); return; }
+  try {
+    const resp = await authFetch(`/api/po/${matPoId}/add-postprocess`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ product_codes: codes, process_type: proc, post_vendor: vendor })
+    });
+    const d = await resp.json();
+    const data = d.data || d;
+    if (d.ok !== false && !d.error) {
+      const msg = data.created_new
+        ? `새 후공정 PO 생성: ${data.post_po_number} (${data.added}건 추가, ${data.skipped} 중복 스킵)`
+        : `기존 후공정 PO ${data.post_po_number} 에 ${data.added}건 추가 (${data.skipped} 중복 스킵)`;
+      alert(msg);
+      loadPOList();
+    } else { alert('후공정 추가 실패: '+(d.error||'')); }
   } catch(e) { alert('오류: '+e.message); }
 }
 

@@ -609,7 +609,7 @@ async function reloadProductInfoFromDB() {
       }
     }
     // 후공정 타입 목록 (이 키들은 product_post_vendor에서만 관리)
-    let postProcessTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+    let postProcessTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
     try { const pt = await getPostProcessTypes(); if (pt.length) postProcessTypes = pt; } catch(_) {}
     const postTypeSet = new Set(postProcessTypes);
 
@@ -673,7 +673,7 @@ function scheduleProductInfoReload() {
 function getProductInfo() {
   if (productInfoCache) return productInfoCache;
   // 첫 호출 — 레거시 파일에서 기본정보만 로드 (후공정 키는 즉시 제거)
-  const _defaultPostTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+  const _defaultPostTypes = ['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(__dir, 'product_info.json'), 'utf8'));
     const cleaned = {};
@@ -1397,7 +1397,7 @@ async function getPostProcessTypes() {
     _cachedPostCols = _processTypesInMemory.filter(p => p.category === 'post' && p.is_active).sort((a,b) => a.sort_order - b.sort_order).map(p => p.name);
     return _cachedPostCols;
   }
-  return ['재단','인쇄','박/형압','톰슨','봉투가공','세아리','레이져','실크','임가공','우찌누끼','접지','단면접착','코팅'];
+  return ['재단','인쇄','박/형압','톰슨','봉투가공','단면접착'];
 }
 function invalidatePostColsCache() { _cachedPostCols = null; }
 
@@ -1657,13 +1657,12 @@ await db.exec(`CREATE TABLE IF NOT EXISTS process_types (
   created_at TEXT DEFAULT (datetime('now','localtime')),
   UNIQUE(name, category)
 )`);
-// 시드 데이터: 기존 하드코딩된 후공정 타입
+// 시드 데이터: 사용 중인 후공정 타입 6종 (2026-04 트리밍).
+// 과거 시드된 7종(세아리/레이져/실크/임가공/우찌누끼/접지/코팅)은 아래 마이그레이션에서 is_active=0 으로 비활성화.
 try {
   const seedPost = [
     {name:'재단',sort:1},{name:'인쇄',sort:2},{name:'박/형압',sort:3},{name:'톰슨',sort:4},
-    {name:'봉투가공',sort:5},{name:'세아리',sort:6},{name:'레이져',sort:7},{name:'실크',sort:8},
-    {name:'임가공',sort:9},{name:'우찌누끼',sort:10,vendor:'예지가'},{name:'코팅',sort:13},
-    {name:'접지',sort:11},{name:'단면접착',sort:12}
+    {name:'봉투가공',sort:5},{name:'단면접착',sort:6}
   ];
   const seedBom = [
     {name:'오프셋인쇄',group:'인쇄',icon:'🖨️',sort:1},{name:'디지털인쇄',group:'인쇄',icon:'💻',sort:2},
@@ -1676,6 +1675,11 @@ try {
   const ins = db.prepare("INSERT OR IGNORE INTO process_types (name,category,group_name,icon,sort_order,default_vendor) VALUES (?,?,?,?,?,?)");
   for (const s of seedPost) await ins.run(s.name,'post','',s.icon||'⚙️',s.sort,s.vendor||'');
   for (const s of seedBom) await ins.run(s.name,'bom',s.group||'',s.icon||'⚙️',s.sort,'');
+  // 마이그레이션: 더 이상 사용하지 않는 7종 비활성화 (기존 시드된 row 가 있을 때).
+  // 데이터 삭제는 안 함 — 과거 po_items 의 process_type 으로 참조될 수 있어 hidden 처리만.
+  try {
+    await db.prepare("UPDATE process_types SET is_active=0 WHERE category='post' AND name IN ('세아리','레이져','실크','임가공','우찌누끼','접지','코팅')").run();
+  } catch(_) {}
 } catch(e) { console.warn('process_types 시드 데이터 삽입 실패 (무시):', e.message); }
 
 // ── 품목 필드 변경 이력 ──
@@ -9923,6 +9927,73 @@ async function handleRequest(req, res) {
     if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_items_modify', 'po_items', poId, `PO ${po.po_number} 품목변경: ${details.join(', ')}${body.reason?' 사유:'+body.reason:''}`, clientIP);
 
     ok(res, { po_id: poId, added, removed, updated }); return;
+  }
+
+  // POST /api/po/:matPoId/add-postprocess — 원재료 PO 에서 자식 후공정 PO 에 항목 추가
+  // 동일 (parent_po_id, vendor_name) 조합의 후공정 PO 가 있으면 거기에 추가, 없으면 새로 생성.
+  // 마법사 단계가 아니라 사후 추가도 가능하도록 별도 엔드포인트로 분리.
+  const addPostMatch = pathname.match(/^\/api\/po\/(\d+)\/add-postprocess$/);
+  if (addPostMatch && method === 'POST') {
+    const matPoId = parseInt(addPostMatch[1]);
+    const body = await readJSON(req);
+    const matPo = await db.prepare('SELECT * FROM po_header WHERE po_id=?').get(matPoId);
+    if (!matPo) { fail(res, 404, '원재료 PO 없음'); return; }
+    if (matPo.po_type !== '원재료') { fail(res, 400, '원재료 PO 가 아님 (po_type=' + matPo.po_type + ')'); return; }
+
+    const productCodes = Array.isArray(body.product_codes) ? body.product_codes : [];
+    const processType = (body.process_type || '').trim();
+    const postVendor = (body.post_vendor || '').trim();
+    if (!productCodes.length) { fail(res, 400, '품목 미선택'); return; }
+    if (!processType) { fail(res, 400, '공정명 미입력'); return; }
+    if (!postVendor) { fail(res, 400, '후공정 업체 미입력'); return; }
+
+    // 원재료 PO 의 해당 품목 수량 가져오기
+    const matItems = await db.prepare('SELECT * FROM po_items WHERE po_id=? AND product_code IN (' + productCodes.map(() => '?').join(',') + ')').all(matPoId, ...productCodes);
+    const qtyByCode = {};
+    for (const it of matItems) qtyByCode[it.product_code] = (qtyByCode[it.product_code] || 0) + (it.ordered_qty || 0);
+
+    // 동일 vendor_name 의 자식 후공정 PO 찾기 (없으면 새로 생성)
+    let postPo = await db.prepare("SELECT * FROM po_header WHERE parent_po_id=? AND po_type='후공정' AND vendor_name=? AND status NOT IN ('완료','취소') ORDER BY po_id DESC LIMIT 1").get(matPoId, postVendor);
+    let postPoId, postPoNumber;
+    let createdNew = false;
+    if (postPo) {
+      postPoId = postPo.po_id;
+      postPoNumber = postPo.po_number;
+    } else {
+      postPoNumber = await generatePoNumber();
+      const totalQty = productCodes.reduce((s, c) => s + (qtyByCode[c] || 0), 0);
+      const info = await db.prepare(`INSERT INTO po_header
+        (po_number, po_type, vendor_name, material_vendor_name, process_vendor_name, status,
+         due_date, total_qty, notes, origin, po_date, process_step, parent_po_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,date('now','localtime'),?,?)`)
+        .run(postPoNumber, '후공정', postVendor, matPo.vendor_name || '', postVendor, 'draft',
+             matPo.due_date || '', totalQty, '사후추가: ' + processType, matPo.origin || '한국', 1, matPoId);
+      postPoId = info.lastInsertRowid;
+      createdNew = true;
+      try { await db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(postPoId, 'created', currentUser?.username || 'system', `사후 추가: 후공정 PO (${postVendor}, ${processType}, 원재료 PO: ${matPo.po_number})`); } catch(_) {}
+    }
+
+    // 후공정 PO 에 항목 추가 (동일 product_code+process_type 중복 시 스킵)
+    let added = 0, skipped = 0;
+    const insItem = db.prepare('INSERT INTO po_items (po_id, product_code, brand, process_type, ordered_qty, spec, notes) VALUES (?,?,?,?,?,?,?)');
+    for (const code of productCodes) {
+      const exists = await db.prepare('SELECT item_id FROM po_items WHERE po_id=? AND product_code=? AND process_type=? LIMIT 1').get(postPoId, code, processType);
+      if (exists) { skipped++; continue; }
+      const qty = qtyByCode[code] || 0;
+      try {
+        await insItem.run(postPoId, code, '', processType, qty, processType, '사후 추가 (원재료 PO ' + matPo.po_number + ')');
+        added++;
+      } catch (_) {}
+    }
+    // total_qty 재계산
+    try {
+      const t = await db.prepare('SELECT COALESCE(SUM(ordered_qty),0) AS t FROM po_items WHERE po_id=?').get(postPoId);
+      await db.prepare("UPDATE po_header SET total_qty=?, updated_at=datetime('now','localtime') WHERE po_id=?").run(t.t, postPoId);
+    } catch(_) {}
+    try { await db.prepare("INSERT INTO po_activity_log (po_id, action, actor, details) VALUES (?,?,?,?)").run(postPoId, 'items_modified', currentUser?.username || 'system', `사후 후공정 ${added}건 추가 (${processType}): ${productCodes.join(',')}`); } catch(_) {}
+
+    ok(res, { post_po_id: postPoId, post_po_number: postPoNumber, added, skipped, created_new: createdNew });
+    return;
   }
 
   // PUT /api/po/:id/status
