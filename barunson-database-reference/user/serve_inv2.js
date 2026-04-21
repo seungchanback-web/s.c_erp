@@ -5237,32 +5237,39 @@ async function handleRequest(req, res) {
         const codeChunks = [];
         for (let i = 0; i < validCodes.length; i += CHUNK_SIZE) codeChunks.push(validCodes.slice(i, i + CHUNK_SIZE));
 
-        // 1. 현재고 — 순차 chunk (chunk 실패해도 계속 진행)
+        // 1. 현재고 — 순차 chunk + 실패 chunk 1회 재시도 (transient 타임아웃 대응)
         const invMap = {};
         let invOK = 0, invFail = 0;
-        for (let i = 0; i < codeChunks.length; i++) {
-          const inClause = codeChunks[i].map(c => `'${c}'`).join(',');
-          try {
-            const req = workPool.request();
-            req.timeout = 7000;
-            // ★ 현재고 계산 수정 (2026-04): XERP 스마트재고현황과 일치시키려면 양수 OhQty 만 SUM.
-            //   mmInventory 는 lot/location 별 여러 row 로 저장되며, 예약/조정/불량 lot 은 음수 OhQty 로 존재.
-            //   전체 SUM 하면 음수로 왜곡됨. 양수만 SUM = 실제 현재고 (BI202: -8,706 → 27,474 예상).
-            const r = await req.query(`
-              SELECT RTRIM(ItemCode) AS item_code,
-                     SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS oh_qty
-              FROM mmInventory WITH (NOLOCK)
-              WHERE SiteCode = '${siteCode}' AND RTRIM(ItemCode) IN (${inClause})
-              GROUP BY RTRIM(ItemCode)
-            `);
-            for (const row of r.recordset) {
-              invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
-            }
-            invOK++;
-          } catch (e) {
-            invFail++;
-            console.warn(`[xerp-inv ${legalEntity}] 현재고 chunk ${i+1}/${codeChunks.length} 실패:`, e.message);
+        const invFailedChunks = [];
+        const runInvChunk = async (chunk, idx, attempt) => {
+          const inClause = chunk.map(c => `'${c}'`).join(',');
+          const req = workPool.request();
+          req.timeout = attempt === 1 ? 7000 : 15000; // 재시도는 15초로 완화
+          // ★ 현재고 계산 수정 (2026-04): XERP 스마트재고현황과 일치시키려면 양수 OhQty 만 SUM.
+          //   mmInventory 는 lot/location 별 여러 row 로 저장되며, 예약/조정/불량 lot 은 음수 OhQty 로 존재.
+          //   전체 SUM 하면 음수로 왜곡됨. 양수만 SUM = 실제 현재고 (BI202: -8,706 → 27,474 예상).
+          const r = await req.query(`
+            SELECT RTRIM(ItemCode) AS item_code,
+                   SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS oh_qty
+            FROM mmInventory WITH (NOLOCK)
+            WHERE SiteCode = '${siteCode}' AND RTRIM(ItemCode) IN (${inClause})
+            GROUP BY RTRIM(ItemCode)
+          `);
+          for (const row of r.recordset) {
+            invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
           }
+        };
+        for (let i = 0; i < codeChunks.length; i++) {
+          try { await runInvChunk(codeChunks[i], i, 1); invOK++; }
+          catch (e) {
+            console.warn(`[xerp-inv ${legalEntity}] 현재고 chunk ${i+1}/${codeChunks.length} 1차 실패, 재시도:`, e.message);
+            invFailedChunks.push({ chunk: codeChunks[i], idx: i });
+          }
+        }
+        // 실패 chunk 1회 재시도 (타임아웃 15초)
+        for (const { chunk, idx } of invFailedChunks) {
+          try { await runInvChunk(chunk, idx, 2); invOK++; }
+          catch (e) { invFail++; console.error(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 재시도도 실패:`, e.message); }
         }
         console.log(`[xerp-inv ${legalEntity}] 현재고 chunk 결과: 성공 ${invOK} / 실패 ${invFail} (총 ${codeChunks.length})`);
 
@@ -5272,33 +5279,39 @@ async function handleRequest(req, res) {
         const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
         const shipMap = {};
         let shipOK = 0, shipFail = 0;
-        for (let i = 0; i < codeChunks.length; i++) {
-          const inClause = codeChunks[i].map(c => `'${c}'`).join(',');
-          try {
-            const req = workPool.request()
-              .input('start3m', sql.NChar(16), fmt(start3m))
-              .input('today', sql.NChar(16), fmt(today));
-            req.timeout = 7000;
-            const r = await req.query(`
-              SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
-              FROM mmInoutItem WITH (NOLOCK)
-              WHERE SiteCode = '${siteCode}' AND InoutGubun = 'SO'
-                AND InoutDate >= @start3m AND InoutDate < @today
-                AND RTRIM(ItemCode) IN (${inClause})
-              GROUP BY RTRIM(ItemCode)
-            `);
-            for (const row of r.recordset) {
-              const code = (row.item_code || '').trim().toUpperCase();
-              if (code) {
-                const total = Math.round(row.total_qty || 0);
-                shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
-              }
+        const shipFailedChunks = [];
+        const runShipChunk = async (chunk, attempt) => {
+          const inClause = chunk.map(c => `'${c}'`).join(',');
+          const req = workPool.request()
+            .input('start3m', sql.NChar(16), fmt(start3m))
+            .input('today', sql.NChar(16), fmt(today));
+          req.timeout = attempt === 1 ? 7000 : 15000;
+          const r = await req.query(`
+            SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
+            FROM mmInoutItem WITH (NOLOCK)
+            WHERE SiteCode = '${siteCode}' AND InoutGubun = 'SO'
+              AND InoutDate >= @start3m AND InoutDate < @today
+              AND RTRIM(ItemCode) IN (${inClause})
+            GROUP BY RTRIM(ItemCode)
+          `);
+          for (const row of r.recordset) {
+            const code = (row.item_code || '').trim().toUpperCase();
+            if (code) {
+              const total = Math.round(row.total_qty || 0);
+              shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
             }
-            shipOK++;
-          } catch (e) {
-            shipFail++;
-            console.warn(`[xerp-inv ${legalEntity}] 출고 chunk ${i+1}/${codeChunks.length} 실패:`, e.message);
           }
+        };
+        for (let i = 0; i < codeChunks.length; i++) {
+          try { await runShipChunk(codeChunks[i], 1); shipOK++; }
+          catch (e) {
+            console.warn(`[xerp-inv ${legalEntity}] 출고 chunk ${i+1}/${codeChunks.length} 1차 실패, 재시도:`, e.message);
+            shipFailedChunks.push({ chunk: codeChunks[i], idx: i });
+          }
+        }
+        for (const { chunk, idx } of shipFailedChunks) {
+          try { await runShipChunk(chunk, 2); shipOK++; }
+          catch (e) { shipFail++; console.error(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 재시도도 실패:`, e.message); }
         }
         console.log(`[xerp-inv ${legalEntity}] 출고 chunk 결과: 성공 ${shipOK} / 실패 ${shipFail} (총 ${codeChunks.length})`);
 
@@ -5643,9 +5656,12 @@ async function handleRequest(req, res) {
 
         // 내부 fetchCompanyInventory 가 /api/xerp-inventory 핸들러 스코프에 있어서
         // 여기서는 직접 호출 불가. 대신 live 경로를 self-call.
+        // ★ 명시적 5분 timeout — 없으면 XERP 지연 시 프로세스가 영구 매달려 sync_log 가 running 에 고정됨.
         const ctrl = new AbortController();
+        const timeoutHandle = setTimeout(() => ctrl.abort(new Error('sync bg timeout 5m')), 5 * 60 * 1000);
         const selfBase = 'http://127.0.0.1:' + PORT;
         const r = await fetch(selfBase + '/api/xerp-inventory?refresh=1&company=all', { signal: ctrl.signal }).catch(e=>({__err:e}));
+        clearTimeout(timeoutHandle);
         if (r.__err) throw r.__err;
         const j = await r.json();
         if (!j.ok) throw new Error('xerp-inventory live 호출 실패: ' + (j.error || ''));
@@ -5669,35 +5685,49 @@ async function handleRequest(req, res) {
           return;
         }
 
-        // UPSERT
-        const upsert = db.prepare(`INSERT INTO inventory_snapshot
-          (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
-          VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))
-          ON CONFLICT(product_code) DO UPDATE SET
-            legal_entity=excluded.legal_entity,
-            site_code=excluded.site_code,
-            current_stock=excluded.current_stock,
-            monthly_out=excluded.monthly_out,
-            daily_out=excluded.daily_out,
-            total_3m=excluded.total_3m,
-            item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
-            synced_at=excluded.synced_at`);
+        // UPSERT — 전체를 하나의 트랜잭션으로 감싸서 fsync 1회로 줄임 (이전: 900건 × 개별 autocommit).
+        // 실패 카운트도 기록하여 sync_log.fail_count 에 반영 (이전에는 버려짐).
         let successCount = 0;
-        for (const p of rows) {
-          try {
-            await upsert.run(
-              p['제품코드'], p['legal_entity'], p['_siteCode'],
-              p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
-              p['품목명'] || ''
-            );
-            successCount++;
-          } catch (_) {}
-        }
+        let failCount = 0;
+        const failedCodes = [];
+        const runUpsert = db.transaction(async () => {
+          const upsert = db.prepare(`INSERT INTO inventory_snapshot
+            (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
+            VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))
+            ON CONFLICT(product_code) DO UPDATE SET
+              legal_entity=excluded.legal_entity,
+              site_code=excluded.site_code,
+              current_stock=excluded.current_stock,
+              monthly_out=excluded.monthly_out,
+              daily_out=excluded.daily_out,
+              total_3m=excluded.total_3m,
+              item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
+              synced_at=excluded.synced_at`);
+          for (const p of rows) {
+            try {
+              await upsert.run(
+                p['제품코드'], p['legal_entity'], p['_siteCode'],
+                p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
+                p['품목명'] || ''
+              );
+              successCount++;
+            } catch (e) {
+              failCount++;
+              if (failedCodes.length < 10) failedCodes.push(p['제품코드'] + ':' + e.message.split('\n')[0]);
+            }
+          }
+        });
+        await runUpsert();
+
+        // 캐시 무효화 — snapshot 이 갱신됐으니 10분 TTL 캐시도 폐기해야 새 데이터 보임.
+        // 이전엔 동기화 눌러도 최대 10분간 구 데이터 유지되는 버그 원인이었음.
+        try { if (typeof xerpInventoryCaches === 'object' && xerpInventoryCaches) for (const k in xerpInventoryCaches) delete xerpInventoryCaches[k]; } catch(_) {}
 
         try {
-          await db.prepare("UPDATE sync_log SET status='success', success_count=?, finished_at=datetime('now','localtime') WHERE id=?").run(successCount, syncLogId);
+          await db.prepare("UPDATE sync_log SET status=?, success_count=?, fail_count=?, error_msg=?, finished_at=datetime('now','localtime') WHERE id=?")
+            .run(failCount > 0 && successCount === 0 ? 'failed' : 'success', successCount, failCount, failCount > 0 ? ('UPSERT 실패 ' + failCount + '건: ' + failedCodes.join(' | ')).slice(0, 500) : '', syncLogId);
         } catch (_) {}
-        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
+        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (실패 ${failCount}, 총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
       } catch (e) {
         console.error('[sync bg] 실패:', e.message);
         if (snapshotDisabled) {

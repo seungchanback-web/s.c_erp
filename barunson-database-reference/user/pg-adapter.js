@@ -17,8 +17,15 @@
  *   })();
  */
 const { Pool } = require('pg');
+const { AsyncLocalStorage } = require('async_hooks');
 
 let pool = null;
+// 트랜잭션 컨텍스트 — 같은 async 체인 안에서 같은 client 를 재사용.
+// 이전엔 전역 pool 을 뮤테이션해서 동시 요청이 서로의 client 를 공유하는 치명적 race 였음.
+const txStorage = new AsyncLocalStorage();
+function getExecutor() {
+  return txStorage.getStore() || pool;
+}
 
 // SQLite ? 플레이스홀더를 PostgreSQL $1, $2 ... 로 변환
 function convertPlaceholders(sql) {
@@ -50,9 +57,20 @@ function convertPlaceholders(sql) {
 // SQLite 함수를 PostgreSQL로 변환
 function convertSqliteFunctions(sql) {
   let s = sql;
+  // datetime('now','localtime','±N units') → NOW() + INTERVAL 'N units'  (3-인자 형태)
+  // 예: datetime('now','localtime','-7 minutes') → (NOW() - INTERVAL '7 minutes')
+  // 이게 없어서 sync_log stale 해제 쿼리가 PG 에서 영구 실패했음 → 409 영구화.
+  s = s.replace(/datetime\(\s*'now'\s*,\s*'localtime'\s*,\s*'([+-]?)(\d+)\s+(second|minute|hour|day|month|year)s?'\s*\)/gi,
+    (_, sign, n, unit) => `(NOW() ${sign === '-' ? '-' : '+'} INTERVAL '${n} ${unit}')`);
+  // 2-인자 형태 (localtime 없이 수정자만)
+  s = s.replace(/datetime\(\s*'now'\s*,\s*'([+-]?)(\d+)\s+(second|minute|hour|day|month|year)s?'\s*\)/gi,
+    (_, sign, n, unit) => `(NOW() ${sign === '-' ? '-' : '+'} INTERVAL '${n} ${unit}')`);
   // datetime('now','localtime') → NOW()
   s = s.replace(/datetime\(\s*'now'\s*,\s*'localtime'\s*\)/gi, 'NOW()');
   s = s.replace(/datetime\(\s*'now'\s*\)/gi, 'NOW()');
+  // date('now','localtime','+N units') / date('now','+N units') — 날짜 산술
+  s = s.replace(/date\(\s*'now'\s*(?:,\s*'localtime'\s*)?,\s*'([+-]?)(\d+)\s+(day|month|year)s?'\s*\)/gi,
+    (_, sign, n, unit) => `(CURRENT_DATE ${sign === '-' ? '-' : '+'} INTERVAL '${n} ${unit}')::DATE`);
   // date('now','localtime') → CURRENT_DATE
   s = s.replace(/date\(\s*'now'\s*,\s*'localtime'\s*\)/gi, 'CURRENT_DATE');
   s = s.replace(/date\(\s*'now'\s*\)/gi, 'CURRENT_DATE');
@@ -121,12 +139,12 @@ class Statement {
   }
 
   async get(...params) {
-    const result = await pool.query(this._sql, params);
+    const result = await getExecutor().query(this._sql, params);
     return result.rows[0] || undefined;
   }
 
   async all(...params) {
-    const result = await pool.query(this._sql, params);
+    const result = await getExecutor().query(this._sql, params);
     return result.rows;
   }
 
@@ -150,7 +168,7 @@ class Statement {
       }
       sql = sql.replace(/;?\s*$/, '') + ' RETURNING ' + pk;
     }
-    const result = await pool.query(sql, params);
+    const result = await getExecutor().query(sql, params);
     const firstRow = result.rows && result.rows[0];
     return {
       changes: result.rowCount,
@@ -196,12 +214,12 @@ async function exec(sql) {
   const statements = s.split(';').map(st => st.trim()).filter(st => st.length > 0);
   for (const stmt of statements) {
     try {
-      await pool.query(stmt);
+      await getExecutor().query(stmt);
     } catch (e) {
       // CREATE TABLE IF NOT EXISTS에서 이미 존재하면 무시
-      if (!e.message.includes('already exists')) {
-        // CREATE TABLE / CREATE INDEX 실패는 놓치면 안 됨 (런타임에 relation does not exist 로 이어짐)
-        const isDDL = /^\s*CREATE\s+(TABLE|INDEX|UNIQUE)/i.test(stmt);
+      if (!e.message.includes('already exists') && !/column .* of relation .* already exists/i.test(e.message)) {
+        // DDL (CREATE/ALTER/DROP) 실패는 조용히 지나가면 안 됨 — 런타임에 relation/column does not exist 로 이어짐.
+        const isDDL = /^\s*(CREATE|ALTER|DROP)\s+(TABLE|INDEX|UNIQUE|COLUMN)/i.test(stmt);
         if (isDDL) {
           console.error('[pg-adapter exec ERROR]', e.message.split('\n')[0]);
           console.error('[pg-adapter exec FAILED STMT]', stmt.split('\n')[0].slice(0, 200));
@@ -213,23 +231,22 @@ async function exec(sql) {
   }
 }
 
-// transaction
+// transaction — AsyncLocalStorage 로 요청별 client 격리.
+// 같은 트랜잭션 안에서 prepare()/exec() 는 getExecutor() 를 통해 이 client 를 자동 사용.
+// 동시에 들어온 다른 요청은 영향받지 않음 (전역 pool 은 건드리지 않음).
 function transaction(fn) {
   return async (...args) => {
     const client = await pool.connect();
-    const prevPool = pool;
+    // pg client 에 pool 과 동일한 query() 인터페이스가 있어 getExecutor() 는 그대로 사용 가능.
     try {
       await client.query('BEGIN');
-      // transaction 내에서는 pool 대신 client 사용
-      pool = { query: (...a) => client.query(...a) };
-      const result = await fn(...args);
+      const result = await txStorage.run(client, () => fn(...args));
       await client.query('COMMIT');
       return result;
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch(re) {}
       throw e;
     } finally {
-      pool = prevPool; // 반드시 복원 (에러 여부 무관)
       client.release();
     }
   };
