@@ -184,6 +184,10 @@ async function exec(sql) {
   // DEFAULT (expr) → DEFAULT expr
   s = s.replace(/DEFAULT\s+\(NOW\(\)\)/gi, 'DEFAULT NOW()');
   s = s.replace(/DEFAULT\s+\(CURRENT_DATE\)/gi, 'DEFAULT CURRENT_DATE');
+  // TEXT DEFAULT NOW() → TEXT DEFAULT TO_CHAR(NOW(),'YYYY-MM-DD HH24:MI:SS')
+  // PG 는 timestamp→text 암묵 캐스트를 DEFAULT 식에서 허용하지 않아 CREATE TABLE 이 실패.
+  // 모든 TEXT 타임스탬프 컬럼은 ISO 유사 문자열로 저장돼야 기존 SELECT/INSERT 코드와 호환.
+  s = s.replace(/\bTEXT\s+DEFAULT\s+NOW\(\)/gi, "TEXT DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI:SS')");
   // ON CONFLICT DO NOTHING for INSERT (from OR IGNORE)
   if (/\bINSERT\s+OR\s+IGNORE\b/i.test(sql) && !/ON\s+CONFLICT/i.test(s)) {
     s = s.replace(/(VALUES\s*\([^)]*\))(?!\s*ON)/i, '$1 ON CONFLICT DO NOTHING');
@@ -196,7 +200,14 @@ async function exec(sql) {
     } catch (e) {
       // CREATE TABLE IF NOT EXISTS에서 이미 존재하면 무시
       if (!e.message.includes('already exists')) {
-        console.warn('[pg-adapter exec warn]', e.message.split('\n')[0]);
+        // CREATE TABLE / CREATE INDEX 실패는 놓치면 안 됨 (런타임에 relation does not exist 로 이어짐)
+        const isDDL = /^\s*CREATE\s+(TABLE|INDEX|UNIQUE)/i.test(stmt);
+        if (isDDL) {
+          console.error('[pg-adapter exec ERROR]', e.message.split('\n')[0]);
+          console.error('[pg-adapter exec FAILED STMT]', stmt.split('\n')[0].slice(0, 200));
+        } else {
+          console.warn('[pg-adapter exec warn]', e.message.split('\n')[0]);
+        }
       }
     }
   }
