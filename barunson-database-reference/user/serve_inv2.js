@@ -1400,6 +1400,20 @@ try {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_synclog_type_time ON sync_log(sync_type, started_at)");
   // 상태별 조회 최적화 (stale 감지 / /api/sync/status 모두 status='running' 으로 필터)
   await db.exec("CREATE INDEX IF NOT EXISTS idx_synclog_status ON sync_log(status) WHERE status='running'");
+  // 구 스키마 호환: 구 버전 코드로 sync_log 가 이미 만들어져 있고 triggered_by/error_msg/fail_count 등이 빠져 있을 수 있음.
+  // CREATE TABLE IF NOT EXISTS 는 기존 테이블을 건드리지 않으므로 ALTER 로 명시적 보강.
+  // 누락 시 INSERT "column does not exist" → "does not exist" 정규식 매칭 → snapshot_disabled 로 오폴백.
+  const _synclogCols = [
+    ['triggered_by', "TEXT DEFAULT 'manual'"],
+    ['error_msg',    "TEXT DEFAULT ''"],
+    ['fail_count',   "INTEGER DEFAULT 0"],
+    ['success_count',"INTEGER DEFAULT 0"],
+    ['finished_at',  "TEXT DEFAULT ''"],
+    ['status',       "TEXT DEFAULT 'running'"]
+  ];
+  for (const [col, type] of _synclogCols) {
+    try { await db.exec(`ALTER TABLE sync_log ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch(_) {}
+  }
   // 서버 크래시/재시작 직후 남은 running row 자동 해제.
   // 크래시되면 해당 node 프로세스는 이미 죽었으므로 락을 정리하지 않으면 409가 영구화됨.
   try {
