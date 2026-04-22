@@ -5589,21 +5589,23 @@ async function handleRequest(req, res) {
       try {
         if (!workPool) throw new Error('XERP pool not connected');
 
-        // ★ readonly 계정 10초 타임아웃 대응: 50개씩 chunk + req.timeout=7000
-        // 이 없으면 IN절에 900+ 코드 들어가서 전체 쿼리 실패 → fallback:products 경로로 빠짐
-        const CHUNK_SIZE = 50;
+        // ★ readonly 계정 대응: chunk + 재시도 + 느슨한 timeout.
+        // 이전엔 CHUNK_SIZE=50 / timeout=7s → BE004 같이 38 창고에 분산된 품목이 포함된 chunk 가
+        // 7s 에 못 끝나서 silent-fail → 그 chunk 전원이 현재고=0 으로 떨어지는 버그.
+        // 수정: chunk 20 으로 축소 (IN 절 작아져 훨씬 빠름) + timeout 20s → 재시도 40s 까지 허용.
+        const CHUNK_SIZE = 20;
         const validCodes = productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
         const codeChunks = [];
         for (let i = 0; i < validCodes.length; i += CHUNK_SIZE) codeChunks.push(validCodes.slice(i, i + CHUNK_SIZE));
 
-        // 1. 현재고 — 순차 chunk + 실패 chunk 1회 재시도 (transient 타임아웃 대응)
+        // 1. 현재고 — 순차 chunk + 실패 chunk 2회 재시도 (transient 타임아웃 + 재시도)
         const invMap = {};
         let invOK = 0, invFail = 0;
         const invFailedChunks = [];
         const runInvChunk = async (chunk, idx, attempt) => {
           const inClause = chunk.map(c => `'${c}'`).join(',');
           const req = workPool.request();
-          req.timeout = attempt === 1 ? 7000 : 15000; // 재시도는 15초로 완화
+          req.timeout = attempt === 1 ? 20000 : (attempt === 2 ? 40000 : 60000);
           // ★ 현재고 계산 수정 (2026-04): XERP 스마트재고현황과 일치시키려면 양수 OhQty 만 SUM.
           //   mmInventory 는 lot/location 별 여러 row 로 저장되며, 예약/조정/불량 lot 은 음수 OhQty 로 존재.
           //   전체 SUM 하면 음수로 왜곡됨. 양수만 SUM = 실제 현재고 (BI202: -8,706 → 27,474 예상).
@@ -5625,10 +5627,18 @@ async function handleRequest(req, res) {
             invFailedChunks.push({ chunk: codeChunks[i], idx: i });
           }
         }
-        // 실패 chunk 1회 재시도 (타임아웃 15초)
+        // 실패 chunk 재시도 (2회까지 — 마지막은 60s timeout)
+        const invRetry2Failed = [];
         for (const { chunk, idx } of invFailedChunks) {
           try { await runInvChunk(chunk, idx, 2); invOK++; }
-          catch (e) { invFail++; console.error(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 재시도도 실패:`, e.message); }
+          catch (e) {
+            console.warn(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 2차 실패, 3차 재시도:`, e.message);
+            invRetry2Failed.push({ chunk, idx });
+          }
+        }
+        for (const { chunk, idx } of invRetry2Failed) {
+          try { await runInvChunk(chunk, idx, 3); invOK++; }
+          catch (e) { invFail++; console.error(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 최종 실패 — 품목 ${chunk.slice(0,3).join(',')}... 재고 0 으로 기록됨:`, e.message); }
         }
         console.log(`[xerp-inv ${legalEntity}] 현재고 chunk 결과: 성공 ${invOK} / 실패 ${invFail} (총 ${codeChunks.length})`);
 
@@ -5644,7 +5654,7 @@ async function handleRequest(req, res) {
           const req = workPool.request()
             .input('start3m', sql.NChar(16), fmt(start3m))
             .input('today', sql.NChar(16), fmt(today));
-          req.timeout = attempt === 1 ? 7000 : 15000;
+          req.timeout = attempt === 1 ? 20000 : (attempt === 2 ? 40000 : 60000);
           const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
             FROM mmInoutItem WITH (NOLOCK)
@@ -5668,9 +5678,17 @@ async function handleRequest(req, res) {
             shipFailedChunks.push({ chunk: codeChunks[i], idx: i });
           }
         }
+        const shipRetry2Failed = [];
         for (const { chunk, idx } of shipFailedChunks) {
           try { await runShipChunk(chunk, 2); shipOK++; }
-          catch (e) { shipFail++; console.error(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 재시도도 실패:`, e.message); }
+          catch (e) {
+            console.warn(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 2차 실패, 3차 재시도:`, e.message);
+            shipRetry2Failed.push({ chunk, idx });
+          }
+        }
+        for (const { chunk, idx } of shipRetry2Failed) {
+          try { await runShipChunk(chunk, 3); shipOK++; }
+          catch (e) { shipFail++; console.error(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 최종 실패:`, e.message); }
         }
         console.log(`[xerp-inv ${legalEntity}] 출고 chunk 결과: 성공 ${shipOK} / 실패 ${shipFail} (총 ${codeChunks.length})`);
 
