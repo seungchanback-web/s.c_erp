@@ -852,7 +852,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
         </div>
         <p style="margin-top:14px;color:#888;font-size:11px;text-align:center">
           ※ 본 메일은 ${SENDER_COMPANY} ERP에서 자동 발송되었습니다.<br>
-          문의: barun@baruncompany.com · Tel 02-6959-0750
+          문의: seungchan.back@barunn.net
         </p>
       </div>
     </div>`;
