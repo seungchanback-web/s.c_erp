@@ -7,11 +7,12 @@ const router = new Router();
 /* ────────────────────────────────────────────
    테이블 초기화
    ──────────────────────────────────────────── */
-function initTables() {
+async function initTables() {
   const { db } = ctx;
   if (!db) return;
 
-  db.exec(`CREATE TABLE IF NOT EXISTS report_templates (
+  // pg-adapter 의 exec 는 async 반환. 이전엔 await 안 걸어서 CREATE INDEX 가 CREATE TABLE 완료 전에 실행 → 부팅마다 "relation does not exist" 에러.
+  await db.exec(`CREATE TABLE IF NOT EXISTS report_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     report_type TEXT NOT NULL,
@@ -22,7 +23,7 @@ function initTables() {
     updated_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
-  db.exec(`CREATE TABLE IF NOT EXISTS report_schedules (
+  await db.exec(`CREATE TABLE IF NOT EXISTS report_schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_id INTEGER,
     schedule_type TEXT DEFAULT 'manual',
@@ -32,8 +33,8 @@ function initTables() {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_rpt_tmpl_type ON report_templates(report_type)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_rpt_sched_tmpl ON report_schedules(template_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_rpt_tmpl_type ON report_templates(report_type)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_rpt_sched_tmpl ON report_schedules(template_id)`);
 }
 
 /* ────────────────────────────────────────────
