@@ -3783,7 +3783,7 @@ try {
 
 try {
   const reportEngine = require('./routes/report-engine');
-  if (reportEngine.initTables) reportEngine.initTables();
+  if (reportEngine.initTables) await reportEngine.initTables();
   if (reportEngine.router) moduleRouters.push(reportEngine.router);
   console.log('✅ 모듈 로드: report-engine (' + (reportEngine.router?.count || 0) + ' routes)');
 } catch(e) { console.log('⚠️ report-engine 모듈 미로드:', e.message); }
