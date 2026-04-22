@@ -1377,6 +1377,19 @@ try {
   )`);
   await db.exec("CREATE INDEX IF NOT EXISTS idx_invsnap_entity ON inventory_snapshot(legal_entity)");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_invsnap_synced ON inventory_snapshot(synced_at)");
+  // 구 스키마 호환: 구 버전 코드로 테이블이 만들어져 있으면 legal_entity/site_code/item_name 등 누락 가능.
+  const _invsnapCols = [
+    ['legal_entity',  "TEXT DEFAULT 'barunson'"],
+    ['site_code',     "TEXT DEFAULT 'BK10'"],
+    ['monthly_out',   "INTEGER DEFAULT 0"],
+    ['daily_out',     "INTEGER DEFAULT 0"],
+    ['total_3m',      "INTEGER DEFAULT 0"],
+    ['item_name',     "TEXT DEFAULT ''"],
+    ['synced_at',     "TEXT DEFAULT ''"]
+  ];
+  for (const [col, type] of _invsnapCols) {
+    try { await db.exec(`ALTER TABLE inventory_snapshot ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch(_) {}
+  }
   console.log('[init] inventory_snapshot 테이블 OK');
 } catch(e) {
   console.error('[init] ★ inventory_snapshot 테이블 생성 실패:', e.message);
