@@ -5589,128 +5589,87 @@ async function handleRequest(req, res) {
       try {
         if (!workPool) throw new Error('XERP pool not connected');
 
-        // ★ readonly 계정 대응: chunk + 재시도 + 느슨한 timeout.
-        // 이전엔 CHUNK_SIZE=50 / timeout=7s → BE004 같이 38 창고에 분산된 품목이 포함된 chunk 가
-        // 7s 에 못 끝나서 silent-fail → 그 chunk 전원이 현재고=0 으로 떨어지는 버그.
-        // 수정: chunk 20 으로 축소 (IN 절 작아져 훨씬 빠름) + timeout 20s → 재시도 40s 까지 허용.
-        const CHUNK_SIZE = 20;
-        const validCodes = productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
-        const codeChunks = [];
-        for (let i = 0; i < validCodes.length; i += CHUNK_SIZE) codeChunks.push(validCodes.slice(i, i + CHUNK_SIZE));
+        // ★ 2026-04 리팩토링: chunk + IN 절 방식 폐기 → SiteCode 전체 단일 쿼리.
+        // 이전엔 chunk(20개) × 57회 쿼리 중 일부가 조용히 타임아웃되면 그 chunk 품목
+        // 전원이 ohQty=0 으로 fallback 돼 재고가 0 으로 저장되는 버그.
+        // 수정: SiteCode=BK10/BHC2 전체를 한 쿼리로 SUM GROUP BY ItemCode 해서 받고
+        // 로컬 products 와 매칭. 쿼리 1회 → 실패 감지 명확, 타임아웃 1개만 관리.
+        const validCodeSet = new Set(productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => c.toUpperCase()));
 
-        // 1. 현재고 — 순차 chunk + 실패 chunk 2회 재시도 (transient 타임아웃 + 재시도)
+        // 1. 현재고 — SiteCode 전체 단일 쿼리 (양수 OhQty 만 SUM)
         const invMap = {};
-        let invOK = 0, invFail = 0;
-        const invFailedChunks = [];
-        const runInvChunk = async (chunk, idx, attempt) => {
-          const inClause = chunk.map(c => `'${c}'`).join(',');
+        try {
           const req = workPool.request();
-          req.timeout = attempt === 1 ? 20000 : (attempt === 2 ? 40000 : 60000);
-          // ★ 현재고 계산 수정 (2026-04): XERP 스마트재고현황과 일치시키려면 양수 OhQty 만 SUM.
-          //   mmInventory 는 lot/location 별 여러 row 로 저장되며, 예약/조정/불량 lot 은 음수 OhQty 로 존재.
-          //   전체 SUM 하면 음수로 왜곡됨. 양수만 SUM = 실제 현재고 (BI202: -8,706 → 27,474 예상).
+          req.timeout = 120000; // 2분
           const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code,
                    SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS oh_qty
             FROM mmInventory WITH (NOLOCK)
-            WHERE SiteCode = '${siteCode}' AND RTRIM(ItemCode) IN (${inClause})
+            WHERE SiteCode = '${siteCode}'
             GROUP BY RTRIM(ItemCode)
           `);
           for (const row of r.recordset) {
-            invMap[(row.item_code || '').trim().toUpperCase()] = Math.round(row.oh_qty || 0);
+            const code = (row.item_code || '').trim().toUpperCase();
+            if (code && validCodeSet.has(code)) {
+              invMap[code] = Math.round(row.oh_qty || 0);
+            }
           }
-        };
-        for (let i = 0; i < codeChunks.length; i++) {
-          try { await runInvChunk(codeChunks[i], i, 1); invOK++; }
-          catch (e) {
-            console.warn(`[xerp-inv ${legalEntity}] 현재고 chunk ${i+1}/${codeChunks.length} 1차 실패, 재시도:`, e.message);
-            invFailedChunks.push({ chunk: codeChunks[i], idx: i });
-          }
+          console.log(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 성공: ${Object.keys(invMap).length}개 매칭 (XERP 전체 ${r.recordset.length}개 중)`);
+        } catch (invErr) {
+          console.error(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 실패 — 전체 sync 중단:`, invErr.message);
+          throw invErr; // 전체 sync 실패 처리 (기존 snapshot 유지)
         }
-        // 실패 chunk 재시도 (2회까지 — 마지막은 60s timeout)
-        const invRetry2Failed = [];
-        for (const { chunk, idx } of invFailedChunks) {
-          try { await runInvChunk(chunk, idx, 2); invOK++; }
-          catch (e) {
-            console.warn(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 2차 실패, 3차 재시도:`, e.message);
-            invRetry2Failed.push({ chunk, idx });
-          }
-        }
-        for (const { chunk, idx } of invRetry2Failed) {
-          try { await runInvChunk(chunk, idx, 3); invOK++; }
-          catch (e) { invFail++; console.error(`[xerp-inv ${legalEntity}] 현재고 chunk ${idx+1} 최종 실패 — 품목 ${chunk.slice(0,3).join(',')}... 재고 0 으로 기록됨:`, e.message); }
-        }
-        console.log(`[xerp-inv ${legalEntity}] 현재고 chunk 결과: 성공 ${invOK} / 실패 ${invFail} (총 ${codeChunks.length})`);
 
-        // 2. 최근 3개월 출고 — 순차 chunk
+        // 2. 최근 3개월 출고 — SiteCode 전체 단일 쿼리
         const today = new Date();
         const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
         const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
         const shipMap = {};
-        let shipOK = 0, shipFail = 0;
-        const shipFailedChunks = [];
-        const runShipChunk = async (chunk, attempt) => {
-          const inClause = chunk.map(c => `'${c}'`).join(',');
+        try {
           const req = workPool.request()
             .input('start3m', sql.NChar(16), fmt(start3m))
             .input('today', sql.NChar(16), fmt(today));
-          req.timeout = attempt === 1 ? 20000 : (attempt === 2 ? 40000 : 60000);
+          req.timeout = 120000;
           const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
             FROM mmInoutItem WITH (NOLOCK)
             WHERE SiteCode = '${siteCode}' AND InoutGubun = 'SO'
               AND InoutDate >= @start3m AND InoutDate < @today
-              AND RTRIM(ItemCode) IN (${inClause})
             GROUP BY RTRIM(ItemCode)
           `);
           for (const row of r.recordset) {
             const code = (row.item_code || '').trim().toUpperCase();
-            if (code) {
+            if (code && validCodeSet.has(code)) {
               const total = Math.round(row.total_qty || 0);
               shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
             }
           }
-        };
-        for (let i = 0; i < codeChunks.length; i++) {
-          try { await runShipChunk(codeChunks[i], 1); shipOK++; }
-          catch (e) {
-            console.warn(`[xerp-inv ${legalEntity}] 출고 chunk ${i+1}/${codeChunks.length} 1차 실패, 재시도:`, e.message);
-            shipFailedChunks.push({ chunk: codeChunks[i], idx: i });
-          }
+          console.log(`[xerp-inv ${legalEntity}] 출고 단일쿼리 성공: ${Object.keys(shipMap).length}개 매칭 (3개월치)`);
+        } catch (shipErr) {
+          console.warn(`[xerp-inv ${legalEntity}] 출고 단일쿼리 실패 — 출고 0 으로 진행:`, shipErr.message);
+          // 출고는 실패해도 재고만이라도 보이도록 계속 진행
         }
-        const shipRetry2Failed = [];
-        for (const { chunk, idx } of shipFailedChunks) {
-          try { await runShipChunk(chunk, 2); shipOK++; }
-          catch (e) {
-            console.warn(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 2차 실패, 3차 재시도:`, e.message);
-            shipRetry2Failed.push({ chunk, idx });
-          }
-        }
-        for (const { chunk, idx } of shipRetry2Failed) {
-          try { await runShipChunk(chunk, 3); shipOK++; }
-          catch (e) { shipFail++; console.error(`[xerp-inv ${legalEntity}] 출고 chunk ${idx+1} 최종 실패:`, e.message); }
-        }
-        console.log(`[xerp-inv ${legalEntity}] 출고 chunk 결과: 성공 ${shipOK} / 실패 ${shipFail} (총 ${codeChunks.length})`);
 
-        // 3. 품목명 (S2_Card) — 바른손 모드에서만, chunk 적용
+        // 3. 품목명 (S2_Card) — 바른손 모드에서만, 전체 Card 테이블 한 번에 가져와서 매칭
         let itemNames = {};
         if (!isDd) {
           try {
             const bar1Pool = new sql.ConnectionPool(barShopConfig);
             await bar1Pool.connect();
-            for (let i = 0; i < codeChunks.length; i++) {
-              const inClause = codeChunks[i].map(c => `'${c}'`).join(',');
-              try {
-                const req = bar1Pool.request();
-                req.timeout = 7000;
-                const r = await req.query(`SELECT Card_Code, Card_Name FROM S2_Card WHERE RTRIM(Card_Code) IN (${inClause})`);
-                r.recordset.forEach(row => {
-                  itemNames[(row.Card_Code || '').trim().toUpperCase()] = (row.Card_Name || '').trim();
-                });
-              } catch (_) { /* 품목명 chunk 실패는 조용히 무시 */ }
-            }
+            try {
+              const req = bar1Pool.request();
+              req.timeout = 60000;
+              const r = await req.query(`SELECT RTRIM(Card_Code) AS code, Card_Name FROM S2_Card`);
+              r.recordset.forEach(row => {
+                const code = (row.code || '').trim().toUpperCase();
+                if (code && validCodeSet.has(code)) {
+                  itemNames[code] = (row.Card_Name || '').trim();
+                }
+              });
+              console.log(`[xerp-inv ${legalEntity}] 품목명 단일쿼리 성공: ${Object.keys(itemNames).length}개 매칭`);
+            } catch (nameErr) { console.warn(`[xerp-inv ${legalEntity}] 품목명 쿼리 실패:`, nameErr.message); }
             await bar1Pool.close();
-          } catch (e) { console.warn('품목명 로드 실패:', e.message); }
+          } catch (e) { console.warn('품목명 풀 생성 실패:', e.message); }
         }
 
         // 4. 품목 병합
