@@ -3776,7 +3776,7 @@ try {
 
 try {
   const barcode = require('./routes/barcode');
-  if (barcode.initTables) barcode.initTables();
+  if (barcode.initTables) await barcode.initTables();
   if (barcode.router) moduleRouters.push(barcode.router);
   console.log('✅ 모듈 로드: barcode (' + (barcode.router?.count || 0) + ' routes)');
 } catch(e) { console.log('⚠️ barcode 모듈 미로드:', e.message); }
