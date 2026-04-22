@@ -5412,10 +5412,38 @@ async function handleRequest(req, res) {
           return;
         }
         // 테이블은 있는데 비어있음 → live 폴백 금지 (nginx 60s 넘음).
-        // 빈 products + message 반환. 프론트는 "동기화 필요" 배너로 안내.
-        console.log('[xerp-inventory] snapshot 테이블 비어있음 — DB 동기화 버튼 유도');
-        ok(res, { products: [], updated: new Date().toISOString(), count: 0, source: 'empty-snapshot', message: '아직 동기화된 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요.' });
-        return;
+        // 이전엔 products:[] 빈 응답이라 제품관리에 등록한 품목 목록조차 못 봄.
+        // 이제는 products 테이블에서 목록만 가져와 재고 0 으로 표시 (필터/정렬 작동).
+        // 동기화 완료되면 snapshot 경로가 재고 수치를 채워서 재렌더.
+        console.log('[xerp-inventory] snapshot 테이블 비어있음 — products-only fallback 로 목록 표시');
+        try {
+          const _emptyFilterParts = ["status IN ('active','inactive')"];
+          if (company === 'barunson') _emptyFilterParts.push("(product_code NOT LIKE 'DD%' AND origin != 'DD')");
+          else if (company === 'dd') _emptyFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
+          const _emptyRows = await db.prepare(
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${_emptyFilterParts.join(' AND ')}`
+          ).all();
+          const _emptyOut = _emptyRows.map(p => {
+            const code = (p.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim();
+            const isDD = code.startsWith('DD') || p.origin === 'DD';
+            return {
+              '제품코드': code, '품목명': p.product_name || '', '브랜드': p.brand || '',
+              '생산지': p.origin || '', '현재고': 0, '가용재고': 0, '요청량': 0,
+              '_xerpMonthly': 0, '_xerpDaily': 0, '_xerpTotal3m': 0,
+              '_원자재코드': p.material_code || '', '_원재료용지명': p.material_name || '',
+              '_절': p.cut_spec || '', '_조판': p.jopan || '', '_원지사': p.paper_maker || '',
+              '_후공정업체': p.post_vendor || '',
+              'legal_entity': isDD ? 'dd' : 'barunson',
+              '_invSource': 'empty-snapshot', '_siteCode': isDD ? 'BHC2' : 'BK10'
+            };
+          });
+          ok(res, { products: _emptyOut, updated: new Date().toISOString(), count: _emptyOut.length, source: 'empty-snapshot', message: '아직 동기화된 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요. (현재 재고 0 으로 표시)' });
+          return;
+        } catch (_fbErr) {
+          console.error('[xerp-inventory] empty-snapshot fallback 실패:', _fbErr.message);
+          ok(res, { products: [], updated: new Date().toISOString(), count: 0, source: 'empty-snapshot', message: '아직 동기화된 데이터가 없습니다. 상단 [DB 동기화] 버튼을 눌러주세요.' });
+          return;
+        }
       } catch (e) {
         // 테이블 자체가 없는 경우 — live 폴백도 nginx 60s 넘어 HTML 504 나므로 회피
         // refresh=1 (관리자 셀프콜) 일 때만 live 허용, 일반 페이지 로드는 캐시/products만
