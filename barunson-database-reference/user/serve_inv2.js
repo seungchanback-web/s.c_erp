@@ -5925,6 +5925,50 @@ async function handleRequest(req, res) {
   //  - XERP mmInventory / mmInoutItem 원시 쿼리 (단일 코드)
   //  - LIKE 매칭으로 유사 코드도 함께 검색 (prefix/pad 차이 찾기)
   // ════════════════════════════════════════════════════════════════════
+  if (pathname === '/api/debug/env-status' && method === 'GET') {
+    // 환경변수 로드 상태 진단 — 비번은 길이만 노출해 SSL 로그/스샷 유출 방지.
+    const mask = (v) => v ? `[${String(v).length}자]` : '(없음)';
+    const src = (k) => envVars[k] ? '.env 파일' : (process.env[k] ? 'docker env' : '미설정');
+    const out = {
+      dotenv_path: dotenvPath,
+      dotenv_exists: require('fs').existsSync(dotenvPath),
+      xerp_config: {
+        server: xerpConfig.server || '(없음)',
+        port: xerpConfig.port,
+        user: xerpConfig.user || '(없음)',
+        password_len: mask(xerpConfig.password),
+        database: xerpConfig.database
+      },
+      bar_shop_config: {
+        server: barShopConfig.server || '(없음)',
+        port: barShopConfig.port,
+        user: barShopConfig.user || '(없음)',
+        password_len: mask(barShopConfig.password),
+        database: barShopConfig.database
+      },
+      dd_config: {
+        host: ddConfig.host || '(없음)',
+        port: ddConfig.port,
+        user: ddConfig.user || '(없음)',
+        password_len: mask(ddConfig.password)
+      },
+      sources: {
+        DB_SERVER: src('DB_SERVER'),
+        DB_USER: src('DB_USER'),
+        DB_PASSWORD: src('DB_PASSWORD'),
+        XERP_DB_SERVER: src('XERP_DB_SERVER'),
+        XERP_DB_USER: src('XERP_DB_USER'),
+        XERP_DB_PASSWORD: src('XERP_DB_PASSWORD'),
+        DD_DB_SERVER: src('DD_DB_SERVER'),
+        DD_DB_USER: src('DD_DB_USER'),
+        DD_DB_PASSWORD: src('DD_DB_PASSWORD')
+      },
+      xerp_pool_connected: !!xerpPool
+    };
+    ok(res, out);
+    return;
+  }
+
   if (pathname === '/api/debug/xerp-match' && method === 'GET') {
     const code = (parsed.searchParams.get('code') || '').trim();
     if (!code) { fail(res, 400, 'code 파라미터 필요'); return; }
