@@ -5879,11 +5879,15 @@ async function handleRequest(req, res) {
       syncLogId = info.lastInsertRowid;
       console.log('[sync] 시작 sync_log_id=' + syncLogId + ' (trigger=' + triggeredBy + ')');
     } catch (e) {
-      if (/does not exist|relation.*not exist/i.test(e.message)) {
-        console.warn('[sync] sync_log 테이블 미존재 → snapshot 비활성, live 리프레시 모드로 진행');
+      // 이전: "does not exist" 매칭으로 모두 snapshot_disabled 로 오폴백 → 실제 원인(컬럼 missing / 권한 / 기타) 묻힘.
+      // 수정: 에러 원문을 항상 로그하고, 테이블 자체가 없을 때만 snapshot_disabled 로 분기.
+      console.warn('[sync] sync_log INSERT 실패 원문:', e.message);
+      if (/relation\s+"sync_log"\s+does not exist/i.test(e.message)) {
+        console.warn('[sync] sync_log 테이블 자체가 없음 → snapshot 비활성, live 리프레시 모드로 진행');
         snapshotDisabled = true;
       } else {
-        console.error('[sync] sync_log INSERT 실패:', e.message);
+        // 그 외 에러 (컬럼 missing / 권한 부족 등) → 500 반환해 사용자·관리자에게 명확히 알림
+        console.error('[sync] sync_log INSERT 실패 (snapshot 모드 진입 불가):', e.message);
         fail(res, 500, 'sync_log 기록 실패: ' + e.message);
         return;
       }
