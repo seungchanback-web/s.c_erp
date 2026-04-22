@@ -5996,6 +5996,24 @@ async function handleRequest(req, res) {
           return;
         }
 
+        // ★ 자가복구: inventory_snapshot 테이블/컬럼 선제 보장 — UPSERT 전에 한 번 확인.
+        try {
+          await db.exec(`CREATE TABLE IF NOT EXISTS inventory_snapshot (
+            product_code   TEXT PRIMARY KEY,
+            legal_entity   TEXT DEFAULT 'barunson',
+            site_code      TEXT DEFAULT 'BK10',
+            current_stock  INTEGER DEFAULT 0,
+            monthly_out    INTEGER DEFAULT 0,
+            daily_out      INTEGER DEFAULT 0,
+            total_3m       INTEGER DEFAULT 0,
+            item_name      TEXT DEFAULT '',
+            synced_at      TEXT DEFAULT (datetime('now','localtime'))
+          )`);
+          for (const [col, type] of [['legal_entity',"TEXT DEFAULT 'barunson'"],['site_code',"TEXT DEFAULT 'BK10'"],['monthly_out',"INTEGER DEFAULT 0"],['daily_out',"INTEGER DEFAULT 0"],['total_3m',"INTEGER DEFAULT 0"],['item_name',"TEXT DEFAULT ''"],['synced_at',"TEXT DEFAULT ''"]]) {
+            try { await db.exec(`ALTER TABLE inventory_snapshot ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch(_) {}
+          }
+        } catch(_) {}
+
         // UPSERT — 전체를 하나의 트랜잭션으로 감싸서 fsync 1회로 줄임 (이전: 900건 × 개별 autocommit).
         // 실패 카운트도 기록하여 sync_log.fail_count 에 반영 (이전에는 버려짐).
         let successCount = 0;
