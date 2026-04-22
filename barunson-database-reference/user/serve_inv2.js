@@ -5428,18 +5428,66 @@ async function handleRequest(req, res) {
     }
 
     try {
+      // ★ Fix #5: 전체 live 쿼리에 하드 타임아웃 45s 부여.
+      // chunk 별 7s + 재시도 15s 가 있지만 chunk 수가 많으면 누적 합계가 nginx 60s 를 넘길 수 있음.
+      // 45s 초과 시 TIMEOUT 플래그와 함께 snapshot/products-only fallback 으로 응답 — 504 캐스케이드 방지.
+      const HARD_BUDGET_MS = 45_000;
+      const TIMEOUT_SENTINEL = Symbol('xerp_live_timeout');
+      const withBudget = (p) => Promise.race([
+        p,
+        new Promise(resolve => setTimeout(() => resolve(TIMEOUT_SENTINEL), HARD_BUDGET_MS))
+      ]);
+
       let products = [];
+      let liveTimedOut = false;
       if (company === 'barunson') {
-        products = await fetchCompanyInventory('barunson');
+        const r = await withBudget(fetchCompanyInventory('barunson'));
+        if (r === TIMEOUT_SENTINEL) liveTimedOut = true; else products = r;
       } else if (company === 'dd') {
-        products = await fetchCompanyInventory('dd');
+        const r = await withBudget(fetchCompanyInventory('dd'));
+        if (r === TIMEOUT_SENTINEL) liveTimedOut = true; else products = r;
       } else {
-        // all: 둘 다 조회 후 병합
-        const [bs, dd] = await Promise.all([
+        // all: 둘 다 조회 후 병합 — 총 시간도 45s 버짓 내에서 끝나야 함
+        const combined = withBudget(Promise.all([
           fetchCompanyInventory('barunson').catch(e => { console.error('barunson 조회 실패:', e.message); return []; }),
           fetchCompanyInventory('dd').catch(e => { console.error('dd 조회 실패:', e.message); return []; })
-        ]);
-        products = [...bs, ...dd];
+        ]));
+        const r = await combined;
+        if (r === TIMEOUT_SENTINEL) liveTimedOut = true;
+        else { const [bs, dd] = r; products = [...bs, ...dd]; }
+      }
+
+      if (liveTimedOut) {
+        // products-only fallback — 로컬 products 테이블만 조회해서 재고 0 으로 응답.
+        // 사용자는 재고 수치만 안 보일 뿐 페이지 자체는 뜸 → 504 대비 훨씬 나음.
+        console.warn(`[xerp-inventory] live 45s 타임아웃 — products-only fallback (company=${company})`);
+        try {
+          const productFilterParts = ["status IN ('active','inactive')"];
+          if (company === 'barunson') productFilterParts.push("(product_code NOT LIKE 'DD%' AND origin != 'DD')");
+          else if (company === 'dd') productFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
+          const fbRows = await db.prepare(
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${productFilterParts.join(' AND ')}`
+          ).all();
+          const fbOut = fbRows.map(p => {
+            const code = (p.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim();
+            const isDD = code.startsWith('DD') || p.origin === 'DD';
+            return {
+              '제품코드': code, '품목명': p.product_name || '', '브랜드': p.brand || '',
+              '생산지': p.origin || '', '현재고': 0, '가용재고': 0, '요청량': 0,
+              '_xerpMonthly': 0, '_xerpDaily': 0, '_xerpTotal3m': 0,
+              '_원자재코드': p.material_code || '', '_원재료용지명': p.material_name || '',
+              '_절': p.cut_spec || '', '_조판': p.jopan || '', '_원지사': p.paper_maker || '',
+              '_후공정업체': p.post_vendor || '',
+              'legal_entity': isDD ? 'dd' : 'barunson',
+              '_invSource': 'live-timeout', '_siteCode': isDD ? 'BHC2' : 'BK10'
+            };
+          });
+          ok(res, { products: fbOut, updated: new Date().toISOString(), count: fbOut.length, source: 'live-timeout', message: 'XERP 응답 지연 (45s 초과) — 재고 수치 없이 목록만 표시. 다시 시도해주세요.' });
+          return;
+        } catch (fbErr) {
+          fail(res, 504, 'XERP 응답 지연 (45s) + products-only fallback 실패: ' + fbErr.message);
+          return;
+        }
       }
 
       if (!products.length) {
