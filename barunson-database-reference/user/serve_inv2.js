@@ -1286,6 +1286,14 @@ try {
     triggered_by  TEXT DEFAULT 'manual'
   )`);
   await db.exec("CREATE INDEX IF NOT EXISTS idx_synclog_type_time ON sync_log(sync_type, started_at)");
+  // 상태별 조회 최적화 (stale 감지 / /api/sync/status 모두 status='running' 으로 필터)
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_synclog_status ON sync_log(status) WHERE status='running'");
+  // 서버 크래시/재시작 직후 남은 running row 자동 해제.
+  // 크래시되면 해당 node 프로세스는 이미 죽었으므로 락을 정리하지 않으면 409가 영구화됨.
+  try {
+    const cleared = await db.prepare("UPDATE sync_log SET status='failed', error_msg='서버 재시작 감지 — 자동 해제', finished_at=datetime('now','localtime') WHERE status='running'").run();
+    if (cleared && cleared.changes > 0) console.log(`[init] sync_log stale 자동 해제: ${cleared.changes}건`);
+  } catch(_) {}
   console.log('[init] sync_log 테이블 OK');
 } catch(e) {
   console.error('[init] ★ sync_log 테이블 생성 실패:', e.message);
