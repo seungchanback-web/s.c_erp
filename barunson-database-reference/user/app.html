@@ -20902,11 +20902,24 @@ async function updateSyncStatus() {
       _syncStatusTimer = setTimeout(updateSyncStatus, 3000);
     } else if (d.last_success_at) {
       // 이전 동기화 성공 기록이 있으면 날짜/시간만 단순 표시 (이모지/개수 제거, 회색 중립 스타일)
-      const dt = new Date(String(d.last_success_at).replace(' ', 'T'));
-      const mm = dt.getMonth() + 1, dd = dt.getDate();
-      const hh = String(dt.getHours()).padStart(2,'0'), mn = String(dt.getMinutes()).padStart(2,'0');
+      // PG timestamptz 포맷 ('2026-04-22 09:08:51.123456+00') 과 KST 로컬 포맷 모두 안전 파싱.
+      let dt;
+      const s = String(d.last_success_at);
+      // ISO 스타일 파싱 시도 — 공백을 T 로, fractional seconds 잘라서, +00 → +00:00 으로 정규화
+      const iso = s.replace(' ', 'T').replace(/(\.\d{1,6})/, (m)=>m.slice(0,4)).replace(/([+-]\d{2})$/, '$1:00');
+      dt = new Date(iso);
+      if (isNaN(dt.getTime())) {
+        // KST 로컬 텍스트 가정 — 끝에 +09:00 붙여 재시도
+        dt = new Date(s.replace(' ', 'T') + '+09:00');
+      }
       badge.style.display = 'inline-block';
-      badge.textContent = `마지막 동기화 ${mm}/${dd} ${hh}:${mn}`;
+      if (isNaN(dt.getTime())) {
+        badge.textContent = `마지막 동기화 완료`;
+      } else {
+        const mm = dt.getMonth() + 1, dd = dt.getDate();
+        const hh = String(dt.getHours()).padStart(2,'0'), mn = String(dt.getMinutes()).padStart(2,'0');
+        badge.textContent = `마지막 동기화 ${mm}/${dd} ${hh}:${mn}`;
+      }
       badge.style.cssText = 'display:inline-block;font-size:11px;padding:3px 8px;border-radius:10px;background:#f1f5f9;color:#64748b';
     } else {
       // 이전 동기화 기록 없음 → 노란색 "⚠️ 동기화 필요" 제거, 배지 자체 숨김
