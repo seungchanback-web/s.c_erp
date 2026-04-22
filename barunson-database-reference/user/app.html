@@ -20863,19 +20863,22 @@ async function updateSyncStatus() {
       }
       const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
       const elapsedTxt = mm > 0 ? `${mm}m ${ss}s` : `${elapsed}s`;
+      badge.style.display = 'inline-block';
       badge.textContent = `⏳ 동기화 중... (${elapsedTxt} 경과)`;
-      badge.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:10px;background:#dbeafe;color:#1e40af';
+      badge.style.cssText = 'display:inline-block;font-size:11px;padding:3px 8px;border-radius:10px;background:#dbeafe;color:#1e40af';
       // 3초 후 자가 갱신 (running 동안만 계속 폴링)
       _syncStatusTimer = setTimeout(updateSyncStatus, 3000);
     } else if (d.last_success_at) {
+      // 이전 동기화 성공 기록이 있으면 날짜/시간만 단순 표시 (이모지/개수 제거, 회색 중립 스타일)
       const dt = new Date(String(d.last_success_at).replace(' ', 'T'));
       const mm = dt.getMonth() + 1, dd = dt.getDate();
       const hh = String(dt.getHours()).padStart(2,'0'), mn = String(dt.getMinutes()).padStart(2,'0');
-      badge.textContent = `✅ 마지막 동기화: ${mm}/${dd} ${hh}:${mn} (${d.last_success_count}개)`;
-      badge.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:10px;background:#dcfce7;color:#166534';
+      badge.style.display = 'inline-block';
+      badge.textContent = `마지막 동기화 ${mm}/${dd} ${hh}:${mn}`;
+      badge.style.cssText = 'display:inline-block;font-size:11px;padding:3px 8px;border-radius:10px;background:#f1f5f9;color:#64748b';
     } else {
-      badge.textContent = '⚠️ 동기화 필요';
-      badge.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:10px;background:#fef3c7;color:#92400e';
+      // 이전 동기화 기록 없음 → 노란색 "⚠️ 동기화 필요" 제거, 배지 자체 숨김
+      badge.style.display = 'none';
     }
   } catch (_) {}
 }
