@@ -3711,6 +3711,43 @@ Object.assign(routeCtx, {
   ensureXerpPool: typeof ensureXerpPool !== 'undefined' ? ensureXerpPool : null,
 });
 
+// ── legal_entity 2차 ALTER (뒤늦게 CREATE 된 trade_document/defects/batch_master/work_orders 대응) ──
+// 1차 ALTER 루프(line ~1560)는 이 테이블들이 아직 CREATE 전이라 silent-fail 했음.
+// 이제 모든 CREATE TABLE 이 끝났으니 누락된 것들만 재시도.
+try {
+  const _entityTablesLate = ['trade_document', 'defects', 'batch_master', 'work_orders'];
+  let _lateOk = 0;
+  for (const tbl of _entityTablesLate) {
+    try {
+      const chk = await db.prepare("SELECT 1 AS x FROM information_schema.columns WHERE table_name=? AND column_name='legal_entity'").get(tbl);
+      if (!chk) {
+        await db.exec(`ALTER TABLE ${tbl} ADD COLUMN legal_entity TEXT DEFAULT 'barunson'`);
+        await db.prepare(`UPDATE ${tbl} SET legal_entity='barunson' WHERE legal_entity IS NULL OR legal_entity=''`).run().catch(()=>{});
+        _lateOk++;
+      }
+    } catch(e) { /* 테이블 자체가 없으면 skip */ }
+  }
+  if (_lateOk) console.log(`[entity 2nd pass] ${_lateOk}개 테이블에 legal_entity 추가 완료`);
+} catch(_) {}
+
+// ── products 누락 컬럼 보강 (product_spec 등 — reloadProductInfoFromDB 의 SELECT 에서 참조) ──
+// products 테이블은 외부 마이그레이션/수동 DDL 로 생성된 케이스가 많아 스키마 편차 발생.
+// 코드가 참조하는 컬럼이 없으면 런타임 쿼리 전체 실패 → reloadProductInfoFromDB 재로드 실패 연쇄.
+try {
+  const productsCols = [
+    ['product_spec', "TEXT DEFAULT ''"],
+    ['thomson',  "TEXT DEFAULT ''"],
+    ['envelope', "TEXT DEFAULT ''"],
+    ['seari',    "TEXT DEFAULT ''"],
+    ['laser',    "TEXT DEFAULT ''"],
+    ['cutting',  "TEXT DEFAULT ''"],
+    ['silk',     "TEXT DEFAULT ''"]
+  ];
+  for (const [col, type] of productsCols) {
+    try { await db.exec(`ALTER TABLE products ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch(_) {}
+  }
+} catch(_) {}
+
 // 라우트 모듈 로드 (새 기능은 모듈로 추가)
 const moduleRouters = [];
 try {
