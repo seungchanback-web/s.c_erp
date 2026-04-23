@@ -6167,15 +6167,15 @@ async function handleRequest(req, res) {
         } catch(_) {}
 
         // UPSERT — 전체를 하나의 트랜잭션으로 감싸서 fsync 1회로 줄임 (이전: 900건 × 개별 autocommit).
-        // 실패 카운트도 기록하여 sync_log.fail_count 에 반영 (이전에는 버려짐).
+        // ★ 추가로 multi-row VALUES 로 배치화 (BATCH_SIZE=200). 이전엔 .run() 을 900번 호출 → PG 어댑터 사용 시
+        //   매 row 마다 네트워크 왕복 발생. 이제 ~5회 왕복으로 축소 → 10~50배 가속 기대.
+        //   배치 실패 시 해당 배치만 row-by-row 폴백하여 문제 품목 코드 식별 (기존 fail 로그 포맷 유지).
         let successCount = 0;
         let failCount = 0;
         const failedCodes = [];
-        const runUpsert = db.transaction(async () => {
-          const upsert = db.prepare(`INSERT INTO inventory_snapshot
-            (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
-            VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))
-            ON CONFLICT(product_code) DO UPDATE SET
+        const BATCH_SIZE = 200;
+        const rowPh = "(?,?,?,?,?,?,?,?,datetime('now','localtime'))";
+        const onConflict = `ON CONFLICT(product_code) DO UPDATE SET
               legal_entity=excluded.legal_entity,
               site_code=excluded.site_code,
               current_stock=excluded.current_stock,
@@ -6183,18 +6183,42 @@ async function handleRequest(req, res) {
               daily_out=excluded.daily_out,
               total_3m=excluded.total_3m,
               item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
-              synced_at=excluded.synced_at`);
-          for (const p of rows) {
+              synced_at=excluded.synced_at`;
+        const rowParams = p => [
+          p['제품코드'], p['legal_entity'], p['_siteCode'],
+          p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
+          p['품목명'] || ''
+        ];
+        const runUpsert = db.transaction(async () => {
+          // 폴백용 단건 UPSERT (배치 실패 시 어느 row 가 원인인지 식별)
+          const singleUpsert = db.prepare(`INSERT INTO inventory_snapshot
+            (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
+            VALUES ${rowPh}
+            ${onConflict}`);
+
+          for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const batch = rows.slice(i, i + BATCH_SIZE);
+            const placeholders = batch.map(() => rowPh).join(',');
+            const batchSql = `INSERT INTO inventory_snapshot
+              (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
+              VALUES ${placeholders}
+              ${onConflict}`;
+            const flatParams = batch.flatMap(rowParams);
             try {
-              await upsert.run(
-                p['제품코드'], p['legal_entity'], p['_siteCode'],
-                p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
-                p['품목명'] || ''
-              );
-              successCount++;
-            } catch (e) {
-              failCount++;
-              if (failedCodes.length < 10) failedCodes.push(p['제품코드'] + ':' + e.message.split('\n')[0]);
+              await db.prepare(batchSql).run(...flatParams);
+              successCount += batch.length;
+            } catch (batchErr) {
+              // 배치 전체 실패 → row-by-row 폴백 (잘못된 품목만 fail 로 집계)
+              console.warn(`[sync bg] batch ${i}..${i+batch.length-1} 실패, row-by-row 재시도:`, batchErr.message.split('\n')[0]);
+              for (const p of batch) {
+                try {
+                  await singleUpsert.run(...rowParams(p));
+                  successCount++;
+                } catch (e) {
+                  failCount++;
+                  if (failedCodes.length < 10) failedCodes.push(p['제품코드'] + ':' + e.message.split('\n')[0]);
+                }
+              }
             }
           }
         });
@@ -6316,14 +6340,18 @@ async function handleRequest(req, res) {
       if (!validCodes.length) { ok(res, {}); return; }
 
       // ★ readonly 10초 타임아웃 대응: 50개씩 chunk + req.timeout=7000
+      // ★ 병렬화: 이전엔 순차 await 로 chunk 수만큼 누적 대기 (N*평균지연). 이제 MAX_CONCURRENT 웨이브로 묶어 처리.
+      //   XERP pool max=5 이므로 동시 3으로 제한 → 다른 요청용 커넥션 여유 2개 확보. 평균 3~5배 가속.
       const CHUNK_SIZE = 50;
+      const MAX_CONCURRENT = 3;
       const codeChunks = [];
       for (let i = 0; i < validCodes.length; i += CHUNK_SIZE) codeChunks.push(validCodes.slice(i, i + CHUNK_SIZE));
 
       const usage = {};
       let okCount = 0, failCount = 0;
-      for (let i = 0; i < codeChunks.length; i++) {
-        const inClause = codeChunks[i].map(c => `'${c}'`).join(',');
+
+      const processChunk = async (chunk, idx) => {
+        const inClause = chunk.map(c => `'${c}'`).join(',');
         try {
           const reqQ = xerpPool.request()
             .input('start3m', sql.NChar(16), fmt(start3m))
@@ -6346,8 +6374,14 @@ async function handleRequest(req, res) {
           okCount++;
         } catch (e) {
           failCount++;
-          console.warn(`[xerp-monthly] chunk ${i+1}/${codeChunks.length} 실패:`, e.message);
+          console.warn(`[xerp-monthly] chunk ${idx+1}/${codeChunks.length} 실패:`, e.message);
         }
+      };
+
+      // 웨이브 단위 병렬 처리 — Promise.all 로 MAX_CONCURRENT 개씩 동시에 대기
+      for (let i = 0; i < codeChunks.length; i += MAX_CONCURRENT) {
+        const wave = codeChunks.slice(i, i + MAX_CONCURRENT);
+        await Promise.all(wave.map((chunk, j) => processChunk(chunk, i + j)));
       }
       console.log(`XERP 월출고: ${okCount}/${codeChunks.length} chunk 성공 (실패 ${failCount}), ${Object.keys(usage).length}개 품목`);
 
