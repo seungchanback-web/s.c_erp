@@ -7639,6 +7639,7 @@ function classifyItem(p){
   p._totalTracked = p._pendingQty + p._receivedNotSynced;  // 전체 추적수량
   p._pendingOS = po ? po.os_numbers : [];
   p._pendingPO = po ? po.po_numbers : [];
+  p._pendingPoTypes = po ? (po.po_types || []) : [];
   p._lastOrderDate = po ? po.last_order_date : '';
 
   // ── 예상소진일 = 오늘 + 가용일수 (재고=0 기준) ──
@@ -7795,8 +7796,8 @@ async function processData(products){
     const o=document.createElement('option');o.value=b;o.textContent=`${b||'(없음)'}(${n})`;sel.appendChild(o);
   });
 
-  // 디폴트 정렬: 일평균 출고수량 내림차순 (가장 잘 나가는 품목 먼저)
-  sortK='_dailyUsage';sortD='desc';
+  // 디폴트 정렬: 월출고수량 내림차순 (가장 많이 나가는 품목 먼저). 소진 후 단종은 render() 에서 항상 맨 아래 블록으로 모임.
+  sortK='_xerpMonthly';sortD='desc';
   buildHeader();
   render();
 
@@ -7908,7 +7909,8 @@ function switchInvMainTab(tab){
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('#invStatusFilters .tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
-  if(tab==='all'){sortK='_dailyUsage';sortD='desc';}
+  // 기본 정렬: '전체' 탭은 월출고(_xerpMonthly) 내림차순. 운영구분별 소진 후 단종 그룹핑은 render() 에서 1차 키로 강제.
+  if(tab==='all'){sortK='_xerpMonthly';sortD='desc';}
   else if(tab==='urgent'){sortK='가용재고';sortD='asc';}
   else if(tab==='danger'){sortK='_remainDays';sortD='asc';}
   else if(tab==='safe'){sortK='_remainDays';sortD='asc';}
@@ -7999,10 +8001,16 @@ function renderCell(c, p){
   if(c.special==='pendingQty'){
     const pq=parseInt(p._pendingQty)||0;
     const rns=parseInt(p._receivedNotSynced)||0;
-    // XERP OS 번호가 있으면 입고중(미입고) 표시 숨김 — 예상재고+발주수량으로 XERP 등록 확인하는 용도의 역할 완료.
-    // 입고완료(rns)는 별도 쿼리에서 os_number IS NULL 인 PO만 집계하므로 그대로 노출.
+    // 입고중(미입고) 표시를 숨기는 두 가지 경우:
+    //  1) XERP OS 번호 이미 있음 → 등록 확인 역할 완료 (원재료 케이스)
+    //  2) pending PO 들이 전부 원재료/후공정 외 (= 상품) → 애초에 OS 등록 개념이 없음.
+    //     po_type 이 '원재료','후공정','material' 중 하나라도 있으면 '원재료성 PO' 로 간주해 기존 규칙 유지.
     const hasOs=(p._pendingOS?.length||0)>0;
-    const showPq=pq>0&&!hasOs;
+    const poTypes=p._pendingPoTypes||[];
+    const MATERIAL_TYPES=['원재료','후공정','material'];
+    const hasMaterialPO = poTypes.length>0 && poTypes.some(t => MATERIAL_TYPES.includes(t));
+    const isProductOnly = poTypes.length>0 && !hasMaterialPO;
+    const showPq = pq>0 && !hasOs && !isProductOnly;
     if(!showPq&&!rns)return`<td class="n" style="color:#ddd">-</td>`;
     const osStr=p._pendingOS?.length?` title="OS: ${p._pendingOS.join(', ')}"`:'';
     let html='<td class="n" style="cursor:help"'+osStr+'>';
@@ -8238,12 +8246,19 @@ function render(){
   });
 
   if(sortK){
+    // ★ 1차 키는 항상 운영구분 그룹: 소진 후 단종 품목은 항상 맨 아래로 모음 (사용자 지정 정렬과 무관).
+    //    2차 키는 사용자가 선택한 sortK (기본값은 _xerpMonthly desc — switchTab 에서 지정).
     f.sort((a,b)=>{
+      const catA=productNotes[a['제품코드']]?.op_category||'';
+      const catB=productNotes[b['제품코드']]?.op_category||'';
+      const rankA = catA==='소진후단종' ? 1 : 0;
+      const rankB = catB==='소진후단종' ? 1 : 0;
+      if(rankA!==rankB) return rankA-rankB;  // 소진 후 단종은 항상 아래 블록
       let va,vb;
       if(sortK==='운영구분'){
         const opOrder={'운영품목':1,'소진후단종':2,'이력없음':3,'기타':4,'':5};
-        va=opOrder[productNotes[a['제품코드']]?.op_category||'']||5;
-        vb=opOrder[productNotes[b['제품코드']]?.op_category||'']||5;
+        va=opOrder[catA]||5;
+        vb=opOrder[catB]||5;
       } else {
         va=a[sortK]??''; vb=b[sortK]??'';
       }

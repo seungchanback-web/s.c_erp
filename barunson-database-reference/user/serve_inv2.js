@@ -5836,6 +5836,7 @@ async function handleRequest(req, res) {
                SUM(COALESCE(i.received_qty,0)) as partial_received_qty,
                STRING_AGG(DISTINCT h.os_number, ',') as os_numbers,
                STRING_AGG(DISTINCT h.po_number, ',') as po_numbers,
+               STRING_AGG(DISTINCT h.po_type, ',') as po_types,
                MIN(h.due_date) as earliest_due,
                MAX(h.status) as latest_status,
                MAX(h.po_date) as latest_po_date
@@ -5869,6 +5870,7 @@ async function handleRequest(req, res) {
           received_not_synced: 0,
           os_numbers: (r.os_numbers || '').split(',').filter(Boolean),
           po_numbers: (r.po_numbers || '').split(',').filter(Boolean),
+          po_types: (r.po_types || '').split(',').filter(Boolean),
           earliest_due: r.earliest_due || '',
           status: r.latest_status || '',
           last_order_date: r.latest_po_date || ''
@@ -5880,7 +5882,7 @@ async function handleRequest(req, res) {
           map[r.product_code] = {
             pending_qty: 0, ordered_qty: 0, partial_received_qty: 0,
             received_not_synced: 0,
-            os_numbers: [], po_numbers: [],
+            os_numbers: [], po_numbers: [], po_types: [],
             earliest_due: '', status: 'received', last_order_date: ''
           };
         }
