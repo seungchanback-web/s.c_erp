@@ -4300,6 +4300,7 @@ function closeMegaMenu() { /* no-op */ }
             <th>제품코드</th>
             <th>임시코드</th>
             <th>품목명</th>
+            <th>규격</th>
             <th>브랜드</th>
             <th>카테고리</th>
             <th>운영구분</th>
@@ -4310,7 +4311,6 @@ function closeMegaMenu() { /* no-op */ }
             <th>절</th>
             <th>조판</th>
             <th>제지사</th>
-            <th>규격</th>
             <th></th>
           </tr></thead>
           <tbody id="pmTableBody">
@@ -4432,6 +4432,7 @@ function closeMegaMenu() { /* no-op */ }
       <div class="form-group"><label>제품코드 *</label><input type="text" id="pmCode" placeholder="예: BI202"></div>
       <div class="form-group"><label>임시코드</label><input type="text" id="pmTempCode" placeholder="임시코드"></div>
       <div class="form-group"><label>품목명</label><input type="text" id="pmName" placeholder="품목명"></div>
+      <div class="form-group"><label>규격 <span style="font-size:10px;color:#6b7280;font-weight:400">(XERP 자동)</span></label><input type="text" id="pmSpec" placeholder="210*297"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label style="color:#7c3aed;font-weight:700">법인 *</label>
@@ -4471,10 +4472,7 @@ function closeMegaMenu() { /* no-op */ }
     </div>
     <div class="form-row">
       <div class="form-group"><label>제지사</label><input type="text" id="pmPaperMaker" placeholder="대한"></div>
-      <div class="form-group"><label>규격 <span style="font-size:10px;color:#6b7280;font-weight:400">(XERP 자동 동기화, 수동 편집 가능)</span></label><input type="text" id="pmSpec" placeholder="210*297"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group" style="flex:1"><label>비고</label><input type="text" id="pmMemo" placeholder=""></div>
+      <div class="form-group"><label>비고</label><input type="text" id="pmMemo" placeholder=""></div>
     </div>
     <div style="display:flex; gap:16px; align-items:center; margin-top:8px;">
       <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
@@ -21469,6 +21467,7 @@ function renderProductMgmt(){
       <td style="${cellStyle};font-weight:600" title="${esc(p.product_code)}">${entityBadge}${esc(p.product_code)}</td>
       <td style="${cellStyle};color:#6b7280" title="${esc(p.temp_code||'')}">${esc(p.temp_code||'')}</td>
       <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}${originVariantBadge}</td>
+      <td style="${cellStyle}" title="${esc(p.spec||'')}">${esc(p.spec||'')}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
       <td style="${cellStyle};text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${opFg};background:${opBg}">${opCatLabel(opCat)||'-'}</span></td>
@@ -21479,7 +21478,6 @@ function renderProductMgmt(){
       <td style="${cellStyle};text-align:center">${p.cut_spec||''}</td>
       <td style="${cellStyle};text-align:center">${p.jopan||''}</td>
       <td style="${cellStyle}">${esc(p.paper_maker||'')}</td>
-      <td style="${cellStyle}" title="${esc(p.spec||'')}">${esc(p.spec||'')}</td>
       <td>
         <button class="btn btn-sm" style="padding:2px 6px;font-size:11px" onclick="editProduct(${p.id})">수정</button>
         <button class="btn btn-sm btn-urgent" style="padding:2px 6px;font-size:11px" onclick="deleteProduct(${p.id})">삭제</button>

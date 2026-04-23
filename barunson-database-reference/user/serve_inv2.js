@@ -783,7 +783,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     return {
       ...it,
       material_code: pi['원자재코드'] || '',
-      material_name: pi['원재료용지명'] || it.spec || '',
+      // 원재료명: 규격 컬럼이 별도로 존재하므로 it.spec fallback 제거 (중복 표시 방지)
+      material_name: pi['원재료용지명'] || '',
       cut_spec: pi['절'] || '',
       ream_qty: reamsStr,
     };
@@ -808,6 +809,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <th style="${thStyle}">제품코드</th>
       <th style="${thStyle}">원재료코드</th>
       <th style="${thStyle}">원재료명</th>
+      <th style="${thStyle}">규격</th>
       <th style="${thStyle};text-align:right">발주수량(R)</th>
       <th style="${thStyle};text-align:center">절</th>
     </tr>`;
@@ -815,6 +817,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
       <td style="${tdStyle}">${it.material_code || ''}</td>
       <td style="${tdStyle}">${it.material_name || ''}</td>
+      <td style="${tdStyle}">${it.spec || ''}</td>
       <td style="${tdStyle};text-align:right;font-weight:700;font-size:15px">${it.ream_qty || 0}R <span style="font-size:11px;color:#888;font-weight:400">(${(it.ordered_qty || 0).toLocaleString()}매)</span></td>
       <td style="${tdStyle};text-align:center">${it.cut_spec || ''}</td>
     </tr>`).join('');
@@ -950,6 +953,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <th>제품코드${isChinaVendor ? '<br><span style="font-weight:400;color:#999">产品编号</span>' : ''}</th>
           <th>원재료코드</th>
           <th>원재료명${isChinaVendor ? '<br><span style="font-weight:400;color:#999">材料名称</span>' : ''}</th>
+          <th>규격${isChinaVendor ? '<br><span style="font-weight:400;color:#999">规格</span>' : ''}</th>
           <th class="right">발주수량(R)${isChinaVendor ? '<br><span style="font-weight:400;color:#999">订购量</span>' : ''}</th>
           <th class="right">매수</th>
           <th class="center">절</th>
@@ -968,6 +972,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td class="bold">${it.product_code || ''}</td>
           <td>${it.material_code || ''}</td>
           <td>${it.material_name || ''}</td>
+          <td>${it.spec || ''}</td>
           <td class="right bold" style="font-size:14px">${it.ream_qty || 0}R</td>
           <td class="right" style="color:#888">${(it.ordered_qty || 0).toLocaleString()}</td>
           <td class="center">${it.cut_spec || ''}</td>
@@ -980,7 +985,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td>${it.spec || ''}</td>
         </tr>`).join('')}
         <tr class="total-row">
-          <td colspan="${isRawMaterial ? 4 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
+          <td colspan="${isRawMaterial ? 5 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
           ${isRawMaterial ? `
             <td class="right" style="border:1px solid #ccc;font-size:14px">${totalReams % 1 === 0 ? totalReams : totalReams.toFixed(1)}R</td>
             <td class="right" style="border:1px solid #ccc">${totalQty.toLocaleString()}</td>
@@ -10379,6 +10384,9 @@ async function handleRequest(req, res) {
       for (const it of items) {
         await itemStmt.run(poId, it.product_code || '', it.brand || '', it.process_type || '', it.ordered_qty || 0, it.spec || '', it.notes || '');
       }
+      // 규격 자동 보정 — 품목 단위로 spec 이 비어 있으면 products.spec 에서 복사. 발주서 HTML 렌더러가 i.spec 을 사용하므로
+      // 프론트가 spec 을 안 보내도 이 단계에서 자동 채워짐. 이미 채워진 건 덮어쓰지 않음.
+      try { await db.prepare(`UPDATE po_items SET spec = COALESCE((SELECT spec FROM products WHERE product_code = po_items.product_code), '') WHERE po_id = ? AND (spec IS NULL OR spec = '')`).run(poId); } catch(_){}
       return poId;
     });
     const poId = await tx();
