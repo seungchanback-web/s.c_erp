@@ -7358,6 +7358,8 @@ function invalidateInventoryCache(){
 
 // 창고 드롭다운 채우기 — RAW 의 모든 _warehouses 키 합집합으로 옵션 구성.
 // 사용자가 "전체 창고"(빈값) 선택 시 가용재고는 합산. 특정 창고 선택 시 그 창고 재고만 표시.
+// 기본 창고 — 데이터에 이 코드가 있으면 첫 진입 시 자동 선택됨. '파주물류센터(제품)' 창고.
+const DEFAULT_WAREHOUSE_CODE = 'MF01';
 function populateWarehouseFilter(){
   const sel = document.getElementById('warehouseFilter');
   if (!sel) return;
@@ -7368,11 +7370,14 @@ function populateWarehouseFilter(){
     for (const k of Object.keys(wh)) codes.add(k);
   }
   const sorted = Array.from(codes).sort();
-  // 기존 선택값 보존 (페이지 재방문 시)
+  // 기존 선택값 보존 (페이지 재방문 시) — 단 이전값이 유효 창고코드여야 함.
+  // 이전값이 없거나 '전체'(빈값) 이면 기본창고(MF01) 로 자동 선택.
   const prev = sel.value;
   sel.innerHTML = '<option value="">전체 창고</option>' +
     sorted.map(c => `<option value="${c}">${c}</option>`).join('');
-  if (prev && (prev === '' || codes.has(prev))) sel.value = prev;
+  if (prev && codes.has(prev)) sel.value = prev;
+  else if (codes.has(DEFAULT_WAREHOUSE_CODE)) sel.value = DEFAULT_WAREHOUSE_CODE;
+  else sel.value = '';
 }
 
 // 현재 선택된 창고 (빈문자열 = 전체)
