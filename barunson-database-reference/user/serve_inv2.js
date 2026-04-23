@@ -5634,7 +5634,7 @@ async function handleRequest(req, res) {
         ];
         for (const cfg of bhcCandidates) {
           try {
-            console.log(`[xerp-inv dd] BHC 연결 시도: ${cfg._label}`);
+            console.log(`[xerp-inv dd] BHC 연결 시도: ${cfg._label}, pw_len=${(cfg.password||'').length}, pw_last=${(cfg.password||'').slice(-1)}, server=${cfg.server}`);
             const { _label, ...poolCfg } = cfg;
             workPool = new sql.ConnectionPool(poolCfg);
             await workPool.connect();
