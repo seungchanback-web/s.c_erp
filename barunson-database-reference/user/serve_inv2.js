@@ -220,6 +220,15 @@ const xerpConfig = {
   pool: { max: 5, min: 1, idleTimeoutMillis: 300000 }
 };
 
+// 재고 조회 시 특정 창고만 필터링 — 미설정이면 전체 창고 합산 (legacy 동작).
+// 사용자가 "파주물류센터(제품)" 한 창고만 보고 싶다고 해서 도입. WhCode 정확값은
+//   GET /api/debug/xerp-warehouses 로 조회 후 .env 에 XERP_INV_WAREHOUSE=<code> 설정.
+//   여러 창고 합산이 필요하면 콤마로 구분 (예: 'MF24,MF14').
+const XERP_INV_WAREHOUSE = (envVars.XERP_INV_WAREHOUSE || process.env.XERP_INV_WAREHOUSE || '').trim();
+const XERP_INV_WH_LIST = XERP_INV_WAREHOUSE ? XERP_INV_WAREHOUSE.split(',').map(s => s.trim()).filter(Boolean) : [];
+if (XERP_INV_WH_LIST.length > 0) console.log(`[xerp-inv] 창고 필터 활성: WhCode IN (${XERP_INV_WH_LIST.join(', ')})`);
+else console.log('[xerp-inv] 창고 필터 미설정 — 전체 창고 합산');
+
 // bar_shop1 전용 config — DB_* (readonly_user) 사용. server 는 XERP 와 동일 인스턴스지만
 // SQL 로그인이 달라서 (readonly_user vs readonly_erp) 별도 관리.
 // 기존엔 `{...xerpConfig, database: 'bar_shop1'}` 로 덮어써서 readonly_erp 가 bar_shop1 접근 권한 없으면 실패.
@@ -783,7 +792,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     return {
       ...it,
       material_code: pi['원자재코드'] || '',
-      material_name: pi['원재료용지명'] || it.spec || '',
+      // 원재료명: 규격 컬럼이 별도로 존재하므로 it.spec fallback 제거 (중복 표시 방지)
+      material_name: pi['원재료용지명'] || '',
       cut_spec: pi['절'] || '',
       ream_qty: reamsStr,
     };
@@ -808,6 +818,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <th style="${thStyle}">제품코드</th>
       <th style="${thStyle}">원재료코드</th>
       <th style="${thStyle}">원재료명</th>
+      <th style="${thStyle}">규격</th>
       <th style="${thStyle};text-align:right">발주수량(R)</th>
       <th style="${thStyle};text-align:center">절</th>
     </tr>`;
@@ -815,6 +826,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
       <td style="${tdStyle}">${it.material_code || ''}</td>
       <td style="${tdStyle}">${it.material_name || ''}</td>
+      <td style="${tdStyle}">${it.spec || ''}</td>
       <td style="${tdStyle};text-align:right;font-weight:700;font-size:15px">${it.ream_qty || 0}R <span style="font-size:11px;color:#888;font-weight:400">(${(it.ordered_qty || 0).toLocaleString()}매)</span></td>
       <td style="${tdStyle};text-align:center">${it.cut_spec || ''}</td>
     </tr>`).join('');
@@ -950,6 +962,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <th>제품코드${isChinaVendor ? '<br><span style="font-weight:400;color:#999">产品编号</span>' : ''}</th>
           <th>원재료코드</th>
           <th>원재료명${isChinaVendor ? '<br><span style="font-weight:400;color:#999">材料名称</span>' : ''}</th>
+          <th>규격${isChinaVendor ? '<br><span style="font-weight:400;color:#999">规格</span>' : ''}</th>
           <th class="right">발주수량(R)${isChinaVendor ? '<br><span style="font-weight:400;color:#999">订购量</span>' : ''}</th>
           <th class="right">매수</th>
           <th class="center">절</th>
@@ -968,6 +981,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td class="bold">${it.product_code || ''}</td>
           <td>${it.material_code || ''}</td>
           <td>${it.material_name || ''}</td>
+          <td>${it.spec || ''}</td>
           <td class="right bold" style="font-size:14px">${it.ream_qty || 0}R</td>
           <td class="right" style="color:#888">${(it.ordered_qty || 0).toLocaleString()}</td>
           <td class="center">${it.cut_spec || ''}</td>
@@ -980,7 +994,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td>${it.spec || ''}</td>
         </tr>`).join('')}
         <tr class="total-row">
-          <td colspan="${isRawMaterial ? 4 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
+          <td colspan="${isRawMaterial ? 5 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
           ${isRawMaterial ? `
             <td class="right" style="border:1px solid #ccc;font-size:14px">${totalReams % 1 === 0 ? totalReams : totalReams.toFixed(1)}R</td>
             <td class="right" style="border:1px solid #ccc">${totalQty.toLocaleString()}</td>
@@ -1555,6 +1569,11 @@ try { await db.exec("ALTER TABLE products ADD COLUMN post_vendor TEXT DEFAULT ''
 try { await db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'EA'"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN op_category TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN temp_code TEXT DEFAULT ''"); } catch(e) {}
+// 규격 — XERP mmInoutItem.ItemSpec 에서 1회성 동기화됨. 한번 채워지면 수동 수정 전까지 유지.
+try { await db.exec("ALTER TABLE products ADD COLUMN spec TEXT DEFAULT ''"); } catch(e) {}
+// inventory_snapshot 에 창고별 재고 JSON 컬럼 — { "MF01": 100, "MT01": 50, ... }
+// 프론트가 창고 드롭다운으로 즉시 필터링 가능. current_stock 은 전체 합산을 그대로 유지(legacy 호환).
+try { await db.exec("ALTER TABLE inventory_snapshot ADD COLUMN warehouses_json TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN moq TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN payment_terms TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN supplier_id INTEGER DEFAULT 0"); } catch(e) {}
@@ -4863,14 +4882,22 @@ async function handleRequest(req, res) {
     try { await db.prepare('SELECT temp_code FROM products LIMIT 1').get(); _hasTempCode = true; } catch(_){}
     try {
       let info;
-      const baseCols = 'product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo';
+      // op_category, is_new_product 는 PUT 핸들러에만 있었음. 신규등록 시에도 저장되도록 baseCols 포함.
+      const baseCols = 'product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, op_category, is_new_product, spec';
       const baseVals = [b.product_code, b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||''];
+        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0, b.spec||''];
       let cols = baseCols, vals = [...baseVals];
       if (_hasEntity.products) { cols += ', legal_entity'; vals.push(entity); }
       if (_hasTempCode) { cols += ', temp_code'; vals.push(b.temp_code||''); }
       const ph = vals.map((_,i)=>'?').join(',');
       info = await db.prepare(`INSERT INTO products (${cols}) VALUES (${ph})`).run(...vals);
+      // op_category → product_notes 동기화 (PUT 핸들러와 동일 — 재고현황 필터/그룹핑이 product_notes 를 참조)
+      if (b.op_category) {
+        try {
+          await db.prepare(`INSERT INTO product_notes (product_code, op_category, updated_at) VALUES (?,?,datetime('now','localtime'))
+            ON CONFLICT(product_code) DO UPDATE SET op_category=excluded.op_category, updated_at=excluded.updated_at`).run(b.product_code, b.op_category);
+        } catch(_){}
+      }
       ok(res, { id: info.lastInsertRowid });
     } catch(e) {
       fail(res, 400, e.message.includes('UNIQUE') ? '이미 등록된 품목코드입니다' : e.message);
@@ -4886,9 +4913,9 @@ async function handleRequest(req, res) {
     // temp_code 컬럼 존재 여부 런타임 체크
     let _hasTempCodeU = false;
     try { await db.prepare('SELECT temp_code FROM products LIMIT 1').get(); _hasTempCodeU = true; } catch(_){}
-    let setCols = 'product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?';
+    let setCols = 'product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, is_new_product=?, spec=?';
     let setVals = [b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||''];
+      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0, b.spec||''];
     if (_hasEntity.products) { setCols += ', legal_entity=?'; setVals.push(entity); }
     if (_hasTempCodeU) { setCols += ', temp_code=?'; setVals.push(b.temp_code||''); }
     // 매입관리 필드: lead_time_days, moq, payment_terms, supplier_id
@@ -4992,9 +5019,12 @@ async function handleRequest(req, res) {
     };
     for (const it of items) { if (it) it.origin = _normOriginBulk(it.origin); }
 
+    // is_new_product 추가 — 기존에는 엑셀에 '신제품' 컬럼이 있어도 DB 저장 안 됐음.
+    //   엑셀에 컬럼이 없으면 프론트가 0 으로 기본값 세팅하므로, ON CONFLICT 에서 excluded.is_new_product=0 이면
+    //   기존값 보존 (업데이트로 기존 신제품 플래그가 일괄 해제되는 사고 방지).
     const upsert = _hasEntity.products
-      ? db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category, legal_entity)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ? db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category, legal_entity, is_new_product)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(product_code) DO UPDATE SET
         product_name=CASE WHEN excluded.product_name='' THEN products.product_name ELSE excluded.product_name END,
         brand=CASE WHEN excluded.brand='' THEN products.brand ELSE excluded.brand END,
@@ -5007,9 +5037,10 @@ async function handleRequest(req, res) {
         memo=CASE WHEN excluded.memo='' THEN products.memo ELSE excluded.memo END,
         op_category=CASE WHEN excluded.op_category='' THEN products.op_category ELSE excluded.op_category END,
         legal_entity=CASE WHEN excluded.legal_entity='' THEN products.legal_entity ELSE excluded.legal_entity END,
+        is_new_product=CASE WHEN excluded.is_new_product=0 THEN products.is_new_product ELSE excluded.is_new_product END,
         updated_at=datetime('now','localtime')`)
-      : db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      : db.prepare(`INSERT INTO products (product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, memo, op_category, is_new_product)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(product_code) DO UPDATE SET
         product_name=CASE WHEN excluded.product_name='' THEN products.product_name ELSE excluded.product_name END,
         brand=CASE WHEN excluded.brand='' THEN products.brand ELSE excluded.brand END,
@@ -5021,6 +5052,7 @@ async function handleRequest(req, res) {
         paper_maker=CASE WHEN excluded.paper_maker='' THEN products.paper_maker ELSE excluded.paper_maker END,
         memo=CASE WHEN excluded.memo='' THEN products.memo ELSE excluded.memo END,
         op_category=CASE WHEN excluded.op_category='' THEN products.op_category ELSE excluded.op_category END,
+        is_new_product=CASE WHEN excluded.is_new_product=0 THEN products.is_new_product ELSE excluded.is_new_product END,
         updated_at=datetime('now','localtime')`);
 
     // op_category → product_notes 동기화용
@@ -5040,6 +5072,8 @@ async function handleRequest(req, res) {
           it.paper_maker||'', it.memo||'', it.op_category||''
         ];
         if (_hasEntity.products) _bArgs.push((it.legal_entity === 'dd') ? 'dd' : 'barunson');
+        // is_new_product 는 INSERT 컬럼 맨 끝에 위치 (_hasEntity 여부와 무관). 프론트에서 Boolean/0/1 모두 올 수 있어 강제 변환.
+        _bArgs.push(it.is_new_product ? 1 : 0);
         await upsert.run(..._bArgs);
         // op_category가 있으면 product_notes에도 동기화
         if (it.op_category) await upsertNote.run(it.product_code, it.op_category);
@@ -5388,7 +5422,7 @@ async function handleRequest(req, res) {
           else if (company === 'dd') productFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
           const productFilter = productFilterParts.join(' AND ');
           const products = await db.prepare(
-            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${productFilter}`
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor, spec FROM products WHERE ${productFilter}`
           ).all();
 
           const out = [];
@@ -5415,6 +5449,8 @@ async function handleRequest(req, res) {
               '_조판': p.jopan || '',
               '_원지사': p.paper_maker || '',
               '_후공정업체': p.post_vendor || '',
+              '_규격': p.spec || '',
+              '_warehouses': (() => { try { return s.warehouses_json ? JSON.parse(s.warehouses_json) || {} : {}; } catch(_) { return {}; } })(),
               'legal_entity': isDD ? 'dd' : 'barunson',
               '_invSource': s.synced_at ? 'snapshot' : 'no-sync',
               '_siteCode': s.site_code || (isDD ? 'BHC2' : 'BK10'),
@@ -5435,7 +5471,7 @@ async function handleRequest(req, res) {
           if (company === 'barunson') _emptyFilterParts.push("(product_code NOT LIKE 'DD%' AND origin != 'DD')");
           else if (company === 'dd') _emptyFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
           const _emptyRows = await db.prepare(
-            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${_emptyFilterParts.join(' AND ')}`
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor, spec FROM products WHERE ${_emptyFilterParts.join(' AND ')}`
           ).all();
           const _emptyOut = _emptyRows.map(p => {
             const code = (p.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim();
@@ -5446,7 +5482,7 @@ async function handleRequest(req, res) {
               '_xerpMonthly': 0, '_xerpDaily': 0, '_xerpTotal3m': 0,
               '_원자재코드': p.material_code || '', '_원재료용지명': p.material_name || '',
               '_절': p.cut_spec || '', '_조판': p.jopan || '', '_원지사': p.paper_maker || '',
-              '_후공정업체': p.post_vendor || '',
+              '_후공정업체': p.post_vendor || '', '_규격': p.spec || '', '_warehouses': {},
               'legal_entity': isDD ? 'dd' : 'barunson',
               '_invSource': 'empty-snapshot', '_siteCode': isDD ? 'BHC2' : 'BK10'
             };
@@ -5596,25 +5632,34 @@ async function handleRequest(req, res) {
         // 로컬 products 와 매칭. 쿼리 1회 → 실패 감지 명확, 타임아웃 1개만 관리.
         const validCodeSet = new Set(productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => c.toUpperCase()));
 
-        // 1. 현재고 — SiteCode 전체 단일 쿼리 (양수 OhQty 만 SUM)
-        const invMap = {};
+        // 1. 현재고 — SiteCode 전체 단일 쿼리, ItemCode + WhCode 별로 GROUP BY.
+        // ★ 창고별 분해 도입: 프론트가 드롭다운으로 특정 창고만 보고 싶을 수 있어서, 합산값(invMap) 외에
+        //   창고별 맵(invByWh: {item_code: {wh_code: qty}}) 도 별도 보관해 snapshot 에 JSON 으로 저장.
+        const invMap = {};                      // 전체 합산 — 기존 사용처 호환
+        const invByWh = {};                     // {item_code: {wh_code: qty}}
         try {
           const req = workPool.request();
           req.timeout = 120000; // 2분
           const r = await req.query(`
             SELECT RTRIM(ItemCode) AS item_code,
+                   RTRIM(WhCode)   AS wh_code,
                    SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS oh_qty
             FROM mmInventory WITH (NOLOCK)
             WHERE SiteCode = '${siteCode}'
-            GROUP BY RTRIM(ItemCode)
+            GROUP BY RTRIM(ItemCode), RTRIM(WhCode)
           `);
           for (const row of r.recordset) {
             const code = (row.item_code || '').trim().toUpperCase();
-            if (code && validCodeSet.has(code)) {
-              invMap[code] = Math.round(row.oh_qty || 0);
+            const wh   = (row.wh_code   || '').trim();
+            const qty  = Math.round(row.oh_qty || 0);
+            if (!code || !validCodeSet.has(code)) continue;
+            invMap[code] = (invMap[code] || 0) + qty;
+            if (wh && qty > 0) {
+              if (!invByWh[code]) invByWh[code] = {};
+              invByWh[code][wh] = (invByWh[code][wh] || 0) + qty;
             }
           }
-          console.log(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 성공: ${Object.keys(invMap).length}개 매칭 (XERP 전체 ${r.recordset.length}개 중)`);
+          console.log(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 성공: ${Object.keys(invMap).length}개 품목 매칭, 창고-품목 조합 ${r.recordset.length}건`);
         } catch (invErr) {
           console.error(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 실패 — 전체 sync 중단:`, invErr.message);
           throw invErr; // 전체 sync 실패 처리 (기존 snapshot 유지)
@@ -5679,6 +5724,7 @@ async function handleRequest(req, res) {
           const codeUpper = code.toUpperCase();
           const ohQty = invMap[codeUpper] || 0;
           const ship = shipMap[codeUpper] || { total: 0, monthly: 0, daily: 0 };
+          const whMap = invByWh[codeUpper] || {};
           out.push({
             '제품코드': code,
             '품목명': p.product_name || itemNames[codeUpper] || '',
@@ -5696,6 +5742,7 @@ async function handleRequest(req, res) {
             '_조판': p.jopan || '',
             '_원지사': p.paper_maker || '',
             '_후공정업체': p.post_vendor || '',
+            '_warehouses': whMap,                         // {wh_code: qty} — 프론트 드롭다운 필터용
             'legal_entity': isDd ? 'dd' : 'barunson',
             '_invSource': dbName,
             '_siteCode': siteCode
@@ -5836,6 +5883,7 @@ async function handleRequest(req, res) {
                SUM(COALESCE(i.received_qty,0)) as partial_received_qty,
                STRING_AGG(DISTINCT h.os_number, ',') as os_numbers,
                STRING_AGG(DISTINCT h.po_number, ',') as po_numbers,
+               STRING_AGG(DISTINCT h.po_type, ',') as po_types,
                MIN(h.due_date) as earliest_due,
                MAX(h.status) as latest_status,
                MAX(h.po_date) as latest_po_date
@@ -5869,6 +5917,7 @@ async function handleRequest(req, res) {
           received_not_synced: 0,
           os_numbers: (r.os_numbers || '').split(',').filter(Boolean),
           po_numbers: (r.po_numbers || '').split(',').filter(Boolean),
+          po_types: (r.po_types || '').split(',').filter(Boolean),
           earliest_due: r.earliest_due || '',
           status: r.latest_status || '',
           last_order_date: r.latest_po_date || ''
@@ -5880,7 +5929,7 @@ async function handleRequest(req, res) {
           map[r.product_code] = {
             pending_qty: 0, ordered_qty: 0, partial_received_qty: 0,
             received_not_synced: 0,
-            os_numbers: [], po_numbers: [],
+            os_numbers: [], po_numbers: [], po_types: [],
             earliest_due: '', status: 'received', last_order_date: ''
           };
         }
@@ -5943,6 +5992,34 @@ async function handleRequest(req, res) {
       xerp_pool_connected: !!xerpPool
     };
     ok(res, out);
+    return;
+  }
+
+  // ── 창고 목록 조회 — XERP_INV_WAREHOUSE 설정 시 어떤 코드를 써야 하는지 확인용 ──
+  if (pathname === '/api/debug/xerp-warehouses' && method === 'GET') {
+    try {
+      await ensureXerpPool();
+      if (!xerpPool) { fail(res, 503, 'XERP 풀 미연결'); return; }
+      // mmInventory 와 mmInoutItem 양쪽에서 등장하는 WhCode 별 통계 (SiteCode=BK10).
+      // 추가: mmWarehouse 가 있으면 WhName 도 함께 (LEFT JOIN, 없어도 동작).
+      const r = await xerpPool.request().query(`
+        SELECT RTRIM(inv.WhCode) AS wh_code,
+               COUNT(DISTINCT RTRIM(inv.ItemCode)) AS item_count,
+               SUM(CASE WHEN inv.OhQty > 0 THEN inv.OhQty ELSE 0 END) AS total_qty
+        FROM mmInventory inv WITH (NOLOCK)
+        WHERE inv.SiteCode = 'BK10' AND inv.WhCode IS NOT NULL AND RTRIM(inv.WhCode) <> ''
+        GROUP BY RTRIM(inv.WhCode)
+        ORDER BY item_count DESC
+      `);
+      ok(res, {
+        configured: XERP_INV_WH_LIST,
+        configured_active: XERP_INV_WH_LIST.length > 0,
+        warehouses: r.recordset,
+        hint: '환경변수 XERP_INV_WAREHOUSE=<wh_code> 로 설정하면 해당 창고만 조회. 여러 개는 콤마 구분.'
+      });
+    } catch (e) {
+      fail(res, 500, '창고 조회 실패: ' + e.message);
+    }
     return;
   }
 
@@ -6167,15 +6244,16 @@ async function handleRequest(req, res) {
         } catch(_) {}
 
         // UPSERT — 전체를 하나의 트랜잭션으로 감싸서 fsync 1회로 줄임 (이전: 900건 × 개별 autocommit).
-        // 실패 카운트도 기록하여 sync_log.fail_count 에 반영 (이전에는 버려짐).
+        // ★ 추가로 multi-row VALUES 로 배치화 (BATCH_SIZE=200). 이전엔 .run() 을 900번 호출 → PG 어댑터 사용 시
+        //   매 row 마다 네트워크 왕복 발생. 이제 ~5회 왕복으로 축소 → 10~50배 가속 기대.
+        //   배치 실패 시 해당 배치만 row-by-row 폴백하여 문제 품목 코드 식별 (기존 fail 로그 포맷 유지).
         let successCount = 0;
         let failCount = 0;
         const failedCodes = [];
-        const runUpsert = db.transaction(async () => {
-          const upsert = db.prepare(`INSERT INTO inventory_snapshot
-            (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at)
-            VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))
-            ON CONFLICT(product_code) DO UPDATE SET
+        const BATCH_SIZE = 200;
+        // ★ warehouses_json 추가 (placeholder 1개 늘어 9개 → 10개 + datetime).
+        const rowPh = "(?,?,?,?,?,?,?,?,?,datetime('now','localtime'))";
+        const onConflict = `ON CONFLICT(product_code) DO UPDATE SET
               legal_entity=excluded.legal_entity,
               site_code=excluded.site_code,
               current_stock=excluded.current_stock,
@@ -6183,18 +6261,44 @@ async function handleRequest(req, res) {
               daily_out=excluded.daily_out,
               total_3m=excluded.total_3m,
               item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
-              synced_at=excluded.synced_at`);
-          for (const p of rows) {
+              warehouses_json=excluded.warehouses_json,
+              synced_at=excluded.synced_at`;
+        const rowParams = p => [
+          p['제품코드'], p['legal_entity'], p['_siteCode'],
+          p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
+          p['품목명'] || '',
+          p['_warehouses'] ? JSON.stringify(p['_warehouses']) : ''
+        ];
+        const runUpsert = db.transaction(async () => {
+          // 폴백용 단건 UPSERT (배치 실패 시 어느 row 가 원인인지 식별)
+          const singleUpsert = db.prepare(`INSERT INTO inventory_snapshot
+            (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, warehouses_json, synced_at)
+            VALUES ${rowPh}
+            ${onConflict}`);
+
+          for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const batch = rows.slice(i, i + BATCH_SIZE);
+            const placeholders = batch.map(() => rowPh).join(',');
+            const batchSql = `INSERT INTO inventory_snapshot
+              (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, warehouses_json, synced_at)
+              VALUES ${placeholders}
+              ${onConflict}`;
+            const flatParams = batch.flatMap(rowParams);
             try {
-              await upsert.run(
-                p['제품코드'], p['legal_entity'], p['_siteCode'],
-                p['현재고'] || 0, p['_xerpMonthly'] || 0, p['_xerpDaily'] || 0, p['_xerpTotal3m'] || 0,
-                p['품목명'] || ''
-              );
-              successCount++;
-            } catch (e) {
-              failCount++;
-              if (failedCodes.length < 10) failedCodes.push(p['제품코드'] + ':' + e.message.split('\n')[0]);
+              await db.prepare(batchSql).run(...flatParams);
+              successCount += batch.length;
+            } catch (batchErr) {
+              // 배치 전체 실패 → row-by-row 폴백 (잘못된 품목만 fail 로 집계)
+              console.warn(`[sync bg] batch ${i}..${i+batch.length-1} 실패, row-by-row 재시도:`, batchErr.message.split('\n')[0]);
+              for (const p of batch) {
+                try {
+                  await singleUpsert.run(...rowParams(p));
+                  successCount++;
+                } catch (e) {
+                  failCount++;
+                  if (failedCodes.length < 10) failedCodes.push(p['제품코드'] + ':' + e.message.split('\n')[0]);
+                }
+              }
             }
           }
         });
@@ -6204,11 +6308,71 @@ async function handleRequest(req, res) {
         // 이전엔 동기화 눌러도 최대 10분간 구 데이터 유지되는 버그 원인이었음.
         try { if (typeof xerpInventoryCaches === 'object' && xerpInventoryCaches) for (const k in xerpInventoryCaches) delete xerpInventoryCaches[k]; } catch(_) {}
 
+        // ── 규격 1회성 동기화 ──
+        // products.spec 이 비어있는 품목만 XERP mmInoutItem.ItemSpec 최신값으로 채움.
+        // 이미 있으면 skip (수동 편집 보존). 첫 동기화 때만 무거움, 이후 자동으로 no-op 에 수렴.
+        let specSyncedCount = 0;
+        try {
+          const needSpec = await db.prepare("SELECT product_code FROM products WHERE (spec IS NULL OR spec = '') AND status IN ('active','inactive')").all();
+          const validSpecCodes = (needSpec || []).map(r => (r.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim()).filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
+          if (validSpecCodes.length > 0 && xerpPool) {
+            const SPEC_CHUNK = 50;
+            const SPEC_CONCURRENT = 3;
+            const specMap = {};
+            const chunks = [];
+            for (let i = 0; i < validSpecCodes.length; i += SPEC_CHUNK) chunks.push(validSpecCodes.slice(i, i + SPEC_CHUNK));
+            const fetchSpecChunk = async (chunk, idx) => {
+              const inClause = chunk.map(c => `'${c}'`).join(',');
+              try {
+                const reqQ = xerpPool.request();
+                reqQ.timeout = 10000;
+                const r = await reqQ.query(`
+                  SELECT item_code, item_spec FROM (
+                    SELECT RTRIM(ItemCode) AS item_code,
+                           RTRIM(ItemSpec) AS item_spec,
+                           ROW_NUMBER() OVER (PARTITION BY RTRIM(ItemCode) ORDER BY InoutDate DESC, InoutSerNo DESC) AS rn
+                    FROM mmInoutItem WITH (NOLOCK)
+                    WHERE SiteCode = 'BK10' AND RTRIM(ItemCode) IN (${inClause})
+                  ) t
+                  WHERE t.rn = 1 AND t.item_spec <> ''
+                `);
+                for (const row of (r.recordset || [])) {
+                  const c = (row.item_code || '').trim();
+                  const sp = (row.item_spec || '').trim();
+                  if (c && sp) specMap[c] = sp;
+                }
+              } catch (e) {
+                console.warn(`[sync bg] 규격 chunk ${idx+1}/${chunks.length} 실패:`, e.message);
+              }
+            };
+            for (let i = 0; i < chunks.length; i += SPEC_CONCURRENT) {
+              const wave = chunks.slice(i, i + SPEC_CONCURRENT);
+              await Promise.all(wave.map((ch, j) => fetchSpecChunk(ch, i + j)));
+            }
+            // UPDATE only where spec is still empty (경합 방지 — 동기화 중 사용자가 수동 입력했을 수도)
+            if (Object.keys(specMap).length > 0) {
+              const updSpec = db.prepare("UPDATE products SET spec = ? WHERE product_code = ? AND (spec IS NULL OR spec = '')");
+              const applyTx = db.transaction(async () => {
+                for (const [code, spec] of Object.entries(specMap)) {
+                  try {
+                    const info = await updSpec.run(spec, code);
+                    if (info && info.changes > 0) specSyncedCount++;
+                  } catch (_) {}
+                }
+              });
+              await applyTx();
+            }
+            console.log(`[sync bg] 규격 동기화: ${specSyncedCount}개 품목 채움 (후보 ${validSpecCodes.length}개 중 XERP 발견 ${Object.keys(specMap).length}개)`);
+          }
+        } catch (specErr) {
+          console.warn('[sync bg] 규격 동기화 예외:', specErr.message);
+        }
+
         try {
           await db.prepare("UPDATE sync_log SET status=?, success_count=?, fail_count=?, error_msg=?, finished_at=datetime('now','localtime') WHERE id=?")
             .run(failCount > 0 && successCount === 0 ? 'failed' : 'success', successCount, failCount, failCount > 0 ? ('UPSERT 실패 ' + failCount + '건: ' + failedCodes.join(' | ')).slice(0, 500) : '', syncLogId);
         } catch (_) {}
-        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (실패 ${failCount}, 총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
+        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (실패 ${failCount}, 규격 ${specSyncedCount}개 추가, 총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
       } catch (e) {
         console.error('[sync bg] 실패:', e.message);
         if (snapshotDisabled) {
@@ -6316,14 +6480,18 @@ async function handleRequest(req, res) {
       if (!validCodes.length) { ok(res, {}); return; }
 
       // ★ readonly 10초 타임아웃 대응: 50개씩 chunk + req.timeout=7000
+      // ★ 병렬화: 이전엔 순차 await 로 chunk 수만큼 누적 대기 (N*평균지연). 이제 MAX_CONCURRENT 웨이브로 묶어 처리.
+      //   XERP pool max=5 이므로 동시 3으로 제한 → 다른 요청용 커넥션 여유 2개 확보. 평균 3~5배 가속.
       const CHUNK_SIZE = 50;
+      const MAX_CONCURRENT = 3;
       const codeChunks = [];
       for (let i = 0; i < validCodes.length; i += CHUNK_SIZE) codeChunks.push(validCodes.slice(i, i + CHUNK_SIZE));
 
       const usage = {};
       let okCount = 0, failCount = 0;
-      for (let i = 0; i < codeChunks.length; i++) {
-        const inClause = codeChunks[i].map(c => `'${c}'`).join(',');
+
+      const processChunk = async (chunk, idx) => {
+        const inClause = chunk.map(c => `'${c}'`).join(',');
         try {
           const reqQ = xerpPool.request()
             .input('start3m', sql.NChar(16), fmt(start3m))
@@ -6346,8 +6514,14 @@ async function handleRequest(req, res) {
           okCount++;
         } catch (e) {
           failCount++;
-          console.warn(`[xerp-monthly] chunk ${i+1}/${codeChunks.length} 실패:`, e.message);
+          console.warn(`[xerp-monthly] chunk ${idx+1}/${codeChunks.length} 실패:`, e.message);
         }
+      };
+
+      // 웨이브 단위 병렬 처리 — Promise.all 로 MAX_CONCURRENT 개씩 동시에 대기
+      for (let i = 0; i < codeChunks.length; i += MAX_CONCURRENT) {
+        const wave = codeChunks.slice(i, i + MAX_CONCURRENT);
+        await Promise.all(wave.map((chunk, j) => processChunk(chunk, i + j)));
       }
       console.log(`XERP 월출고: ${okCount}/${codeChunks.length} chunk 성공 (실패 ${failCount}), ${Object.keys(usage).length}개 품목`);
 
@@ -10265,6 +10439,9 @@ async function handleRequest(req, res) {
       for (const it of items) {
         await itemStmt.run(poId, it.product_code || '', it.brand || '', it.process_type || '', it.ordered_qty || 0, it.spec || '', it.notes || '');
       }
+      // 규격 자동 보정 — 품목 단위로 spec 이 비어 있으면 products.spec 에서 복사. 발주서 HTML 렌더러가 i.spec 을 사용하므로
+      // 프론트가 spec 을 안 보내도 이 단계에서 자동 채워짐. 이미 채워진 건 덮어쓰지 않음.
+      try { await db.prepare(`UPDATE po_items SET spec = COALESCE((SELECT spec FROM products WHERE product_code = po_items.product_code), '') WHERE po_id = ? AND (spec IS NULL OR spec = '')`).run(poId); } catch(_){}
       return poId;
     });
     const poId = await tx();
