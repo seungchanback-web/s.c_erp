@@ -1,7 +1,8 @@
 const _startTime = Date.now();
 // ERP 애플리케이션 버전 (MANUAL.md / CHANGELOG.md 와 동기화)
-const APP_VERSION = '1.1.1';
-const APP_VERSION_DATE = '2026-04-14';
+const APP_VERSION = '1.1.2';
+const APP_VERSION_DATE = '2026-04-23';
+const APP_BUILD_ID = '2451c4a-bhc-fix';
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -5625,11 +5626,26 @@ async function handleRequest(req, res) {
       let workPool = null;
       let createdLocal = false;
       if (isDd) {
-        // BHC는 별도 계정(DB_USER) + on-demand pool (readonly_erp는 BHC 접근 불가)
-        console.log(`[xerp-inv dd] BHC 풀 생성 (user: ${bhcConfig.user}, server: ${bhcConfig.server})`);
-        workPool = new sql.ConnectionPool(bhcConfig);
-        await workPool.connect();
-        console.log(`[xerp-inv dd] BHC 연결 성공`);
+        // BHC on-demand pool — DB_USER 우선 시도, 실패 시 XERP_DB_USER 폴백
+        // 프로덕션 .env 에서 # 특수문자가 잘리는 환경 대응
+        const bhcCandidates = [
+          { ...bhcConfig, _label: 'DB_USER(' + bhcConfig.user + ')' },
+          { ...bhcConfig, user: xerpConfig.user, password: xerpConfig.password, _label: 'XERP_USER(' + xerpConfig.user + ')' }
+        ];
+        for (const cfg of bhcCandidates) {
+          try {
+            console.log(`[xerp-inv dd] BHC 연결 시도: ${cfg._label}`);
+            const { _label, ...poolCfg } = cfg;
+            workPool = new sql.ConnectionPool(poolCfg);
+            await workPool.connect();
+            console.log(`[xerp-inv dd] BHC 연결 성공: ${_label}`);
+            break;
+          } catch (e) {
+            console.warn(`[xerp-inv dd] BHC 연결 실패 (${cfg._label}):`, e.message);
+            workPool = null;
+          }
+        }
+        if (!workPool) throw new Error('BHC 연결 실패 — 모든 계정 시도 완료');
         createdLocal = true;
       } else {
         workPool = xerpPool;
