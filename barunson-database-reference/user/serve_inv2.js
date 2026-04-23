@@ -1555,6 +1555,8 @@ try { await db.exec("ALTER TABLE products ADD COLUMN post_vendor TEXT DEFAULT ''
 try { await db.exec("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'EA'"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN op_category TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN temp_code TEXT DEFAULT ''"); } catch(e) {}
+// 규격 — XERP mmInoutItem.ItemSpec 에서 1회성 동기화됨. 한번 채워지면 수동 수정 전까지 유지.
+try { await db.exec("ALTER TABLE products ADD COLUMN spec TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN moq TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN payment_terms TEXT DEFAULT ''"); } catch(e) {}
 try { await db.exec("ALTER TABLE products ADD COLUMN supplier_id INTEGER DEFAULT 0"); } catch(e) {}
@@ -4864,9 +4866,9 @@ async function handleRequest(req, res) {
     try {
       let info;
       // op_category, is_new_product 는 PUT 핸들러에만 있었음. 신규등록 시에도 저장되도록 baseCols 포함.
-      const baseCols = 'product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, op_category, is_new_product';
+      const baseCols = 'product_code, product_name, brand, origin, category, status, material_code, material_name, unit, cut_spec, jopan, paper_maker, memo, op_category, is_new_product, spec';
       const baseVals = [b.product_code, b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0];
+        b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0, b.spec||''];
       let cols = baseCols, vals = [...baseVals];
       if (_hasEntity.products) { cols += ', legal_entity'; vals.push(entity); }
       if (_hasTempCode) { cols += ', temp_code'; vals.push(b.temp_code||''); }
@@ -4894,9 +4896,9 @@ async function handleRequest(req, res) {
     // temp_code 컬럼 존재 여부 런타임 체크
     let _hasTempCodeU = false;
     try { await db.prepare('SELECT temp_code FROM products LIMIT 1').get(); _hasTempCodeU = true; } catch(_){}
-    let setCols = 'product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, is_new_product=?';
+    let setCols = 'product_name=?, brand=?, origin=?, category=?, status=?, material_code=?, material_name=?, unit=?, cut_spec=?, jopan=?, paper_maker=?, memo=?, op_category=?, is_new_product=?, spec=?';
     let setVals = [b.product_name||'', b.brand||'', b.origin||'한국', b.category||'', b.status||'active',
-      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0];
+      b.material_code||'', b.material_name||'', b.unit||'EA', b.cut_spec||'', b.jopan||'', b.paper_maker||'', b.memo||'', b.op_category||'', b.is_new_product ? 1 : 0, b.spec||''];
     if (_hasEntity.products) { setCols += ', legal_entity=?'; setVals.push(entity); }
     if (_hasTempCodeU) { setCols += ', temp_code=?'; setVals.push(b.temp_code||''); }
     // 매입관리 필드: lead_time_days, moq, payment_terms, supplier_id
@@ -5403,7 +5405,7 @@ async function handleRequest(req, res) {
           else if (company === 'dd') productFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
           const productFilter = productFilterParts.join(' AND ');
           const products = await db.prepare(
-            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${productFilter}`
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor, spec FROM products WHERE ${productFilter}`
           ).all();
 
           const out = [];
@@ -5430,6 +5432,7 @@ async function handleRequest(req, res) {
               '_조판': p.jopan || '',
               '_원지사': p.paper_maker || '',
               '_후공정업체': p.post_vendor || '',
+              '_규격': p.spec || '',
               'legal_entity': isDD ? 'dd' : 'barunson',
               '_invSource': s.synced_at ? 'snapshot' : 'no-sync',
               '_siteCode': s.site_code || (isDD ? 'BHC2' : 'BK10'),
@@ -5450,7 +5453,7 @@ async function handleRequest(req, res) {
           if (company === 'barunson') _emptyFilterParts.push("(product_code NOT LIKE 'DD%' AND origin != 'DD')");
           else if (company === 'dd') _emptyFilterParts.push("(product_code LIKE 'DD%' OR origin = 'DD')");
           const _emptyRows = await db.prepare(
-            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${_emptyFilterParts.join(' AND ')}`
+            `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor, spec FROM products WHERE ${_emptyFilterParts.join(' AND ')}`
           ).all();
           const _emptyOut = _emptyRows.map(p => {
             const code = (p.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim();
@@ -5461,7 +5464,7 @@ async function handleRequest(req, res) {
               '_xerpMonthly': 0, '_xerpDaily': 0, '_xerpTotal3m': 0,
               '_원자재코드': p.material_code || '', '_원재료용지명': p.material_name || '',
               '_절': p.cut_spec || '', '_조판': p.jopan || '', '_원지사': p.paper_maker || '',
-              '_후공정업체': p.post_vendor || '',
+              '_후공정업체': p.post_vendor || '', '_규격': p.spec || '',
               'legal_entity': isDD ? 'dd' : 'barunson',
               '_invSource': 'empty-snapshot', '_siteCode': isDD ? 'BHC2' : 'BK10'
             };
@@ -6245,11 +6248,71 @@ async function handleRequest(req, res) {
         // 이전엔 동기화 눌러도 최대 10분간 구 데이터 유지되는 버그 원인이었음.
         try { if (typeof xerpInventoryCaches === 'object' && xerpInventoryCaches) for (const k in xerpInventoryCaches) delete xerpInventoryCaches[k]; } catch(_) {}
 
+        // ── 규격 1회성 동기화 ──
+        // products.spec 이 비어있는 품목만 XERP mmInoutItem.ItemSpec 최신값으로 채움.
+        // 이미 있으면 skip (수동 편집 보존). 첫 동기화 때만 무거움, 이후 자동으로 no-op 에 수렴.
+        let specSyncedCount = 0;
+        try {
+          const needSpec = await db.prepare("SELECT product_code FROM products WHERE (spec IS NULL OR spec = '') AND status IN ('active','inactive')").all();
+          const validSpecCodes = (needSpec || []).map(r => (r.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim()).filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
+          if (validSpecCodes.length > 0 && xerpPool) {
+            const SPEC_CHUNK = 50;
+            const SPEC_CONCURRENT = 3;
+            const specMap = {};
+            const chunks = [];
+            for (let i = 0; i < validSpecCodes.length; i += SPEC_CHUNK) chunks.push(validSpecCodes.slice(i, i + SPEC_CHUNK));
+            const fetchSpecChunk = async (chunk, idx) => {
+              const inClause = chunk.map(c => `'${c}'`).join(',');
+              try {
+                const reqQ = xerpPool.request();
+                reqQ.timeout = 10000;
+                const r = await reqQ.query(`
+                  SELECT item_code, item_spec FROM (
+                    SELECT RTRIM(ItemCode) AS item_code,
+                           RTRIM(ItemSpec) AS item_spec,
+                           ROW_NUMBER() OVER (PARTITION BY RTRIM(ItemCode) ORDER BY InoutDate DESC, InoutSerNo DESC) AS rn
+                    FROM mmInoutItem WITH (NOLOCK)
+                    WHERE SiteCode = 'BK10' AND RTRIM(ItemCode) IN (${inClause})
+                  ) t
+                  WHERE t.rn = 1 AND t.item_spec <> ''
+                `);
+                for (const row of (r.recordset || [])) {
+                  const c = (row.item_code || '').trim();
+                  const sp = (row.item_spec || '').trim();
+                  if (c && sp) specMap[c] = sp;
+                }
+              } catch (e) {
+                console.warn(`[sync bg] 규격 chunk ${idx+1}/${chunks.length} 실패:`, e.message);
+              }
+            };
+            for (let i = 0; i < chunks.length; i += SPEC_CONCURRENT) {
+              const wave = chunks.slice(i, i + SPEC_CONCURRENT);
+              await Promise.all(wave.map((ch, j) => fetchSpecChunk(ch, i + j)));
+            }
+            // UPDATE only where spec is still empty (경합 방지 — 동기화 중 사용자가 수동 입력했을 수도)
+            if (Object.keys(specMap).length > 0) {
+              const updSpec = db.prepare("UPDATE products SET spec = ? WHERE product_code = ? AND (spec IS NULL OR spec = '')");
+              const applyTx = db.transaction(async () => {
+                for (const [code, spec] of Object.entries(specMap)) {
+                  try {
+                    const info = await updSpec.run(spec, code);
+                    if (info && info.changes > 0) specSyncedCount++;
+                  } catch (_) {}
+                }
+              });
+              await applyTx();
+            }
+            console.log(`[sync bg] 규격 동기화: ${specSyncedCount}개 품목 채움 (후보 ${validSpecCodes.length}개 중 XERP 발견 ${Object.keys(specMap).length}개)`);
+          }
+        } catch (specErr) {
+          console.warn('[sync bg] 규격 동기화 예외:', specErr.message);
+        }
+
         try {
           await db.prepare("UPDATE sync_log SET status=?, success_count=?, fail_count=?, error_msg=?, finished_at=datetime('now','localtime') WHERE id=?")
             .run(failCount > 0 && successCount === 0 ? 'failed' : 'success', successCount, failCount, failCount > 0 ? ('UPSERT 실패 ' + failCount + '건: ' + failedCodes.join(' | ')).slice(0, 500) : '', syncLogId);
         } catch (_) {}
-        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (실패 ${failCount}, 총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
+        console.log(`[sync bg] snapshot 갱신 완료: ${successCount}/${rows.length}개 저장 (실패 ${failCount}, 규격 ${specSyncedCount}개 추가, 총 ${((Date.now()-t0)/1000).toFixed(1)}s)`);
       } catch (e) {
         console.error('[sync bg] 실패:', e.message);
         if (snapshotDisabled) {

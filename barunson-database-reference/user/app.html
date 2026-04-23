@@ -4310,10 +4310,11 @@ function closeMegaMenu() { /* no-op */ }
             <th>절</th>
             <th>조판</th>
             <th>제지사</th>
+            <th>규격</th>
             <th></th>
           </tr></thead>
           <tbody id="pmTableBody">
-            <tr><td colspan="14" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
+            <tr><td colspan="15" style="text-align:center;color:var(--text-muted);padding:40px">로딩 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -4470,7 +4471,10 @@ function closeMegaMenu() { /* no-op */ }
     </div>
     <div class="form-row">
       <div class="form-group"><label>제지사</label><input type="text" id="pmPaperMaker" placeholder="대한"></div>
-      <div class="form-group"><label>비고</label><input type="text" id="pmMemo" placeholder=""></div>
+      <div class="form-group"><label>규격 <span style="font-size:10px;color:#6b7280;font-weight:400">(XERP 자동 동기화, 수동 편집 가능)</span></label><input type="text" id="pmSpec" placeholder="210*297"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label>비고</label><input type="text" id="pmMemo" placeholder=""></div>
     </div>
     <div style="display:flex; gap:16px; align-items:center; margin-top:8px;">
       <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
@@ -21439,7 +21443,7 @@ function renderProductMgmt(){
 
   const tbody=document.getElementById('pmTableBody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="14" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="15" style="text-align:center;color:var(--text-muted);padding:40px">${pmTab} 등록 품목이 없습니다</td></tr>`;
     return;
   }
 
@@ -21475,6 +21479,7 @@ function renderProductMgmt(){
       <td style="${cellStyle};text-align:center">${p.cut_spec||''}</td>
       <td style="${cellStyle};text-align:center">${p.jopan||''}</td>
       <td style="${cellStyle}">${esc(p.paper_maker||'')}</td>
+      <td style="${cellStyle}" title="${esc(p.spec||'')}">${esc(p.spec||'')}</td>
       <td>
         <button class="btn btn-sm" style="padding:2px 6px;font-size:11px" onclick="editProduct(${p.id})">수정</button>
         <button class="btn btn-sm btn-urgent" style="padding:2px 6px;font-size:11px" onclick="deleteProduct(${p.id})">삭제</button>
@@ -21696,6 +21701,7 @@ function showAddProductModal(){
   document.getElementById('pmCut').value='';
   document.getElementById('pmJopan').value='';
   document.getElementById('pmPaperMaker').value='';
+  if (document.getElementById('pmSpec')) document.getElementById('pmSpec').value='';
   document.getElementById('pmMemo').value='';
   document.getElementById('pmCode').disabled=false;
   document.getElementById('pmNewProduct').checked = false;
@@ -21726,6 +21732,7 @@ function editProduct(id){
   document.getElementById('pmCut').value=p.cut_spec||'';
   document.getElementById('pmJopan').value=p.jopan||'';
   document.getElementById('pmPaperMaker').value=p.paper_maker||'';
+  if (document.getElementById('pmSpec')) document.getElementById('pmSpec').value=p.spec||'';
   document.getElementById('pmMemo').value=p.memo||'';
   const np = document.getElementById('pmNewProduct');
   if (np) np.checked = !!p.is_new_product;
@@ -21750,6 +21757,7 @@ async function saveProduct(){
     cut_spec:document.getElementById('pmCut').value.trim(),
     jopan:document.getElementById('pmJopan').value.trim(),
     paper_maker:document.getElementById('pmPaperMaker').value.trim(),
+    spec:document.getElementById('pmSpec')?.value.trim() || '',
     memo:document.getElementById('pmMemo').value.trim(),
     is_new_product: document.getElementById('pmNewProduct')?.checked ? 1 : 0,
     temp_code:document.getElementById('pmTempCode').value.trim(),
