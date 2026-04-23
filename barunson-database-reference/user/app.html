@@ -2273,7 +2273,7 @@ function closeMegaMenu() { /* no-op */ }
       <div class="tab active" data-mtab="stock" onclick="switchInvMainTab('stock')" style="font-weight:600;font-size:13px;padding:8px 20px">재고현황</div>
       <div class="tab" data-mtab="order" onclick="switchInvMainTab('order')" style="font-weight:600;font-size:13px;padding:8px 20px">발주제안</div>
       <div class="tab" data-mtab="analysis" onclick="switchInvMainTab('analysis')" style="font-weight:600;font-size:13px;padding:8px 20px">재고분석</div>
-      <div class="tab" data-mtab="discontinued" onclick="switchInvMainTab('discontinued')" style="font-weight:600;font-size:13px;padding:8px 20px">소진후단종</div>
+      <div class="tab" data-mtab="discontinued" onclick="switchInvMainTab('discontinued')" style="font-weight:600;font-size:13px;padding:8px 20px">소진 후 단종</div>
     </div>
 
     <!-- 필터 툴바 (재고현황/발주제안 공통) -->
@@ -2317,6 +2317,7 @@ function closeMegaMenu() { /* no-op */ }
       </select>
       <select id="brandFilter" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px"><option value="">전체 브랜드</option></select>
       <input type="text" id="searchInput" placeholder="제품코드/품목명 검색" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;width:160px" oninput="render()">
+      <button id="invExcelBtn" class="btn btn-sm" onclick="exportInventoryExcel()" style="font-size:11px;background:#16a34a;color:#fff;padding:4px 10px" title="현재 필터가 적용된 재고현황을 엑셀로 다운로드">엑셀 다운로드</button>
     </div>
 
     <!-- 발주제안 전용 툴바 -->
@@ -7519,8 +7520,11 @@ const COLS_ORDER=[
   {k:'✓',w:24,special:'orderCheck',label:'✓'},
 ];
 
-let invMainTab = 'stock'; // 'stock' | 'order' | 'analysis'
+let invMainTab = 'stock'; // 'stock' | 'order' | 'analysis' | 'discontinued'
 let pendingOrders = {}; // {product_code: {pending_qty, os_numbers, po_numbers, ...}}
+
+// 운영구분/note_type 저장값 → 화면 표시 라벨 매핑 (DB값은 '소진후단종' 그대로 두고 표시만 '소진 후 단종' 으로 통일)
+function opCatLabel(v){ return v==='소진후단종' ? '소진 후 단종' : (v||''); }
 
 function getCols(){ return invMainTab==='order' ? COLS_ORDER : COLS_STOCK; }
 
@@ -7864,6 +7868,9 @@ function switchInvMainTab(tab){
   const tableArea=document.getElementById('invTableArea');
   const analysisArea=document.getElementById('invAnalysisArea');
   const filterBar=document.getElementById('invFilterBar');
+  const excelBtn=document.getElementById('invExcelBtn');
+  // 엑셀 다운로드 버튼은 재고현황 탭에서만 노출 (다른 탭은 별도 export 경로 없음)
+  if(excelBtn) excelBtn.style.display = (tab==='stock') ? '' : 'none';
 
   if(tab==='stock'){
     if(statusFilters) statusFilters.style.display='';
@@ -7942,7 +7949,7 @@ function renderCell(c, p){
     const cat=productNotes[code]?.op_category||'';
     const catColors={'운영품목':['#059669','#ecfdf5'],'소진후단종':['#dc2626','#fef2f2'],'이력없음':['#d97706','#fffbeb'],'기타':['#6b7280','#f3f4f6']};
     const [fg,bg]=catColors[cat]||['#94a3b8','#f8fafc'];
-    const label=cat||'-';
+    const label=opCatLabel(cat)||'-';
     return`<td style="text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${fg};background:${bg}">${label}</span></td>`;
   }
   if(c.special==='productCode'){
@@ -7992,10 +7999,14 @@ function renderCell(c, p){
   if(c.special==='pendingQty'){
     const pq=parseInt(p._pendingQty)||0;
     const rns=parseInt(p._receivedNotSynced)||0;
-    if(!pq&&!rns)return`<td class="n" style="color:#ddd">-</td>`;
-    const osStr=p._pendingOS?.length?` title="OS: ${p._pendingOS.join(', ')}"`:'';;
+    // XERP OS 번호가 있으면 입고중(미입고) 표시 숨김 — 예상재고+발주수량으로 XERP 등록 확인하는 용도의 역할 완료.
+    // 입고완료(rns)는 별도 쿼리에서 os_number IS NULL 인 PO만 집계하므로 그대로 노출.
+    const hasOs=(p._pendingOS?.length||0)>0;
+    const showPq=pq>0&&!hasOs;
+    if(!showPq&&!rns)return`<td class="n" style="color:#ddd">-</td>`;
+    const osStr=p._pendingOS?.length?` title="OS: ${p._pendingOS.join(', ')}"`:'';
     let html='<td class="n" style="cursor:help"'+osStr+'>';
-    if(pq>0) html+=`<div style="color:#6366f1;font-weight:600;font-size:12px">${pq.toLocaleString()}<span style="font-size:9px;font-weight:400;color:#9ca3af;margin-left:2px">입고중</span></div>`;
+    if(showPq) html+=`<div style="color:#6366f1;font-weight:600;font-size:12px">${pq.toLocaleString()}<span style="font-size:9px;font-weight:400;color:#9ca3af;margin-left:2px">입고중</span></div>`;
     if(rns>0) html+=`<div style="color:#16a34a;font-weight:600;font-size:11px">${rns.toLocaleString()}<span style="font-size:9px;font-weight:400;color:#9ca3af;margin-left:2px">입고완료</span></div>`;
     html+='</td>';
     return html;
@@ -8057,7 +8068,7 @@ function renderCell(c, p){
     const nt=pn.note_type||'';
     const ntColors={'소진후단종':'#e74c3c','보류':'#95a5a6','신규':'#3498db','디지털인쇄용':'#8e44ad','기타':'#78716c'};
     const ordBadge=orderedToday[code]?`<span style="display:inline-block;padding:2px 6px;border-radius:8px;font-size:9px;font-weight:600;color:#fff;background:#16a34a;margin-right:2px" title="${orderedToday[code].toLocaleString()}개 발주완료">✓${orderedToday[code].toLocaleString()}</span>`:'';
-    const badge=nt?`<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:9px;color:#fff;background:${ntColors[nt]||'#999'};cursor:pointer" onclick="editProductNote('${esc(code)}')">${nt}</span>`:`<span style="color:#ccc;cursor:pointer;font-size:11px" onclick="editProductNote('${esc(code)}')">+</span>`;
+    const badge=nt?`<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:9px;color:#fff;background:${ntColors[nt]||'#999'};cursor:pointer" onclick="editProductNote('${esc(code)}')">${opCatLabel(nt)}</span>`:`<span style="color:#ccc;cursor:pointer;font-size:11px" onclick="editProductNote('${esc(code)}')">+</span>`;
     return`<td style="text-align:center">${ordBadge}${badge}</td>`;
   }
   if(c.special==='depletionDate'){
@@ -8265,6 +8276,109 @@ function render(){
   if(sb) sb.textContent=`${currentTab} ${f.length}개 | 전체 ${RAW.length}개 | 발주입력 ${orderedCount}개 | ${loadTime||'-'}`;
 }
 
+// ===== EXPORT: 재고현황 엑셀 다운로드 =====
+// 현재 재고현황 탭에 적용된 모든 필터(상태탭/법인/출고이력/운영구분/생산지/브랜드/검색어)와
+// 정렬이 반영된 결과를 xlsx 로 내보낸다. UI 에 300개 프리뷰 제한이 걸려있지만 엑셀은 필터된 전체를 내려준다.
+function exportInventoryExcel(){
+  if(typeof XLSX==='undefined'){ alert('SheetJS 미로드'); return; }
+  const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
+  const brand=document.getElementById('brandFilter')?.value||'';
+  const opCat=document.getElementById('opCategoryFilter')?.value||'';
+  const shipFilter=document.getElementById('shipmentFilter')?.value||'';
+  const legalEntity=document.getElementById('legalEntityFilter')?.value||'';
+
+  let data;
+  if(currentTab==='all'){
+    data=[]
+      .concat(classified.urgent||[])
+      .concat(classified.nohistory||[])
+      .concat(classified.danger||[])
+      .concat(classified.safe||[])
+      .concat(classified.nosale||[])
+      .concat(classified.printwarehouse||[])
+      .concat(classified.etc||[]);
+  } else {
+    data=classified[currentTab]||[];
+  }
+
+  const f=data.filter(p=>{
+    if(currentOrigin!=='all'&&p._origin!==currentOrigin)return false;
+    if(legalEntity){
+      const _code=String(p['제품코드']||p['품목코드']||'').toUpperCase();
+      const isDD=(p.legal_entity==='dd')||_code.startsWith('DD')||p._origin==='DD'||p['생산지']==='DD'||p['브랜드']==='DD';
+      if(legalEntity==='dd' && !isDD)return false;
+      if(legalEntity==='barunson' && isDD)return false;
+    }
+    if(brand&&(p['브랜드']||'')!==brand)return false;
+    if(q){
+      const c=(p['제품코드']||'').toLowerCase();
+      const n=(p['품목명']||'').toLowerCase();
+      if(!c.includes(q)&&!n.includes(q))return false;
+    }
+    if(opCat){
+      const pnCat=productNotes[p['제품코드']]?.op_category||'';
+      if(opCat==='이력없음'){ if(pnCat&&pnCat!=='이력없음')return false; }
+      else{ if(pnCat!==opCat)return false; }
+    }
+    if(shipFilter){
+      const hasShipment=(p._xerpMonthly||0)>0;
+      if(shipFilter==='active'&&!hasShipment)return false;
+      if(shipFilter==='inactive'&&hasShipment)return false;
+    }
+    return true;
+  });
+
+  // 상태 라벨 매핑 — statusBadge 렌더러와 동일 로직
+  const statusLabel = p => {
+    const code=p['제품코드']||p['품목코드']||'';
+    const note=productNotes[code]?.note_type||'';
+    if(note==='디지털인쇄용')return '인쇄자재';
+    if(note==='기타')return '기타';
+    if((p._status==='urgent'||p._status==='danger'||p._status==='safe') && allPOItems && allPOItems.size>0 && !allPOItems.has(code)) return '이력없음';
+    return ({urgent:'긴급',danger:'위험',safe:'안전',nosale:'출고없음'})[p._status]||'-';
+  };
+
+  const rows=f.map(p=>{
+    const code=p['제품코드']||p['품목코드']||'';
+    const pq=parseInt(p._pendingQty)||0;
+    const rns=parseInt(p._receivedNotSynced)||0;
+    const hasOs=(p._pendingOS?.length||0)>0;
+    const showPq=pq>0 && !hasOs;  // 미입고(입고중)은 OS 있으면 숨김 — 화면과 동일
+    const pendingText = [
+      showPq ? `입고중 ${pq.toLocaleString()}` : '',
+      rns>0 ? `입고완료 ${rns.toLocaleString()}` : ''
+    ].filter(Boolean).join(' / ');
+    return {
+      '상태': statusLabel(p),
+      '운영구분': opCatLabel(productNotes[code]?.op_category||''),
+      '제품코드': code,
+      '품목명': p['품목명']||'',
+      '생산지': p._origin||p['생산지']||'',
+      '법인': ((p.legal_entity==='dd')||String(code).toUpperCase().startsWith('DD')||p._origin==='DD')?'디디':'바른컴퍼니',
+      '브랜드': p['브랜드']||'',
+      '가용재고': Number(p['가용재고']||0),
+      '월출고': Number(p._xerpMonthly||0),
+      '일평균': Number(p._dailyUsage||0),
+      '가용일수': p._remainDays===null||p._remainDays===undefined?'':Number(p._remainDays),
+      '안전재고': Number(p._safetyStock||0),
+      '미입고': pendingText,
+      'OS번호': (p._pendingOS||[]).join(', '),
+      '예상재고': Number(p._effectiveStock||p['가용재고']||0),
+      '발주필요': p._needOrder?'Y':'',
+      '메모': productNotes[code]?.memo||''
+    };
+  });
+
+  if(!rows.length){ alert('다운로드할 데이터가 없습니다.'); return; }
+
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '재고현황');
+  const today=new Date().toISOString().slice(0,10);
+  const suffix=currentTab && currentTab!=='all' ? `_${currentTab}` : '';
+  XLSX.writeFile(wb, `재고현황${suffix}_${today}.xlsx`);
+}
+
 // ===== RENDER: 발주제안 탭 =====
 function renderOrderTab(){
   const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
@@ -8435,7 +8549,7 @@ function renderDiscontinuedTab(){
   }).join('');
 
   const sb=document.getElementById('statusBar');
-  if(sb) sb.textContent=`소진후단종 ${f.length}개 | 전체 ${RAW.length}개 | ${loadTime||'-'}`;
+  if(sb) sb.textContent=`소진 후 단종 ${f.length}개 | 전체 ${RAW.length}개 | ${loadTime||'-'}`;
 }
 
 // ===== RENDER: 재고분석 탭 =====
@@ -8538,7 +8652,7 @@ function checkAll(checked){
 function editProductNote(code){
   const pn=productNotes[code]||{};
   const types=['','소진후단종','보류','신규','디지털인쇄용','기타'];
-  const typeLabels=['없음','소진후단종','보류','신규','디지털인쇄용','기타'];
+  const typeLabels=['없음','소진 후 단종','보류','신규','디지털인쇄용','기타'];
   let sel=types.indexOf(pn.note_type||'');if(sel<0)sel=0;
   const opCats=['','운영품목','소진후단종','이력없음','기타'];
   const opLabels=['미분류','운영품목','소진 후 단종','이력없음','기타'];
@@ -21065,7 +21179,7 @@ function downloadProductTemplate() {
     ['품목명','Y','텍스트','표시 이름'],
     ['브랜드','','텍스트','브랜드명'],
     ['생산지','Y','한국 / 중국 / 더기프트','⚠️ 이 세 가지 값만 사용. 디디 품목도 "예지가/코리아/마커엘엔피" 등 변형값 대신 "한국"으로 통일해 입력'],
-    ['운영구분','','운영품목 / 소진후단종 / 이력없음 / 기타','운영 상태'],
+    ['운영구분','','운영품목 / 소진 후 단종 / 이력없음 / 기타','운영 상태'],
     ['원재료코드','','텍스트','연결 원재료 코드'],
     ['원재료명','','텍스트','원재료명'],
     ['절','','숫자','종이 절 규격'],
@@ -21327,7 +21441,7 @@ function renderProductMgmt(){
       <td style="${cellStyle}" title="${esc(p.product_name||'')}">${esc(p.product_name||'')}${newBadge}${originVariantBadge}</td>
       <td style="${cellStyle}">${esc(p.brand||'')}</td>
       <td style="${cellStyle}">${esc(p.category||'')}</td>
-      <td style="${cellStyle};text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${opFg};background:${opBg}">${opCat||'-'}</span></td>
+      <td style="${cellStyle};text-align:center"><span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;color:${opFg};background:${opBg}">${opCatLabel(opCat)||'-'}</span></td>
       <td style="${cellStyle};text-align:center;color:#475569">${esc(p.unit||'EA')}</td>
       <td style="${cellStyle}"><span class="status-badge ${stCls}" style="font-size:10px">${stLabel}</span></td>
       <td style="${cellStyle}" title="${esc(p.material_code||'')}">${esc(p.material_code||'')}</td>
