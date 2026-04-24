@@ -835,11 +835,22 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     const reams = qty / 500 / cut / jopan;
     const reamsStr = reams % 1 === 0 ? String(reams) : reams.toFixed(1);
     // 제품별 후공정 체인 (step_order 순) — 코리아패키지(톰슨) → 예지가(봉투가공)
+    // 동일 업체 중복은 제거하고 최초 등장 순서 유지 (예: 코리아→코리아→코리아 → 코리아)
     let itemChainText = '';
     const steps = (pi._steps && pi._steps.length)
       ? pi._steps.slice().sort((a,b)=> (a.step||0) - (b.step||0))
       : [];
-    if (steps.length) itemChainText = steps.map(s => s.vendor).join(' → ');
+    if (steps.length) {
+      const seenVendors = new Set();
+      const uniqVendors = [];
+      for (const s of steps) {
+        if (s.vendor && !seenVendors.has(s.vendor)) {
+          seenVendors.add(s.vendor);
+          uniqVendors.push(s.vendor);
+        }
+      }
+      itemChainText = uniqVendors.join(' → ');
+    }
     // 규격 폴백: po_items.spec 우선 → 절/조판 조합 → 제품사양 (원재료 발주서는 종이 규격이 우선)
     let specText = (it.spec && String(it.spec).trim()) ? String(it.spec).trim() : '';
     if (!specText && pi['절'] && pi['조판']) specText = `${pi['절']}절 ${pi['조판']}조판`;
