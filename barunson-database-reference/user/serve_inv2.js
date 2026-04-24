@@ -834,22 +834,23 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     const qty = it.ordered_qty || 0;
     const reams = qty / 500 / cut / jopan;
     const reamsStr = reams % 1 === 0 ? String(reams) : reams.toFixed(1);
-    // 제품별 후공정 체인 (step_order 순) — 코리아패키지(톰슨) → 예지가(봉투가공)
-    // 동일 업체 중복은 제거하고 최초 등장 순서 유지 (예: 코리아→코리아→코리아 → 코리아)
+    // 제품별 후공정 체인 (step_order 순) — 공정 포함: 코리아(톰슨) → 예지가(봉투가공)
+    // 동일 (업체,공정) 중복만 제거; 같은 업체가 여러 공정을 맡으면 모두 노출
     let itemChainText = '';
     const steps = (pi._steps && pi._steps.length)
       ? pi._steps.slice().sort((a,b)=> (a.step||0) - (b.step||0))
       : [];
     if (steps.length) {
-      const seenVendors = new Set();
-      const uniqVendors = [];
+      const seen = new Set();
+      const parts = [];
       for (const s of steps) {
-        if (s.vendor && !seenVendors.has(s.vendor)) {
-          seenVendors.add(s.vendor);
-          uniqVendors.push(s.vendor);
-        }
+        if (!s.vendor) continue;
+        const key = s.vendor + '||' + (s.process || '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        parts.push(s.process ? `${s.vendor}(${s.process})` : s.vendor);
       }
-      itemChainText = uniqVendors.join(' → ');
+      itemChainText = parts.join(' → ');
     }
     // 규격 폴백: po_items.spec 우선 → 절/조판 조합 → 제품사양 (원재료 발주서는 종이 규격이 우선)
     let specText = (it.spec && String(it.spec).trim()) ? String(it.spec).trim() : '';
@@ -1001,10 +1002,9 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <tr><td style="padding:6px 0;color:#666">발주일</td><td style="padding:6px 0">${po.po_date || ''}</td></tr>
           <tr><td style="padding:6px 0;color:#666">거래처</td><td style="padding:6px 0;font-weight:600">${vendorName}</td></tr>
           <tr><td style="padding:6px 0;color:#666">납기예정일</td><td style="padding:6px 0">${po.expected_date || ''}</td></tr>
-          ${nextDestinations.length ? `<tr><td style="padding:6px 0;color:#666">다음 입고처</td><td style="padding:6px 0;font-weight:600;color:#f97316">${nextDestinations.join(', ')}</td></tr>` : ''}
           ${po.notes ? `<tr><td style="padding:6px 0;color:#666">비고</td><td style="padding:6px 0">${po.notes}</td></tr>` : ''}
         </table>
-        <h3 style="margin:20px 0 10px;font-size:15px">발주 품목</h3>
+        <h3 style="margin:20px 0 10px;font-size:15px">발주 품목 <span style="font-size:11px;font-weight:400;color:#9a3412">— 품목별 다음 입고처 공정 포함</span></h3>
         <table style="width:100%;border-collapse:collapse">
           <thead>${tableHeader}</thead>
           <tbody>${tableRows}</tbody>
@@ -1090,7 +1090,6 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
         <table>
           <tr><td>${isChinaVendor ? '供应商' : '업체명'}</td><td style="font-weight:700;font-size:14px">${vendorName}</td></tr>
           <tr><td>이메일</td><td>${vendorEmail}</td></tr>
-          ${nextDestinations.length ? `<tr><td>입고처</td><td style="color:#f97316;font-weight:600">${nextDestinations.join(', ')}</td></tr>` : ''}
           ${po.notes ? `<tr><td>비고</td><td>${po.notes}</td></tr>` : ''}
         </table>
       </div>
