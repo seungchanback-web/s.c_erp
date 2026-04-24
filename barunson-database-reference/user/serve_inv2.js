@@ -6373,6 +6373,133 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── DD 재고 원샷 재동기화 (bypass 일반 sync, BHC 직접 쿼리 → snapshot UPSERT) ──
+  // 사용: POST /api/admin/dd-resync
+  // 응답: { matched, unmatched, upserted, bhc_total_rows, bhc_error?, total_stock, total_monthly, sample_upserts }
+  if (pathname === '/api/admin/dd-resync' && method === 'POST') {
+    const out = { started_at: new Date().toISOString() };
+    try {
+      // 1) 로컬 DD 제품 리스트
+      const locals = await db.prepare(
+        "SELECT product_code, product_name FROM products WHERE (product_code LIKE 'DD%' OR legal_entity='dd' OR origin='DD') AND status IN ('active','inactive')"
+      ).all();
+      const codes = locals.map(r => (r.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim()).filter(Boolean);
+      out.local_dd_count = codes.length;
+      if (!codes.length) { ok(res, out); return; }
+
+      // 2) BHC 연결 (barShopConfig → xerpConfig 폴백)
+      let bhcPool = null;
+      let usedCfg = null;
+      for (const c of [{ n: 'barShopConfig', cfg: barShopConfig }, { n: 'xerpConfig', cfg: xerpConfig }]) {
+        try { bhcPool = new sql.ConnectionPool({ ...c.cfg, database: 'BHC' }); await bhcPool.connect(); usedCfg = c.n; break; } catch (e) {
+          out['conn_err_' + c.n] = e.message;
+          bhcPool = null;
+        }
+      }
+      out.bhc_used_config = usedCfg;
+      if (!bhcPool) { out.bhc_error = '모든 credential 실패'; ok(res, out); return; }
+
+      // 3) 재고 쿼리 (mmInventory, SiteCode='BHC2')
+      const invByWh = {}; // {code: {wh: qty}}
+      const invMap = {};  // {code: totalQty}
+      try {
+        const req0 = bhcPool.request(); req0.timeout = 120000;
+        const r = await req0.query(`
+          SELECT RTRIM(ItemCode) AS item_code, RTRIM(WhCode) AS wh_code,
+                 SUM(CASE WHEN OhQty>0 THEN OhQty ELSE 0 END) AS oh_qty
+          FROM mmInventory WITH (NOLOCK) WHERE SiteCode='BHC2'
+          GROUP BY RTRIM(ItemCode), RTRIM(WhCode)`);
+        for (const row of r.recordset) {
+          const c = (row.item_code || '').trim().toUpperCase();
+          const w = (row.wh_code || '').trim();
+          const q = Math.round(row.oh_qty || 0);
+          if (!c) continue;
+          invMap[c] = (invMap[c] || 0) + q;
+          if (w && q > 0) { (invByWh[c] ||= {})[w] = (invByWh[c][w] || 0) + q; }
+        }
+        out.bhc_inv_rows = r.recordset.length;
+        out.bhc_inv_items = Object.keys(invMap).length;
+      } catch (e) { out.inv_query_error = e.message; }
+
+      // 4) 3개월 출고 쿼리
+      const shipMap = {};
+      try {
+        const today = new Date();
+        const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
+        const fmt = d => d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+        const req1 = bhcPool.request()
+          .input('s', sql.NChar(16), fmt(start3m))
+          .input('e', sql.NChar(16), fmt(today));
+        req1.timeout = 120000;
+        const r = await req1.query(`
+          SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
+          FROM mmInoutItem WITH (NOLOCK)
+          WHERE SiteCode='BHC2' AND InoutGubun='SO' AND InoutDate >= @s AND InoutDate < @e
+          GROUP BY RTRIM(ItemCode)`);
+        for (const row of r.recordset) {
+          const c = (row.item_code || '').trim().toUpperCase();
+          const t = Math.round(row.total_qty || 0);
+          if (c) shipMap[c] = { total: t, monthly: Math.round(t / 3), daily: Math.round(t / 90) };
+        }
+        out.bhc_ship_items = Object.keys(shipMap).length;
+      } catch (e) { out.ship_query_error = e.message; }
+
+      try { await bhcPool.close(); } catch (_) {}
+
+      // 5) 로컬 제품별 매칭 + UPSERT
+      const matched = [];
+      const unmatched = [];
+      const sample = [];
+      let upserted = 0;
+      let upsertFailed = 0;
+      const upsertErrs = [];
+      const upsertStmt = db.prepare(`INSERT INTO inventory_snapshot
+        (product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, warehouses_json, synced_at)
+        VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime'))
+        ON CONFLICT(product_code) DO UPDATE SET
+          legal_entity=excluded.legal_entity, site_code=excluded.site_code,
+          current_stock=excluded.current_stock, monthly_out=excluded.monthly_out,
+          daily_out=excluded.daily_out, total_3m=excluded.total_3m,
+          item_name=CASE WHEN excluded.item_name='' THEN inventory_snapshot.item_name ELSE excluded.item_name END,
+          warehouses_json=excluded.warehouses_json, synced_at=excluded.synced_at`);
+      for (const p of locals) {
+        const code = (p.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim();
+        if (!code) continue;
+        const cu = code.toUpperCase();
+        const stock = invMap[cu] || 0;
+        const ship = shipMap[cu] || { total: 0, monthly: 0, daily: 0 };
+        const whJson = invByWh[cu] ? JSON.stringify(invByWh[cu]) : '';
+        if (invMap[cu] !== undefined || shipMap[cu] !== undefined) matched.push(code);
+        else unmatched.push(code);
+        try {
+          await upsertStmt.run(code, 'dd', 'BHC2', stock, ship.monthly, ship.daily, ship.total, p.product_name || '', whJson);
+          upserted++;
+          if (sample.length < 10 && stock > 0) sample.push({ code, stock, monthly: ship.monthly });
+        } catch (e) {
+          upsertFailed++;
+          if (upsertErrs.length < 5) upsertErrs.push(code + ':' + e.message.split('\n')[0]);
+        }
+      }
+
+      out.matched_count = matched.length;
+      out.unmatched_count = unmatched.length;
+      out.unmatched_sample = unmatched.slice(0, 10);
+      out.upserted = upserted;
+      out.upsert_failed = upsertFailed;
+      if (upsertErrs.length) out.upsert_errors = upsertErrs;
+      out.total_stock = locals.reduce((s, p) => s + (invMap[(p.product_code || '').toUpperCase()] || 0), 0);
+      out.total_monthly_out = Object.values(shipMap).reduce((s, v) => s + (v.monthly || 0), 0);
+      out.sample_upserts = sample;
+      out.finished_at = new Date().toISOString();
+      ok(res, out);
+    } catch (e) {
+      out.fatal_error = e.message;
+      out.stack = (e.stack || '').split('\n').slice(0, 5).join(' | ');
+      fail(res, 500, JSON.stringify(out));
+    }
+    return;
+  }
+
   if (pathname === '/api/debug/xerp-match' && method === 'GET') {
     const code = (parsed.searchParams.get('code') || '').trim();
     if (!code) { fail(res, 400, 'code 파라미터 필요'); return; }

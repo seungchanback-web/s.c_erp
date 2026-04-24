@@ -23,7 +23,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # 캐시 무효화 (빌드마다 변경)
-ARG CACHE_BUST=20260408-legal-entity-v2
+ARG CACHE_BUST=20260424-dd-resync-v1
 RUN echo "build:$CACHE_BUST" > /app/.buildstamp
 
 # 앱 파일 복사
