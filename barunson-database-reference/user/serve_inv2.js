@@ -663,6 +663,16 @@ async function reloadProductInfoFromDB() {
       out[code] = row;
     }
     // DB products 테이블로 override (단일 소스)
+    // 레거시 후공정 컬럼(thomson/envelope/...) 매핑 — product_post_vendor 가 비었을 때 폴백용
+    const LEGACY_POST_ORDER = [
+      { col: 'cutting',  kr: '재단' },
+      { col: 'thomson',  kr: '톰슨' },
+      { col: 'envelope', kr: '봉투가공' },
+      { col: 'seari',    kr: '세아리' },
+      { col: 'laser',    kr: '레이져' },
+      { col: 'silk',     kr: '실크' },
+    ];
+    const legacyStepsByCode = {};
     for (const p of products) {
       const code = p.product_code;
       if (!code) continue;
@@ -676,6 +686,16 @@ async function reloadProductInfoFromDB() {
       // 레거시 후공정 키가 남아있으면 제거
       for (const pt of postProcessTypes) { delete row[pt]; }
       out[code] = row;
+      // 레거시 products 컬럼에서 후공정 체인 수집 (polluted 값 '0' 제외)
+      const steps = [];
+      let stepOrder = 1;
+      for (const { col, kr } of LEGACY_POST_ORDER) {
+        const v = (p[col] || '').trim ? p[col].trim() : p[col];
+        if (v && v !== '0') {
+          steps.push({ step: stepOrder++, process: kr, vendor: v });
+        }
+      }
+      if (steps.length) legacyStepsByCode[code] = steps;
     }
     // product_post_vendor가 유일한 후공정 소스 (사용자가 품목관리에서 관리)
     for (const [code, ptMap] of Object.entries(ppvByCode)) {
@@ -684,6 +704,17 @@ async function reloadProductInfoFromDB() {
       // step_order 기반 정렬된 후공정 체인 (_steps)
       if (ppvStepsByCode[code]?.length) {
         out[code]._steps = ppvStepsByCode[code].sort((a, b) => a.step - b.step);
+      }
+    }
+    // product_post_vendor 에 항목 없는 품목은 레거시 products 컬럼으로 _steps 폴백
+    for (const [code, legacySteps] of Object.entries(legacyStepsByCode)) {
+      if (!out[code]) out[code] = {};
+      if (!out[code]._steps || !out[code]._steps.length) {
+        out[code]._steps = legacySteps;
+        // 공정명→업체 역 매핑도 pi[공정명] = 업체 형태로 보강
+        for (const s of legacySteps) {
+          if (!out[code][s.process]) out[code][s.process] = s.vendor;
+        }
       }
     }
     productInfoCache = out;
@@ -803,6 +834,16 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     const qty = it.ordered_qty || 0;
     const reams = qty / 500 / cut / jopan;
     const reamsStr = reams % 1 === 0 ? String(reams) : reams.toFixed(1);
+    // 제품별 후공정 체인 (step_order 순) — 코리아패키지(톰슨) → 예지가(봉투가공)
+    let itemChainText = '';
+    const steps = (pi._steps && pi._steps.length)
+      ? pi._steps.slice().sort((a,b)=> (a.step||0) - (b.step||0))
+      : [];
+    if (steps.length) itemChainText = steps.map(s => s.vendor).join(' → ');
+    // 규격 폴백: po_items.spec 우선 → 절/조판 조합 → 제품사양 (원재료 발주서는 종이 규격이 우선)
+    let specText = (it.spec && String(it.spec).trim()) ? String(it.spec).trim() : '';
+    if (!specText && pi['절'] && pi['조판']) specText = `${pi['절']}절 ${pi['조판']}조판`;
+    if (!specText && pi['제품사양']) specText = pi['제품사양'];
     return {
       ...it,
       material_code: pi['원자재코드'] || '',
@@ -810,17 +851,29 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       material_name: pi['원재료용지명'] || '',
       cut_spec: pi['절'] || '',
       ream_qty: reamsStr,
+      item_chain: itemChainText,
+      spec_display: specText,
     };
   });
 
   // 원재료/후공정 구분
   const isRawMaterial = !isPostProcess;
 
-  // 원재료: 다음 입고처(후공정 업체) 조회
+  // 원재료: 다음 입고처(후공정 업체) — 제품별 체인을 합쳐 헤더 요약으로 사용
   let nextDestinations = [];
-  if (isRawMaterial && po.po_date) {
-    const postPOs = await db.prepare(`SELECT DISTINCT vendor_name FROM po_header WHERE po_date = ? AND po_type = '후공정' AND status != 'cancelled'`).all(po.po_date);
-    nextDestinations = postPOs.map(p => p.vendor_name);
+  if (isRawMaterial) {
+    const seen = new Set();
+    for (const it of enrichedItems) {
+      if (it.item_chain && !seen.has(it.item_chain)) {
+        seen.add(it.item_chain);
+        nextDestinations.push(it.item_chain);
+      }
+    }
+    // 제품별 체인이 하나도 없으면 기존 방식(같은 날짜 후공정 vendor) 폴백
+    if (!nextDestinations.length && po.po_date) {
+      const postPOs = await db.prepare(`SELECT DISTINCT vendor_name FROM po_header WHERE po_date = ? AND po_type = '후공정' AND status != 'cancelled'`).all(po.po_date);
+      nextDestinations = postPOs.map(p => p.vendor_name);
+    }
   }
 
   const thStyle = 'border:1px solid #bbb;padding:8px 10px;text-align:left;background:#f3f4f6;font-weight:600;font-size:12px';
@@ -833,6 +886,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <th style="${thStyle}">원재료코드</th>
       <th style="${thStyle}">원재료명</th>
       <th style="${thStyle}">규격</th>
+      <th style="${thStyle};color:#c2410c">다음 입고처</th>
       <th style="${thStyle};text-align:right">발주수량(R)</th>
       <th style="${thStyle};text-align:center">절</th>
     </tr>`;
@@ -840,7 +894,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
       <td style="${tdStyle}">${it.material_code || ''}</td>
       <td style="${tdStyle}">${it.material_name || ''}</td>
-      <td style="${tdStyle}">${it.spec || ''}</td>
+      <td style="${tdStyle}">${it.spec_display || ''}</td>
+      <td style="${tdStyle};color:#c2410c;font-weight:600">${it.item_chain || '-'}</td>
       <td style="${tdStyle};text-align:right;font-weight:700;font-size:15px">${it.ream_qty || 0}R <span style="font-size:11px;color:#888;font-weight:400">(${(it.ordered_qty || 0).toLocaleString()}매)</span></td>
       <td style="${tdStyle};text-align:center">${it.cut_spec || ''}</td>
     </tr>`).join('');
@@ -977,6 +1032,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <th>원재료코드</th>
           <th>원재료명${isChinaVendor ? '<br><span style="font-weight:400;color:#999">材料名称</span>' : ''}</th>
           <th>규격${isChinaVendor ? '<br><span style="font-weight:400;color:#999">规格</span>' : ''}</th>
+          <th style="color:#c2410c">다음 입고처${isChinaVendor ? '<br><span style="font-weight:400;color:#999">下一入库处</span>' : ''}</th>
           <th class="right">발주수량(R)${isChinaVendor ? '<br><span style="font-weight:400;color:#999">订购量</span>' : ''}</th>
           <th class="right">매수</th>
           <th class="center">절</th>
@@ -995,7 +1051,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td class="bold">${it.product_code || ''}</td>
           <td>${it.material_code || ''}</td>
           <td>${it.material_name || ''}</td>
-          <td>${it.spec || ''}</td>
+          <td>${it.spec_display || ''}</td>
+          <td style="color:#c2410c;font-weight:600">${it.item_chain || '-'}</td>
           <td class="right bold" style="font-size:14px">${it.ream_qty || 0}R</td>
           <td class="right" style="color:#888">${(it.ordered_qty || 0).toLocaleString()}</td>
           <td class="center">${it.cut_spec || ''}</td>
@@ -1008,7 +1065,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td>${it.spec || ''}</td>
         </tr>`).join('')}
         <tr class="total-row">
-          <td colspan="${isRawMaterial ? 5 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
+          <td colspan="${isRawMaterial ? 6 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
           ${isRawMaterial ? `
             <td class="right" style="border:1px solid #ccc;font-size:14px">${totalReams % 1 === 0 ? totalReams : totalReams.toFixed(1)}R</td>
             <td class="right" style="border:1px solid #ccc">${totalQty.toLocaleString()}</td>
