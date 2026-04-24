@@ -8169,16 +8169,18 @@ async function handleRequest(req, res) {
 
         materialPos.push({ po_id: matPoId, po_number: matPoNumber, vendor: matVendor, items: matItems.length, total_qty: matTotalQty });
 
-        // ─ 동일 원재료 그룹의 1단계 후가공 업체 수집 → 업체별로 후가공 PO 생성 ─
-        const postStep1ByVendor = {};
+        // ─ 동일 원재료 그룹의 1단계 후가공을 (업체, 공정) 조합별로 수집 → 각 조합마다 별도 PO ─
+        // 같은 업체가 여러 공정을 맡아도 공정별로 발주서가 쪼개져 해당 공정 담당자에게만 CC 라우팅됨
+        const postStep1ByVendorProcess = {};
         for (const it of matItems) {
           const step1 = it.process_chain[0];
-          if (!step1) continue;
-          const key = step1.vendor;
-          if (!postStep1ByVendor[key]) postStep1ByVendor[key] = { process: step1.process, items: [] };
-          postStep1ByVendor[key].items.push(it);
+          if (!step1 || !step1.vendor || !step1.process) continue;
+          const key = step1.vendor + '||' + step1.process;
+          if (!postStep1ByVendorProcess[key]) postStep1ByVendorProcess[key] = { vendor: step1.vendor, process: step1.process, items: [] };
+          postStep1ByVendorProcess[key].items.push(it);
         }
-        for (const [postVendor, info] of Object.entries(postStep1ByVendor)) {
+        for (const info of Object.values(postStep1ByVendorProcess)) {
+          const postVendor = info.vendor;
           const postPoNumber = await generatePoNumber();
           const postTotalQty = info.items.reduce((s, i) => s + (Number(i.ordered_qty) || 0), 0);
           const postInfo = await db.prepare(`INSERT INTO po_header
@@ -11030,8 +11032,12 @@ async function handleRequest(req, res) {
     const qtyByCode = {};
     for (const it of matItems) qtyByCode[it.product_code] = (qtyByCode[it.product_code] || 0) + (it.ordered_qty || 0);
 
-    // 동일 vendor_name 의 자식 후공정 PO 찾기 (없으면 새로 생성)
-    let postPo = await db.prepare("SELECT * FROM po_header WHERE parent_po_id=? AND po_type='후공정' AND vendor_name=? AND status NOT IN ('완료','취소') ORDER BY po_id DESC LIMIT 1").get(matPoId, postVendor);
+    // 동일 vendor_name + process_type 의 자식 후공정 PO 찾기 (없으면 새로 생성)
+    // ※ 공정이 다르면 vendor 가 같아도 별도 PO 로 분리 (공정별 담당자 라우팅을 위한 정책)
+    let postPo = await db.prepare(`SELECT h.* FROM po_header h
+      WHERE h.parent_po_id=? AND h.po_type='후공정' AND h.vendor_name=? AND h.status NOT IN ('완료','취소')
+        AND EXISTS (SELECT 1 FROM po_items WHERE po_id=h.po_id AND process_type=?)
+      ORDER BY h.po_id DESC LIMIT 1`).get(matPoId, postVendor, processType);
     let postPoId, postPoNumber;
     let createdNew = false;
     if (postPo) {
