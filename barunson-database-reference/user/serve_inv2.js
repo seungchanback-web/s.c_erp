@@ -870,6 +870,30 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
   // 원재료/후공정 구분
   const isRawMaterial = !isPostProcess;
 
+  // 후공정: 품목별 process_type → 담당자 매핑 (process_assignee 테이블)
+  // 같은 업체의 같은 공정에 담당자 여러 명 가능 — 모두 CC, 섹션 헤더에 이름만 나열
+  const assigneesByProcess = {};  // { process_type: [{name, email, phone}, ...] }
+  const autoCcEmails = [];
+  if (isPostProcess) {
+    const uniqProcs = [...new Set(enrichedItems.map(it => (it.process_type || '').trim()).filter(Boolean))];
+    if (uniqProcs.length) {
+      try {
+        const placeholders = uniqProcs.map(() => '?').join(',');
+        const rows = await db.prepare(`SELECT process_type, assignee_name, assignee_email, phone
+          FROM process_assignee
+          WHERE vendor_name=? AND process_type IN (${placeholders}) AND is_active=1
+          ORDER BY process_type, assignee_name`).all(vendorName, ...uniqProcs);
+        for (const r of rows) {
+          if (!assigneesByProcess[r.process_type]) assigneesByProcess[r.process_type] = [];
+          assigneesByProcess[r.process_type].push({ name: r.assignee_name || '', email: r.assignee_email || '', phone: r.phone || '' });
+          if (r.assignee_email) autoCcEmails.push(r.assignee_email.trim());
+        }
+      } catch (e) {
+        console.warn('[process_assignee 조회 실패]', e.message);
+      }
+    }
+  }
+
   // 원재료: 다음 입고처(후공정 업체) — 제품별 체인을 합쳐 헤더 요약으로 사용
   let nextDestinations = [];
   if (isRawMaterial) {
@@ -911,21 +935,58 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <td style="${tdStyle};text-align:center">${it.cut_spec || ''}</td>
     </tr>`).join('');
   } else {
-    // 후공정 발주서: 제품코드 | 공정 | 입고수량(R) | 생산수량(낱개) | 규격
-    tableHeader = `<tr>
-      <th style="${thStyle}">제품코드</th>
-      <th style="${thStyle}">공정</th>
-      <th style="${thStyle};text-align:right">입고수량(R)</th>
-      <th style="${thStyle};text-align:right">생산수량(낱개)</th>
-      <th style="${thStyle}">규격</th>
-    </tr>`;
-    tableRows = enrichedItems.map(it => `<tr>
-      <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
-      <td style="${tdStyle}">${it.process_type || ''}</td>
-      <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
-      <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
-      <td style="${tdStyle}">${it.spec || ''}</td>
-    </tr>`).join('');
+    // 후공정 발주서: 공정별 섹션 분리 — 각 섹션 헤더에 담당자 표시
+    const byProc = {};
+    for (const it of enrichedItems) {
+      const p = (it.process_type || '').trim() || '(공정미지정)';
+      if (!byProc[p]) byProc[p] = [];
+      byProc[p].push(it);
+    }
+    const sectionOrder = Object.keys(byProc).sort();
+    // 단일 공정일 때는 섹션 헤더 생략하고 기존 테이블 유지
+    if (sectionOrder.length <= 1) {
+      tableHeader = `<tr>
+        <th style="${thStyle}">제품코드</th>
+        <th style="${thStyle}">공정</th>
+        <th style="${thStyle};text-align:right">입고수량(R)</th>
+        <th style="${thStyle};text-align:right">생산수량(낱개)</th>
+        <th style="${thStyle}">규격</th>
+      </tr>`;
+      tableRows = enrichedItems.map(it => `<tr>
+        <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
+        <td style="${tdStyle}">${it.process_type || ''}</td>
+        <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
+        <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
+        <td style="${tdStyle}">${it.spec || ''}</td>
+      </tr>`).join('');
+    } else {
+      // 복수 공정: 섹션별 sub-table 로 렌더 → tableHeader/tableRows 대신 본문 통째 교체용 마크업을 tableRows 에 담음
+      tableHeader = `<tr>
+        <th style="${thStyle}">제품코드</th>
+        <th style="${thStyle}">공정</th>
+        <th style="${thStyle};text-align:right">입고수량(R)</th>
+        <th style="${thStyle};text-align:right">생산수량(낱개)</th>
+        <th style="${thStyle}">규격</th>
+      </tr>`;
+      tableRows = sectionOrder.map(proc => {
+        const list = byProc[proc];
+        const ppl = assigneesByProcess[proc] || [];
+        const assigneeLabel = ppl.length
+          ? ppl.map(a => a.name + (a.email ? ` &lt;${a.email}&gt;` : '')).join(', ')
+          : '담당자 미등록';
+        const sectionHdr = `<tr><td colspan="5" style="padding:10px 8px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:13px">
+          ▸ ${proc} <span style="font-weight:400;font-size:11px;color:#9a3412;margin-left:10px">담당: ${assigneeLabel}</span>
+        </td></tr>`;
+        const body = list.map(it => `<tr>
+          <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
+          <td style="${tdStyle}">${it.process_type || ''}</td>
+          <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
+          <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
+          <td style="${tdStyle}">${it.spec || ''}</td>
+        </tr>`).join('');
+        return sectionHdr + body;
+      }).join('');
+    }
   }
 
   // 이메일 본문 HTML
@@ -1057,24 +1118,59 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
         </tr>`}
       </thead>
       <tbody>
-        ${enrichedItems.map((it, idx) => isRawMaterial ? `<tr>
-          <td class="center" style="color:#999">${idx + 1}</td>
-          <td class="bold">${it.product_code || ''}</td>
-          <td>${it.material_code || ''}</td>
-          <td>${it.material_name || ''}</td>
-          <td>${it.spec_display || ''}</td>
-          <td style="color:#c2410c;font-weight:600">${it.item_chain || '-'}</td>
-          <td class="right bold" style="font-size:14px">${it.ream_qty || 0}R</td>
-          <td class="right" style="color:#888">${(it.ordered_qty || 0).toLocaleString()}</td>
-          <td class="center">${it.cut_spec || ''}</td>
-        </tr>` : `<tr>
-          <td class="center" style="color:#999">${idx + 1}</td>
-          <td class="bold">${it.product_code || ''}</td>
-          <td>${it.process_type || ''}</td>
-          <td class="right bold">${it.ream_qty || '-'}R</td>
-          <td class="right">${(it.ordered_qty || 0).toLocaleString()}</td>
-          <td>${it.spec || ''}</td>
-        </tr>`).join('')}
+        ${(() => {
+          if (isRawMaterial) {
+            return enrichedItems.map((it, idx) => `<tr>
+              <td class="center" style="color:#999">${idx + 1}</td>
+              <td class="bold">${it.product_code || ''}</td>
+              <td>${it.material_code || ''}</td>
+              <td>${it.material_name || ''}</td>
+              <td>${it.spec_display || ''}</td>
+              <td style="color:#c2410c;font-weight:600">${it.item_chain || '-'}</td>
+              <td class="right bold" style="font-size:14px">${it.ream_qty || 0}R</td>
+              <td class="right" style="color:#888">${(it.ordered_qty || 0).toLocaleString()}</td>
+              <td class="center">${it.cut_spec || ''}</td>
+            </tr>`).join('');
+          }
+          // 후공정: 공정별 섹션 + 담당자 헤더
+          const byProc = {};
+          for (const it of enrichedItems) {
+            const p = (it.process_type || '').trim() || '(공정미지정)';
+            if (!byProc[p]) byProc[p] = [];
+            byProc[p].push(it);
+          }
+          const procs = Object.keys(byProc).sort();
+          if (procs.length <= 1) {
+            return enrichedItems.map((it, idx) => `<tr>
+              <td class="center" style="color:#999">${idx + 1}</td>
+              <td class="bold">${it.product_code || ''}</td>
+              <td>${it.process_type || ''}</td>
+              <td class="right bold">${it.ream_qty || '-'}R</td>
+              <td class="right">${(it.ordered_qty || 0).toLocaleString()}</td>
+              <td>${it.spec || ''}</td>
+            </tr>`).join('');
+          }
+          let idx = 0;
+          return procs.map(proc => {
+            const list = byProc[proc];
+            const ppl = assigneesByProcess[proc] || [];
+            const assigneeLabel = ppl.length
+              ? ppl.map(a => a.name + (a.email ? ` &lt;${a.email}&gt;` : '')).join(', ')
+              : '담당자 미등록';
+            const hdr = `<tr><td colspan="6" style="padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:12px">
+              ▸ ${proc} <span style="font-weight:400;font-size:10px;color:#9a3412;margin-left:8px">담당: ${assigneeLabel}</span>
+            </td></tr>`;
+            const body = list.map(it => { idx++; return `<tr>
+              <td class="center" style="color:#999">${idx}</td>
+              <td class="bold">${it.product_code || ''}</td>
+              <td>${it.process_type || ''}</td>
+              <td class="right bold">${it.ream_qty || '-'}R</td>
+              <td class="right">${(it.ordered_qty || 0).toLocaleString()}</td>
+              <td>${it.spec || ''}</td>
+            </tr>`; }).join('');
+            return hdr + body;
+          }).join('');
+        })()}
         <tr class="total-row">
           <td colspan="${isRawMaterial ? 6 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
           ${isRawMaterial ? `
@@ -1121,6 +1217,14 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
 
   const toEmail = vendorEmail; // 실제 거래처 이메일로 발송
   const ccEmails = emailCc ? emailCc.split(',').map(e => e.trim()).filter(e => e) : [];
+  // 후공정 PO: process_assignee 담당자 이메일 자동 CC 병합 (중복 제거, toEmail과도 중복 제거)
+  if (autoCcEmails.length) {
+    const seen = new Set([toEmail.toLowerCase(), ...ccEmails.map(e => e.toLowerCase())]);
+    for (const e of autoCcEmails) {
+      const k = e.toLowerCase();
+      if (k && !seen.has(k)) { ccEmails.push(e); seen.add(k); }
+    }
+  }
 
   // HTML → PDF 변환
   let pdfBuffer = null;
@@ -1985,6 +2089,23 @@ await db.exec(`CREATE TABLE IF NOT EXISTS post_process_price (
 )`);
 await db.exec(`CREATE INDEX IF NOT EXISTS idx_pp_price_vendor ON post_process_price(vendor_name)`);
 await db.exec(`CREATE INDEX IF NOT EXISTS idx_pp_price_process ON post_process_price(process_type)`);
+
+// ── 공정 담당자 마스터 (vendor × 공정 × 담당자) — 후공정 발주 이메일 CC 자동 라우팅 ──
+await db.exec(`CREATE TABLE IF NOT EXISTS process_assignee (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  vendor_name TEXT NOT NULL,
+  process_type TEXT NOT NULL,
+  assignee_name TEXT DEFAULT '',
+  assignee_email TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_pa_vendor ON process_assignee(vendor_name)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_pa_process ON process_assignee(process_type)`);
+await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pa_uniq ON process_assignee(vendor_name, process_type, assignee_email)`);
 
 // ── 후공정 거래 이력 ──
 await db.exec(`CREATE TABLE IF NOT EXISTS post_process_history (
@@ -9460,6 +9581,85 @@ async function handleRequest(req, res) {
     );
     ok(res, { id: info.lastInsertRowid });
     return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PROCESS ASSIGNEE (공정 담당자 마스터) — 후공정 PO 이메일 CC 자동 라우팅
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /api/process-assignees?vendor=&process=&active=1 — 목록
+  if (pathname === '/api/process-assignees' && method === 'GET') {
+    const vendor = parsed.searchParams.get('vendor');
+    const process = parsed.searchParams.get('process');
+    const activeOnly = parsed.searchParams.get('active') === '1';
+    let sql = 'SELECT * FROM process_assignee WHERE 1=1';
+    const params = [];
+    if (vendor)  { sql += ' AND vendor_name=?'; params.push(vendor); }
+    if (process) { sql += ' AND process_type=?'; params.push(process); }
+    if (activeOnly) sql += ' AND is_active=1';
+    sql += ' ORDER BY vendor_name, process_type, assignee_name';
+    ok(res, await db.prepare(sql).all(...params));
+    return;
+  }
+
+  // POST /api/process-assignees — 신규 등록 (vendor+process+email UNIQUE 충돌 시 이름/연락처 갱신)
+  if (pathname === '/api/process-assignees' && method === 'POST') {
+    const body = await readJSON(req);
+    const vendor_name = (body.vendor_name || '').trim();
+    const process_type = (body.process_type || '').trim();
+    const assignee_email = (body.assignee_email || '').trim();
+    const assignee_name = (body.assignee_name || '').trim();
+    const phone = (body.phone || '').trim();
+    const notes = (body.notes || '').trim();
+    if (!vendor_name || !process_type) { fail(res, 400, 'vendor_name, process_type 필수'); return; }
+    if (!assignee_name && !assignee_email) { fail(res, 400, '담당자명 또는 이메일 중 하나는 필수'); return; }
+    try {
+      const info = await db.prepare(`INSERT INTO process_assignee
+        (vendor_name, process_type, assignee_name, assignee_email, phone, notes, is_active)
+        VALUES (?,?,?,?,?,?,1)`).run(vendor_name, process_type, assignee_name, assignee_email, phone, notes);
+      ok(res, { id: info.lastInsertRowid });
+    } catch (e) {
+      // UNIQUE(vendor, process, email) 위반 시 같은 조합에 name/phone/notes/active 만 갱신
+      if (String(e.message || '').includes('UNIQUE')) {
+        await db.prepare(`UPDATE process_assignee
+          SET assignee_name=?, phone=?, notes=?, is_active=1, updated_at=datetime('now','localtime')
+          WHERE vendor_name=? AND process_type=? AND assignee_email=?`)
+          .run(assignee_name, phone, notes, vendor_name, process_type, assignee_email);
+        const row = await db.prepare(`SELECT id FROM process_assignee WHERE vendor_name=? AND process_type=? AND assignee_email=?`)
+          .get(vendor_name, process_type, assignee_email);
+        ok(res, { id: row?.id, upserted: true });
+      } else {
+        fail(res, 500, e.message);
+      }
+    }
+    return;
+  }
+
+  // PUT /api/process-assignees/:id — 수정
+  {
+    const m = pathname.match(/^\/api\/process-assignees\/(\d+)$/);
+    if (m && method === 'PUT') {
+      const id = parseInt(m[1], 10);
+      const body = await readJSON(req);
+      const fields = [];
+      const vals = [];
+      for (const k of ['vendor_name','process_type','assignee_name','assignee_email','phone','notes']) {
+        if (body[k] !== undefined) { fields.push(`${k}=?`); vals.push(String(body[k] || '').trim()); }
+      }
+      if (body.is_active !== undefined) { fields.push('is_active=?'); vals.push(body.is_active ? 1 : 0); }
+      if (!fields.length) { fail(res, 400, '수정할 필드 없음'); return; }
+      fields.push(`updated_at=datetime('now','localtime')`);
+      vals.push(id);
+      await db.prepare(`UPDATE process_assignee SET ${fields.join(',')} WHERE id=?`).run(...vals);
+      ok(res, { id });
+      return;
+    }
+    if (m && method === 'DELETE') {
+      const id = parseInt(m[1], 10);
+      await db.prepare('DELETE FROM process_assignee WHERE id=?').run(id);
+      ok(res, { id, deleted: true });
+      return;
+    }
   }
 
   // GET /api/post-process/history — 거래 이력 조회

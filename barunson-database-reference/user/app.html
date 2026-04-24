@@ -3696,8 +3696,66 @@ function closeMegaMenu() { /* no-op */ }
         <button class="btn btn-primary btn-sm" id="btnAddVendorNote" style="padding:4px 10px;font-size:12px" onclick="openVendorNoteModal()">+ 이슈 등록</button>
       </div>
     </div>
+
+    <!-- 공정 담당자 섹션: 후공정 업체일 때만 표시 -->
+    <div id="vendorAssigneeSection" style="display:none;margin-bottom:14px;border:1px solid #fdba74;background:#fff7ed;border-radius:8px;padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;color:#7c2d12">📮 공정 담당자 <span style="font-weight:400;font-size:11px;color:#9a3412">— 후공정 발주서 이메일 CC로 자동 전달</span></div>
+        <button class="btn btn-primary btn-sm" style="padding:3px 10px;font-size:11px" onclick="openAssigneeModal()">+ 담당자 추가</button>
+      </div>
+      <div id="vendorAssigneeList" style="display:flex;flex-direction:column;gap:6px">
+        <div style="color:var(--text-muted);font-size:12px;padding:8px;text-align:center">로딩중...</div>
+      </div>
+    </div>
+
     <div id="vendorNotesList" style="max-height:calc(46vh - 40px);overflow-y:auto;display:flex;flex-direction:column;gap:10px">
       <div style="color:var(--text-muted);font-size:13px;padding:30px;text-align:center">거래처를 선택하세요</div>
+    </div>
+  </div>
+</div>
+
+<!-- 공정 담당자 등록/수정 모달 -->
+<div class="modal-bg" id="assigneeModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closeAssigneeModal()">
+  <div class="modal" style="max-width:440px;width:95%">
+    <div class="modal-header">
+      <span id="assigneeModalTitle">공정 담당자 등록</span>
+      <button class="modal-close" onclick="closeAssigneeModal()">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;padding:14px 16px">
+      <input type="hidden" id="paEditId">
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">업체</label>
+        <input id="paVendor" readonly style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px;background:#f8fafc">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">공정 *</label>
+        <input list="paProcessList" id="paProcess" placeholder="예: 톰슨, 재단, 봉투가공" style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px">
+        <datalist id="paProcessList"></datalist>
+      </div>
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">담당자명</label>
+        <input id="paName" placeholder="홍길동" style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">이메일 (발주서 CC로 자동 발송)</label>
+        <input id="paEmail" placeholder="manager@vendor.com" style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">연락처</label>
+        <input id="paPhone" placeholder="010-0000-0000" style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#555;font-weight:600">메모</label>
+        <input id="paNotes" placeholder="" style="width:100%;padding:7px 8px;border:1px solid #ddd;border-radius:6px">
+      </div>
+      <div style="font-size:11px;color:#92400e;background:#fffbeb;padding:7px 10px;border-radius:5px;line-height:1.5">※ 담당자명 또는 이메일 중 하나는 필수. 같은 업체+공정+이메일 조합은 자동으로 덮어쓰기 됩니다.</div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:space-between;padding:12px 16px;border-top:1px solid #e5e7eb">
+      <button class="btn btn-sm" id="paDeleteBtn" style="color:#dc2626;border-color:#fca5a5;display:none" onclick="deleteAssignee()">삭제</button>
+      <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn btn-sm" onclick="closeAssigneeModal()">취소</button>
+        <button class="btn btn-primary btn-sm" onclick="saveAssignee()">저장</button>
+      </div>
     </div>
   </div>
 </div>
@@ -13969,6 +14027,7 @@ function selectVendor(vendorId){
   }
   renderVendorSideList(window._vendorList||[]);
   loadVendorNotes(vendorId);
+  loadVendorAssignees(v.name, v.type);
 }
 
 function loadVendorNotes(vendorId){
@@ -13980,6 +14039,112 @@ function loadVendorNotes(vendorId){
     window._vendorNotesList=notes;
     renderVendorNotes(notes);
   }).catch(()=>{el.innerHTML='<div style="color:#ef4444;padding:16px">로딩 실패</div>';});
+}
+
+// ===== 공정 담당자 =====
+function loadVendorAssignees(vendorName, vendorType) {
+  const section = document.getElementById('vendorAssigneeSection');
+  const list = document.getElementById('vendorAssigneeList');
+  if (!section || !list) return;
+  // 후공정 업체에서만 표시
+  if (vendorType !== '후공정') { section.style.display = 'none'; return; }
+  section.style.display = '';
+  list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;text-align:center">로딩중...</div>';
+  authFetch('/api/process-assignees?vendor=' + encodeURIComponent(vendorName))
+    .then(r => r.json()).then(resp => {
+      const rows = resp.data || [];
+      window._vendorAssignees = rows;
+      if (!rows.length) {
+        list.innerHTML = '<div style="color:#9a3412;font-size:12px;padding:8px;text-align:center">등록된 담당자가 없습니다. 공정별로 담당자를 등록하면 발주서 이메일이 자동으로 CC됩니다.</div>';
+        return;
+      }
+      // 공정별 그룹핑
+      const byProc = {};
+      for (const r of rows) { (byProc[r.process_type] ||= []).push(r); }
+      list.innerHTML = Object.keys(byProc).sort().map(proc => {
+        const items = byProc[proc].map(r => `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fff;border:1px solid #fed7aa;border-radius:5px">
+            <div style="flex:1;font-size:12px">
+              <b>${esc(r.assignee_name || '(이름 미등록)')}</b>
+              ${r.assignee_email ? `<span style="color:#666"> · ${esc(r.assignee_email)}</span>` : ''}
+              ${r.phone ? `<span style="color:#888;font-size:11px"> · ${esc(r.phone)}</span>` : ''}
+              ${r.notes ? `<div style="font-size:11px;color:#9a3412;margin-top:2px">${esc(r.notes)}</div>` : ''}
+              ${r.is_active ? '' : '<span style="font-size:10px;background:#f3f4f6;color:#6b7280;padding:1px 6px;border-radius:3px;margin-left:4px">비활성</span>'}
+            </div>
+            <button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick='openAssigneeModal(${r.id})'>수정</button>
+          </div>`).join('');
+        return `<div style="margin-bottom:6px">
+          <div style="font-size:11px;font-weight:700;color:#7c2d12;margin-bottom:4px">▸ ${esc(proc)}</div>
+          <div style="display:flex;flex-direction:column;gap:4px">${items}</div>
+        </div>`;
+      }).join('');
+    }).catch(() => { list.innerHTML = '<div style="color:#ef4444;padding:8px">로딩 실패</div>'; });
+}
+
+function openAssigneeModal(editId) {
+  const v = (window._vendorList || []).find(x => x.vendor_id === window._selectedVendorId);
+  if (!v) { alert('거래처를 먼저 선택하세요'); return; }
+  const modal = document.getElementById('assigneeModal');
+  document.getElementById('assigneeModalTitle').textContent = editId ? '공정 담당자 수정' : '공정 담당자 등록';
+  document.getElementById('paEditId').value = editId || '';
+  document.getElementById('paVendor').value = v.name || '';
+  document.getElementById('paDeleteBtn').style.display = editId ? '' : 'none';
+  // process datalist 채우기 (DB에서 post 공정 타입 로드)
+  authFetch('/api/process-types?category=post').then(r => r.ok ? r.json() : {data:[]}).then(resp => {
+    const types = (resp.data || []).map(t => t.name || t).filter(Boolean);
+    const dl = document.getElementById('paProcessList');
+    dl.innerHTML = (types.length ? types : ['재단','톰슨','봉투가공','세아리','레이져','실크','박/형압','단면접착','우찌누끼','접지','코팅']).map(t => `<option value="${esc(t)}">`).join('');
+  });
+  if (editId) {
+    const row = (window._vendorAssignees || []).find(r => r.id === editId);
+    if (row) {
+      document.getElementById('paProcess').value = row.process_type || '';
+      document.getElementById('paName').value = row.assignee_name || '';
+      document.getElementById('paEmail').value = row.assignee_email || '';
+      document.getElementById('paPhone').value = row.phone || '';
+      document.getElementById('paNotes').value = row.notes || '';
+    }
+  } else {
+    ['paProcess','paName','paEmail','paPhone','paNotes'].forEach(id => document.getElementById(id).value = '');
+  }
+  modal.style.display = 'flex';
+}
+
+function closeAssigneeModal() { document.getElementById('assigneeModal').style.display = 'none'; }
+
+function saveAssignee() {
+  const id = document.getElementById('paEditId').value;
+  const body = {
+    vendor_name: document.getElementById('paVendor').value.trim(),
+    process_type: document.getElementById('paProcess').value.trim(),
+    assignee_name: document.getElementById('paName').value.trim(),
+    assignee_email: document.getElementById('paEmail').value.trim(),
+    phone: document.getElementById('paPhone').value.trim(),
+    notes: document.getElementById('paNotes').value.trim(),
+  };
+  if (!body.vendor_name || !body.process_type) { alert('공정을 입력하세요'); return; }
+  if (!body.assignee_name && !body.assignee_email) { alert('담당자명 또는 이메일 중 하나는 필수입니다'); return; }
+  const url = id ? '/api/process-assignees/' + id : '/api/process-assignees';
+  const method = id ? 'PUT' : 'POST';
+  authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(resp => {
+      if (!resp.ok) { alert('저장 실패: ' + (resp.error || '알 수 없음')); return; }
+      closeAssigneeModal();
+      const v = (window._vendorList || []).find(x => x.vendor_id === window._selectedVendorId);
+      if (v) loadVendorAssignees(v.name, v.type);
+    });
+}
+
+function deleteAssignee() {
+  const id = document.getElementById('paEditId').value;
+  if (!id) return;
+  if (!confirm('이 담당자를 삭제하시겠습니까?')) return;
+  authFetch('/api/process-assignees/' + id, { method: 'DELETE' })
+    .then(r => r.json()).then(() => {
+      closeAssigneeModal();
+      const v = (window._vendorList || []).find(x => x.vendor_id === window._selectedVendorId);
+      if (v) loadVendorAssignees(v.name, v.type);
+    });
 }
 
 const NOTE_STATUS = {
