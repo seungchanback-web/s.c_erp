@@ -6378,6 +6378,28 @@ async function handleRequest(req, res) {
   // 응답: { matched, unmatched, upserted, bhc_total_rows, bhc_error?, total_stock, total_monthly, sample_upserts }
   if (pathname === '/api/admin/dd-resync' && method === 'POST') {
     const out = { started_at: new Date().toISOString() };
+
+    // sync_log 기록 — sync_type='xerp_inventory:dd' 로 법인별 row 분리.
+    //   기존 'xerp_inventory' 단일 row 에 뭉쳐서 DD 단독 실패가 success 로 은폐되던 문제 해소.
+    //   스키마(id, sync_type, started_at, finished_at, success_count, fail_count,
+    //   status, error_msg, triggered_by) 는 기존 그대로 — sync_type 태깅만으로 분리.
+    let _syncLogId = null;
+    try {
+      const info = await db.prepare("INSERT INTO sync_log (sync_type, status, triggered_by) VALUES (?,?,?)")
+        .run('xerp_inventory:dd', 'running', 'admin-dd-resync');
+      _syncLogId = info.lastInsertRowid;
+      out.sync_log_id = _syncLogId;
+    } catch (e) {
+      console.warn('[dd-resync] sync_log INSERT 실패 (이력 없이 진행):', e.message);
+    }
+    const finalizeLog = async (status, successCount, failCount, errMsg) => {
+      if (!_syncLogId) return;
+      try {
+        await db.prepare("UPDATE sync_log SET status=?, success_count=?, fail_count=?, error_msg=?, finished_at=datetime('now','localtime') WHERE id=?")
+          .run(status, successCount || 0, failCount || 0, (errMsg || '').slice(0, 500), _syncLogId);
+      } catch (_) {}
+    };
+
     try {
       // 0) credential 진단 — 비밀번호 본문은 숨기고 길이/끝문자/출처만 노출
       const _pwSrc = (k) => (envVars[k] !== undefined ? 'envVars' : (process.env[k] !== undefined ? 'process.env' : 'missing'));
@@ -6393,7 +6415,7 @@ async function handleRequest(req, res) {
       ).all();
       const codes = locals.map(r => (r.product_code || '').replace(/[\s ​‌‍﻿]/g, '').trim()).filter(Boolean);
       out.local_dd_count = codes.length;
-      if (!codes.length) { ok(res, out); return; }
+      if (!codes.length) { await finalizeLog('success', 0, 0, 'DD 제품 0건 — 동기화 스킵'); ok(res, out); return; }
 
       // 2) BHC 연결 (barShopConfig → xerpConfig 폴백)
       let bhcPool = null;
@@ -6405,7 +6427,13 @@ async function handleRequest(req, res) {
         }
       }
       out.bhc_used_config = usedCfg;
-      if (!bhcPool) { out.bhc_error = '모든 credential 실패'; ok(res, out); return; }
+      if (!bhcPool) {
+        out.bhc_error = '모든 credential 실패';
+        const connErrs = Object.entries(out).filter(([k]) => k.startsWith('conn_err_')).map(([k, v]) => k + '=' + v).join(' | ');
+        await finalizeLog('failed', 0, (out.local_dd_count || 0), 'BHC 연결 실패: ' + connErrs);
+        ok(res, out);
+        return;
+      }
 
       // 3) 재고 쿼리 (mmInventory, SiteCode='BHC2')
       const invByWh = {}; // {code: {wh: qty}}
@@ -6499,10 +6527,21 @@ async function handleRequest(req, res) {
       out.total_monthly_out = Object.values(shipMap).reduce((s, v) => s + (v.monthly || 0), 0);
       out.sample_upserts = sample;
       out.finished_at = new Date().toISOString();
+
+      // sync_log 마무리: upsert_failed 만 있어도 일부 성공이면 'success' 로 기록 (POST /api/sync/xerp-inventory 와 동일 기준).
+      //   inv_query_error / ship_query_error 가 있으면 부분 실패로 간주해 error_msg 에 병기.
+      const partialErr = [];
+      if (out.inv_query_error) partialErr.push('inv_query:' + out.inv_query_error);
+      if (out.ship_query_error) partialErr.push('ship_query:' + out.ship_query_error);
+      if (upsertErrs.length) partialErr.push('upsert:' + upsertErrs.join(' / '));
+      const finalStatus = (upsertFailed > 0 && upserted === 0) ? 'failed' : 'success';
+      await finalizeLog(finalStatus, upserted, upsertFailed, partialErr.join(' | '));
+
       ok(res, out);
     } catch (e) {
       out.fatal_error = e.message;
       out.stack = (e.stack || '').split('\n').slice(0, 5).join(' | ');
+      await finalizeLog('failed', 0, (out.local_dd_count || 0), 'fatal: ' + e.message);
       fail(res, 500, JSON.stringify(out));
     }
     return;
@@ -20448,12 +20487,22 @@ async function refreshXerpCache() {
   try {
     xerpInventoryCacheTime = 0; // 캐시 무효화
     const http = require('http');
-    const req = http.get(`http://localhost:${PORT}/api/xerp-inventory?refresh=1`, (res) => {
+    // ★ 2026-04: GET /api/xerp-inventory?refresh=1 → POST /api/sync/xerp-inventory 로 교체.
+    //   GET 경로는 in-memory 캐시만 갱신하고 inventory_snapshot 테이블은 건드리지 않아서
+    //   컨테이너 재기동/캐시 TTL 만료 후 snapshot 이 영구적으로 오래된 값을 반환하는 문제가 있었음.
+    //   POST 는 202 즉시 반환 + 백그라운드에서 snapshot UPSERT 까지 완수.
+    const postData = JSON.stringify({ triggered_by: 'auto-930' });
+    const req = http.request({
+      hostname: '127.0.0.1', port: PORT, path: '/api/sync/xerp-inventory', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+    }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => console.log('[XERP 동기화] 완료'));
+      res.on('end', () => console.log(`[XERP 동기화] POST 수락 status=${res.statusCode} resp=${data.slice(0, 200)}`));
     });
     req.on('error', e => console.warn('[XERP 동기화] 실패:', e.message));
+    req.write(postData);
+    req.end();
   } catch(e) { console.warn('[XERP 동기화] 오류:', e.message); }
 }
 

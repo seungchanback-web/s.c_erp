@@ -23,7 +23,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # 캐시 무효화 (빌드마다 다른 값)
-ARG CACHE_BUST=20260424-dd-resync-v2-creddiag
+ARG CACHE_BUST=20260424-auto930-post-synclog
 
 # 앱 파일 복사
 RUN echo "build:$CACHE_BUST" > /app/.buildstamp
