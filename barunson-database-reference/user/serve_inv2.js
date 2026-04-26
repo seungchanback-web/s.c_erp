@@ -5846,7 +5846,26 @@ async function handleRequest(req, res) {
         // 전원이 ohQty=0 으로 fallback 돼 재고가 0 으로 저장되는 버그.
         // 수정: SiteCode=BK10/BHC2 전체를 한 쿼리로 SUM GROUP BY ItemCode 해서 받고
         // 로컬 products 와 매칭. 쿼리 1회 → 실패 감지 명확, 타임아웃 1개만 관리.
-        const validCodeSet = new Set(productCodes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => c.toUpperCase()));
+        //
+        // ★ DD 포맷 정규화: 로컬 products 의 DD 품목코드는 'DDC_5209' 식으로 저장돼 있는데
+        //   BHC.mmInventory 는 'DDC5209' 로 저장 (DDC 뒤 언더스코어 없음). 매칭 실패 방지를 위해
+        //   DD 모드일 때 BHC 포맷(언더스코어 제거) 도 validCodeSet 에 추가하고, 역매핑으로 로컬 코드로 복원.
+        //   DD_FST85 같은 'DD_' (DDC 아닌) 는 양쪽 포맷이 동일하므로 처리 불필요.
+        const validCodeSet = new Set();
+        const bhcToLocal = {}; // DD 에서만 사용: BHC 포맷 → 로컬 포맷
+        for (const pc of productCodes) {
+          if (!/^[A-Za-z0-9_\-]+$/.test(pc)) continue;
+          const upper = pc.toUpperCase();
+          validCodeSet.add(upper);
+          bhcToLocal[upper] = upper;
+          if (isDd) {
+            const bhcForm = upper.replace(/^DDC_(\d)/, 'DDC$1');
+            if (bhcForm !== upper) {
+              validCodeSet.add(bhcForm);
+              bhcToLocal[bhcForm] = upper;
+            }
+          }
+        }
 
         // 1. 현재고 — SiteCode 전체 단일 쿼리, ItemCode + WhCode 별로 GROUP BY.
         // ★ 창고별 분해 도입: 프론트가 드롭다운으로 특정 창고만 보고 싶을 수 있어서, 합산값(invMap) 외에
@@ -5869,10 +5888,12 @@ async function handleRequest(req, res) {
             const wh   = (row.wh_code   || '').trim();
             const qty  = Math.round(row.oh_qty || 0);
             if (!code || !validCodeSet.has(code)) continue;
-            invMap[code] = (invMap[code] || 0) + qty;
+            // BHC 포맷을 로컬 포맷으로 복원 (DDC5209 → DDC_5209). barunson 에서는 identity.
+            const storeCode = bhcToLocal[code] || code;
+            invMap[storeCode] = (invMap[storeCode] || 0) + qty;
             if (wh && qty > 0) {
-              if (!invByWh[code]) invByWh[code] = {};
-              invByWh[code][wh] = (invByWh[code][wh] || 0) + qty;
+              if (!invByWh[storeCode]) invByWh[storeCode] = {};
+              invByWh[storeCode][wh] = (invByWh[storeCode][wh] || 0) + qty;
             }
           }
           console.log(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 성공: ${Object.keys(invMap).length}개 품목 매칭, 창고-품목 조합 ${r.recordset.length}건`);
@@ -5901,8 +5922,9 @@ async function handleRequest(req, res) {
           for (const row of r.recordset) {
             const code = (row.item_code || '').trim().toUpperCase();
             if (code && validCodeSet.has(code)) {
+              const storeCode = bhcToLocal[code] || code;
               const total = Math.round(row.total_qty || 0);
-              shipMap[code] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
+              shipMap[storeCode] = { total, monthly: Math.round(total / 3), daily: Math.round(total / 90) };
             }
           }
           console.log(`[xerp-inv ${legalEntity}] 출고 단일쿼리 성공: ${Object.keys(shipMap).length}개 매칭 (3개월치)`);
