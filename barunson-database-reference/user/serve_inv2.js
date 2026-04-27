@@ -5878,31 +5878,9 @@ async function handleRequest(req, res) {
       const siteCode = isDd ? 'BHC2' : 'BK10';
       let workPool = null;
       let createdLocal = false;
-      if (isDd) {
-        // BHC on-demand pool — DB_USER 우선 시도, 실패 시 XERP_DB_USER 폴백
-        // 프로덕션 .env 에서 # 특수문자가 잘리는 환경 대응
-        const bhcCandidates = [
-          { ...bhcConfig, _label: 'DB_USER(' + bhcConfig.user + ')' },
-          { ...bhcConfig, user: xerpConfig.user, password: xerpConfig.password, _label: 'XERP_USER(' + xerpConfig.user + ')' }
-        ];
-        for (const cfg of bhcCandidates) {
-          try {
-            console.log(`[xerp-inv dd] BHC 연결 시도: ${cfg._label}, pw_len=${(cfg.password||'').length}, pw_last=${(cfg.password||'').slice(-1)}, server=${cfg.server}`);
-            const { _label, ...poolCfg } = cfg;
-            workPool = new sql.ConnectionPool(poolCfg);
-            await workPool.connect();
-            console.log(`[xerp-inv dd] BHC 연결 성공: ${_label}`);
-            break;
-          } catch (e) {
-            console.warn(`[xerp-inv dd] BHC 연결 실패 (${cfg._label}):`, e.message);
-            workPool = null;
-          }
-        }
-        if (!workPool) throw new Error('BHC 연결 실패 — 모든 계정 시도 완료');
-        createdLocal = true;
-      } else {
-        workPool = xerpPool;
-      }
+      // DD/BarunSon 모두 동일한 XERP work DB 사용. mmInventory.SiteCode 로 분기
+      // (BK10=barunson, BHC2=DD). 별도 'BHC' database 접속은 readonly 계정 권한 부재로 실패.
+      workPool = xerpPool;
 
       try {
         if (!workPool) throw new Error('XERP pool not connected');
@@ -6461,17 +6439,13 @@ async function handleRequest(req, res) {
       out.local_dd_count = codes.length;
       if (!codes.length) { ok(res, out); return; }
 
-      // 2) BHC 연결 (barShopConfig → xerpConfig 폴백)
-      let bhcPool = null;
-      let usedCfg = null;
-      for (const c of [{ n: 'barShopConfig', cfg: barShopConfig }, { n: 'xerpConfig', cfg: xerpConfig }]) {
-        try { bhcPool = new sql.ConnectionPool({ ...c.cfg, database: 'BHC' }); await bhcPool.connect(); usedCfg = c.n; break; } catch (e) {
-          out['conn_err_' + c.n] = e.message;
-          bhcPool = null;
-        }
-      }
-      out.bhc_used_config = usedCfg;
-      if (!bhcPool) { out.bhc_error = '모든 credential 실패'; ok(res, out); return; }
+      // 2) XERP 풀 사용 — DD 재고는 별도 BHC database 가 아니라 XERP work DB 의
+      //    mmInventory 에 SiteCode='BHC2' 로 같이 들어 있음. readonly 계정이 BHC database
+      //    접근 권한 없어 별도 풀은 항상 로그인 실패. XERP 풀 재사용으로 통일.
+      const bhcPool = await ensureXerpPool();
+      if (!bhcPool) { out.bhc_error = 'XERP 풀 미연결'; ok(res, out); return; }
+      out.bhc_used_config = 'xerpPool';
+      const _ownsBhcPool = false; // 글로벌 풀 — close 하지 않음
 
       // 3) 재고 쿼리 (mmInventory, SiteCode='BHC2')
       // 매칭 정규화: BHC ItemCode 와 로컬 product_code 가 언더스코어 유무로 어긋나는 케이스(예: DDC0213 vs DDC_0213)가 있어
@@ -6537,7 +6511,7 @@ async function handleRequest(req, res) {
         out.bhc_ship_items = Object.keys(shipMap).length;
       } catch (e) { out.ship_query_error = e.message; }
 
-      try { await bhcPool.close(); } catch (_) {}
+      // bhcPool 은 XERP 글로벌 풀이므로 close 하지 않음 (다른 핸들러도 사용)
 
       // 5) 로컬 제품별 매칭 + UPSERT
       const matched = [];
