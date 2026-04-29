@@ -934,8 +934,9 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     }
   }
 
-  const thStyle = 'border:1px solid #bbb;padding:8px 10px;text-align:left;background:#f3f4f6;font-weight:600;font-size:12px';
-  const tdStyle = 'border:1px solid #ddd;padding:8px 10px;font-size:13px';
+  // 모든 셀 가운데 정렬 + 일정 padding + 단어 wrap 방지 (사용자 요청 — 간극 통일)
+  const thStyle = 'border:1px solid #bbb;padding:8px 8px;text-align:center;vertical-align:middle;background:#f3f4f6;font-weight:600;font-size:12px;white-space:nowrap';
+  const tdStyle = 'border:1px solid #ddd;padding:8px 8px;font-size:13px;text-align:center;vertical-align:middle;white-space:nowrap';
 
   let tableHeader, tableRows;
   if (isRawMaterial) {
@@ -947,8 +948,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <th style="${thStyle}">원재료명</th>
       <th style="${thStyle}">용지 규격</th>
       <th style="${thStyle};color:#c2410c">다음 입고처</th>
-      <th style="${thStyle};text-align:right">발주수량(R)</th>
-      <th style="${thStyle};text-align:center">절</th>
+      <th style="${thStyle}">발주수량(R)</th>
+      <th style="${thStyle}">절</th>
     </tr>`;
     tableRows = enrichedItems.map(it => `<tr>
       <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
@@ -956,8 +957,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
       <td style="${tdStyle}">${it.material_name || ''}</td>
       <td style="${tdStyle}">${it.spec || ''}</td>
       <td style="${tdStyle};color:#c2410c;font-weight:600">${it.item_chain || '-'}</td>
-      <td style="${tdStyle};text-align:right;font-weight:700;font-size:15px">${it.ream_qty || 0}R</td>
-      <td style="${tdStyle};text-align:center">${it.cut_spec || ''}</td>
+      <td style="${tdStyle};font-weight:700;font-size:15px">${it.ream_qty || 0}R</td>
+      <td style="${tdStyle}">${it.cut_spec || ''}</td>
     </tr>`).join('');
   } else {
     // 후공정 발주서: 공정별 섹션 분리 — 각 섹션 헤더에 담당자 표시
@@ -975,8 +976,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
         <th style="${thStyle}">공정</th>
         <th style="${thStyle}">원재료코드</th>
         <th style="${thStyle}">원재료명</th>
-        <th style="${thStyle};text-align:right">입고수량(R)</th>
-        <th style="${thStyle};text-align:right">생산수량(낱개)</th>
+        <th style="${thStyle}">입고수량(R)</th>
+        <th style="${thStyle}">생산수량(낱개)</th>
         <th style="${thStyle}">규격</th>
         <th style="${thStyle}">입고처</th>
       </tr>`;
@@ -985,8 +986,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <td style="${tdStyle}">${it.process_type || ''}</td>
           <td style="${tdStyle};color:#0369a1">${it.material_code || ''}</td>
           <td style="${tdStyle}">${it.material_name || ''}</td>
-          <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
-          <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
+          <td style="${tdStyle};font-weight:700">${it.ream_qty || '-'}R</td>
+          <td style="${tdStyle};font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
           <td style="${tdStyle}">${it.spec || ''}</td>
           <td style="${tdStyle};color:#7c2d12;font-weight:600">${it.next_vendor || '바른손'}</td>
         </tr>`;
@@ -1011,9 +1012,9 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     }
   }
 
-  // 이메일 본문 HTML
+  // 이메일 본문 HTML — max-width 700→960px (8~10컬럼 표가 wrap 되지 않도록)
   const html = `
-    <div style="font-family:'맑은 고딕',sans-serif;max-width:700px;margin:0 auto">
+    <div style="font-family:'맑은 고딕',sans-serif;max-width:960px;margin:0 auto">
       <div style="background:#f97316;color:#fff;padding:20px;border-radius:8px 8px 0 0">
         <h2 style="margin:0">${SENDER_COMPANY} ${typeLabel} 발주서</h2>
       </div>
@@ -1245,35 +1246,65 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     }
   }
 
-  // HTML → PDF 변환
-  let pdfBuffer = null;
-  let attachmentFileName = `${typeLabel}_발주서_${po.po_number}.pdf`;
-  let attachmentContentType = 'application/pdf';
+  // 첨부파일 — xlsx (사용자 요청으로 PDF → 엑셀 변경, 2026-04-29)
+  let xlsxBuffer = null;
+  let attachmentFileName = `${typeLabel}_발주서_${po.po_number}.xlsx`;
+  let attachmentContentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   try {
-    // puppeteer-core (경량) 우선, 없으면 puppeteer (풀) 사용
-    let puppeteer;
-    try { puppeteer = require('puppeteer-core'); } catch(_) { puppeteer = require('puppeteer'); }
-    // 시스템 Chrome/Chromium 경로 자동 탐색
-    const execPaths = [
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-      '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome',
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    ].filter(Boolean);
-    let execPath = null;
-    for (const p of execPaths) { try { if (require('fs').existsSync(p)) { execPath = p; break; } } catch(_){} }
-    const launchOpts = { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'] };
-    if (execPath) launchOpts.executablePath = execPath;
-    const browser = await puppeteer.launch(launchOpts);
-    const page = await browser.newPage();
-    await page.setContent(attachmentHtml, { waitUntil: 'networkidle0' });
-    pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' } });
-    await browser.close();
-    console.log(`📄 PDF 변환 완료: ${attachmentFileName} (${pdfBuffer.length} bytes)`);
-  } catch (pdfErr) {
-    console.warn(`⚠️ PDF 변환 실패 (HTML 첨부로 대체): ${pdfErr.message}`);
-    pdfBuffer = null;
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const aoa = [];
+    // 정보 영역
+    aoa.push([`${SENDER_COMPANY} ${typeLabel} 발주서`]);
+    aoa.push([]);
+    aoa.push(['발주번호', po.po_number]);
+    aoa.push(['발주일', po.po_date || '']);
+    aoa.push(['거래처', vendorName]);
+    if (po.expected_date) aoa.push(['납기예정일', po.expected_date]);
+    if (po.notes) aoa.push(['비고', po.notes]);
+    aoa.push([]);
+    // 품목 헤더 + 데이터 (이메일 본문 표와 동일 컬럼 구성)
+    if (isRawMaterial) {
+      aoa.push(['#', '제품코드', '원재료코드', '원재료명', '용지 규격', '다음 입고처', '발주수량(R)', '절']);
+      enrichedItems.forEach((it, i) => {
+        aoa.push([
+          i + 1,
+          it.product_code || '',
+          it.material_code || '',
+          it.material_name || '',
+          it.spec || '',
+          it.item_chain || '',
+          (it.ream_qty != null ? it.ream_qty : 0) + 'R',
+          it.cut_spec || ''
+        ]);
+      });
+    } else {
+      aoa.push(['#', '제품코드', '공정', '원재료코드', '원재료명', '입고수량(R)', '생산수량(낱개)', '규격', '입고처']);
+      enrichedItems.forEach((it, i) => {
+        aoa.push([
+          i + 1,
+          it.product_code || '',
+          it.process_type || '',
+          it.material_code || '',
+          it.material_name || '',
+          (it.ream_qty != null && it.ream_qty !== '' ? it.ream_qty : '-') + 'R',
+          it.ordered_qty || 0,
+          it.spec || '',
+          it.next_vendor || '바른손'
+        ]);
+      });
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    // 컬럼 너비 (글자 수 기준)
+    ws['!cols'] = isRawMaterial
+      ? [{wch:5},{wch:14},{wch:12},{wch:20},{wch:12},{wch:34},{wch:12},{wch:6}]
+      : [{wch:5},{wch:12},{wch:10},{wch:12},{wch:20},{wch:12},{wch:14},{wch:12},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, '발주서');
+    xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    console.log(`📊 엑셀 변환 완료: ${attachmentFileName} (${xlsxBuffer.length} bytes)`);
+  } catch (xlsxErr) {
+    console.warn(`⚠️ 엑셀 변환 실패 (HTML 첨부로 폴백): ${xlsxErr.message}`);
+    xlsxBuffer = null;
     attachmentFileName = `${typeLabel}_발주서_${po.po_number}.html`;
     attachmentContentType = 'text/html';
   }
@@ -1288,7 +1319,7 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
         html,
         attachments: [{
           filename: attachmentFileName,
-          content: pdfBuffer || attachmentHtml,
+          content: xlsxBuffer || attachmentHtml,
           contentType: attachmentContentType
         }]
       };
