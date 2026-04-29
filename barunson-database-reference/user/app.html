@@ -7259,10 +7259,17 @@ function showApp() {
     badge.textContent = ROLE_LABELS[currentAuthUser.role] || currentAuthUser.role;
     badge.style.background = (ROLE_COLORS[currentAuthUser.role] || '#999') + '22';
     badge.style.color = ROLE_COLORS[currentAuthUser.role] || '#999';
-    // 프로필 사진 표시
+    // 프로필 사진 표시 — XSS 가드: 외부 URL(http/https) 만 허용 (javascript:, data: 등 차단)
     const nameEl = document.getElementById('currentUserName');
-    if (currentAuthUser.profile_picture) {
-      nameEl.innerHTML = `<img src="${currentAuthUser.profile_picture}" style="width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:4px">${currentAuthUser.display_name || currentAuthUser.username}`;
+    const _picUrl = currentAuthUser.profile_picture || '';
+    const _picSafe = /^https?:\/\//i.test(_picUrl) ? _picUrl : '';
+    if (_picSafe) {
+      nameEl.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = _picSafe;
+      img.style.cssText = 'width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:4px';
+      nameEl.appendChild(img);
+      nameEl.appendChild(document.createTextNode(currentAuthUser.display_name || currentAuthUser.username));
     } else {
       nameEl.textContent = currentAuthUser.display_name || currentAuthUser.username;
     }
