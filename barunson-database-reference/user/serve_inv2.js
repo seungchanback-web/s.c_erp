@@ -702,9 +702,14 @@ async function reloadProductInfoFromDB() {
     for (const [code, ptMap] of Object.entries(ppvByCode)) {
       if (!out[code]) out[code] = {};
       for (const [pt, vn] of Object.entries(ptMap)) out[code][pt] = vn;
-      // step_order 기반 정렬된 후공정 체인 (_steps)
+      // step_order 기반 정렬 + 봉투가공은 항상 최후미로 강제 (입고처 lookup 정확성)
+      // step_order 가 중간으로 입력된 품목에서도 후공정 순서 일관성 유지.
       if (ppvStepsByCode[code]?.length) {
-        out[code]._steps = ppvStepsByCode[code].sort((a, b) => a.step - b.step);
+        out[code]._steps = ppvStepsByCode[code].sort((a, b) => {
+          if (a.process==='봉투가공' && b.process!=='봉투가공') return 1;
+          if (b.process==='봉투가공' && a.process!=='봉투가공') return -1;
+          return a.step - b.step;
+        });
       }
     }
     // product_post_vendor 에 항목 없는 품목은 레거시 products 컬럼으로 _steps 폴백
@@ -835,11 +840,15 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     const qty = it.ordered_qty || 0;
     const reams = qty / 500 / cut / jopan;
     const reamsStr = reams % 1 === 0 ? String(reams) : reams.toFixed(1);
-    // 제품별 후공정 체인 (step_order 순) — 공정 포함: 코리아(톰슨) → 예지가(봉투가공)
+    // 제품별 후공정 체인 (step_order 순 + 봉투가공 후미) — 공정 포함: 코리아(톰슨) → 예지가(봉투가공)
     // 동일 (업체,공정) 중복만 제거; 같은 업체가 여러 공정을 맡으면 모두 노출
     let itemChainText = '';
     const steps = (pi._steps && pi._steps.length)
-      ? pi._steps.slice().sort((a,b)=> (a.step||0) - (b.step||0))
+      ? pi._steps.slice().sort((a,b)=> {
+          if (a.process==='봉투가공' && b.process!=='봉투가공') return 1;
+          if (b.process==='봉투가공' && a.process!=='봉투가공') return -1;
+          return (a.step||0) - (b.step||0);
+        })
       : [];
     if (steps.length) {
       const seen = new Set();
