@@ -946,46 +946,41 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
     }
     const sectionOrder = Object.keys(byProc).sort();
     // 단일 공정일 때는 섹션 헤더 생략하고 기존 테이블 유지
-    if (sectionOrder.length <= 1) {
-      tableHeader = `<tr>
+    // 후공정 발주서 헤더: 제품코드 / 공정 / 원재료코드 / 원재료명 / 입고수량(R) / 생산수량(낱개) / 규격
+    const postHeaderHtml = `<tr>
         <th style="${thStyle}">제품코드</th>
         <th style="${thStyle}">공정</th>
+        <th style="${thStyle}">원재료코드</th>
+        <th style="${thStyle}">원재료명</th>
         <th style="${thStyle};text-align:right">입고수량(R)</th>
         <th style="${thStyle};text-align:right">생산수량(낱개)</th>
         <th style="${thStyle}">규격</th>
       </tr>`;
-      tableRows = enrichedItems.map(it => `<tr>
-        <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
-        <td style="${tdStyle}">${it.process_type || ''}</td>
-        <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
-        <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
-        <td style="${tdStyle}">${it.spec || ''}</td>
-      </tr>`).join('');
+    const postRowHtml = it => `<tr>
+          <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
+          <td style="${tdStyle}">${it.process_type || ''}</td>
+          <td style="${tdStyle};color:#0369a1">${it.material_code || ''}</td>
+          <td style="${tdStyle}">${it.material_name || ''}</td>
+          <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
+          <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
+          <td style="${tdStyle}">${it.spec || ''}</td>
+        </tr>`;
+    if (sectionOrder.length <= 1) {
+      tableHeader = postHeaderHtml;
+      tableRows = enrichedItems.map(postRowHtml).join('');
     } else {
       // 복수 공정: 섹션별 sub-table 로 렌더 → tableHeader/tableRows 대신 본문 통째 교체용 마크업을 tableRows 에 담음
-      tableHeader = `<tr>
-        <th style="${thStyle}">제품코드</th>
-        <th style="${thStyle}">공정</th>
-        <th style="${thStyle};text-align:right">입고수량(R)</th>
-        <th style="${thStyle};text-align:right">생산수량(낱개)</th>
-        <th style="${thStyle}">규격</th>
-      </tr>`;
+      tableHeader = postHeaderHtml;
       tableRows = sectionOrder.map(proc => {
         const list = byProc[proc];
         const ppl = assigneesByProcess[proc] || [];
         const assigneeLabel = ppl.length
           ? ppl.map(a => a.name + (a.email ? ` &lt;${a.email}&gt;` : '')).join(', ')
           : '담당자 미등록';
-        const sectionHdr = `<tr><td colspan="5" style="padding:10px 8px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:13px">
+        const sectionHdr = `<tr><td colspan="7" style="padding:10px 8px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:13px">
           ▸ ${proc} <span style="font-weight:400;font-size:11px;color:#9a3412;margin-left:10px">담당: ${assigneeLabel}</span>
         </td></tr>`;
-        const body = list.map(it => `<tr>
-          <td style="${tdStyle};font-weight:600">${it.product_code || ''}</td>
-          <td style="${tdStyle}">${it.process_type || ''}</td>
-          <td style="${tdStyle};text-align:right;font-weight:700">${it.ream_qty || '-'}R</td>
-          <td style="${tdStyle};text-align:right;font-weight:600">${(it.ordered_qty || 0).toLocaleString()}</td>
-          <td style="${tdStyle}">${it.spec || ''}</td>
-        </tr>`).join('');
+        const body = list.map(postRowHtml).join('');
         return sectionHdr + body;
       }).join('');
     }
@@ -1111,6 +1106,8 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
           <th style="width:30px">#</th>
           <th>제품코드</th>
           <th>공정</th>
+          <th>원재료코드</th>
+          <th>원재료명</th>
           <th class="right">입고수량(R)</th>
           <th class="right">생산수량</th>
           <th>규격</th>
@@ -1138,15 +1135,19 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
             byProc[p].push(it);
           }
           const procs = Object.keys(byProc).sort();
-          if (procs.length <= 1) {
-            return enrichedItems.map((it, idx) => `<tr>
-              <td class="center" style="color:#999">${idx + 1}</td>
+          // 후공정 PDF 행: # / 제품코드 / 공정 / 원재료코드 / 원재료명 / 입고수량(R) / 생산수량 / 규격
+          const postPdfRow = (it, n) => `<tr>
+              <td class="center" style="color:#999">${n}</td>
               <td class="bold">${it.product_code || ''}</td>
               <td>${it.process_type || ''}</td>
+              <td>${it.material_code || ''}</td>
+              <td>${it.material_name || ''}</td>
               <td class="right bold">${it.ream_qty || '-'}R</td>
               <td class="right">${(it.ordered_qty || 0).toLocaleString()}</td>
               <td>${it.spec || ''}</td>
-            </tr>`).join('');
+            </tr>`;
+          if (procs.length <= 1) {
+            return enrichedItems.map((it, idx) => postPdfRow(it, idx + 1)).join('');
           }
           let idx = 0;
           return procs.map(proc => {
@@ -1155,22 +1156,15 @@ async function sendPOEmail(po, items, vendorEmail, vendorName, isPostProcess, em
             const assigneeLabel = ppl.length
               ? ppl.map(a => a.name + (a.email ? ` &lt;${a.email}&gt;` : '')).join(', ')
               : '담당자 미등록';
-            const hdr = `<tr><td colspan="6" style="padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:12px">
+            const hdr = `<tr><td colspan="8" style="padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-weight:700;font-size:12px">
               ▸ ${proc} <span style="font-weight:400;font-size:10px;color:#9a3412;margin-left:8px">담당: ${assigneeLabel}</span>
             </td></tr>`;
-            const body = list.map(it => { idx++; return `<tr>
-              <td class="center" style="color:#999">${idx}</td>
-              <td class="bold">${it.product_code || ''}</td>
-              <td>${it.process_type || ''}</td>
-              <td class="right bold">${it.ream_qty || '-'}R</td>
-              <td class="right">${(it.ordered_qty || 0).toLocaleString()}</td>
-              <td>${it.spec || ''}</td>
-            </tr>`; }).join('');
+            const body = list.map(it => { idx++; return postPdfRow(it, idx); }).join('');
             return hdr + body;
           }).join('');
         })()}
         <tr class="total-row">
-          <td colspan="${isRawMaterial ? 6 : 3}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
+          <td colspan="${isRawMaterial ? 6 : 5}" style="text-align:right;border:1px solid #ccc">합계 ${isChinaVendor ? '/ 合计' : ''}</td>
           ${isRawMaterial ? `
             <td class="right" style="border:1px solid #ccc;font-size:14px">${totalReams % 1 === 0 ? totalReams : totalReams.toFixed(1)}R</td>
             <td style="border:1px solid #ccc"></td>
