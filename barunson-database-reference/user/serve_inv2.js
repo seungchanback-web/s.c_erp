@@ -3,6 +3,13 @@ const _startTime = Date.now();
 const APP_VERSION = '1.1.2';
 const APP_VERSION_DATE = '2026-04-23';
 const APP_BUILD_ID = '2451c4a-bhc-fix';
+
+// ── XERP 도메인 상수 ────────────────────────────────────────────────
+// 매직 스트링 산재 방지 — SQL template literal / 하드코딩 분기에서 참조.
+// SiteCode=BK10 (바른손 본사). DD 분기는 ItemCode LIKE 'DD%' 로 처리되므로 별도 상수 없음.
+const XERP_SITE_CODE = 'BK10';
+// 출고 구분 (mmInoutItem.InoutGubun) — 'SO' = Sales Out (출고)
+const XERP_INOUT_GUBUN_SO = 'SO';
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -15,7 +22,7 @@ const pgAdapter = require('./pg-adapter');
 const nodemailer = require('nodemailer');
 const sql = require('mssql');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 // ── 파일 로거 (일별 로테이션, 30일 보관) ────────────────────────────
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, 'logs');
@@ -296,7 +303,7 @@ async function loadXerpItemNames() {
     const poResult = await xerpPool.request().query(`
       SELECT RTRIM(ItemCode) AS ic, MAX(RTRIM(ItemName)) AS nm
       FROM poOrderItem WITH (NOLOCK)
-      WHERE SiteCode = 'BK10'
+      WHERE SiteCode = '${XERP_SITE_CODE}'
         AND ItemName IS NOT NULL AND LEN(RTRIM(ItemName)) > 0
       GROUP BY RTRIM(ItemCode)
     `);
@@ -5974,9 +5981,9 @@ async function handleRequest(req, res) {
       // ★ 2026-04-28: DD 는 SiteCode 가 어느 것인지 운영에서 검증되지 않아 (4/27 의 BHC2 가설로 2주간
       //   가용재고 0 이 지속됨) ItemCode prefix 'DD%' 로 매칭. SiteCode 와 무관하게 합산되며,
       //   실제 잡힌 SiteCode 분포는 로그/응답으로 노출해 진짜 위치를 영구 진단 가능하게 한다.
-      //   BarunSon 은 종전대로 SiteCode='BK10' 명시 (DD 코드는 NOT LIKE 'DD%' 필터로 자동 분리됨).
-      const inventoryFilter = isDd ? "ItemCode LIKE 'DD%'" : "SiteCode = 'BK10'";
-      const shipmentFilter  = isDd ? "ItemCode LIKE 'DD%'" : "SiteCode = 'BK10'";
+      //   BarunSon 은 종전대로 SiteCode='${XERP_SITE_CODE}' 명시 (DD 코드는 NOT LIKE 'DD%' 필터로 자동 분리됨).
+      const inventoryFilter = isDd ? "ItemCode LIKE 'DD%'" : `SiteCode = '${XERP_SITE_CODE}'`;
+      const shipmentFilter  = isDd ? "ItemCode LIKE 'DD%'" : `SiteCode = '${XERP_SITE_CODE}'`;
       // snapshot 메타데이터용 — 클라이언트 폴백(`isDD ? 'BHC2' : 'BK10'`) 과 일관성 유지.
       // 실제 발견된 SiteCode 는 invSiteDist 로그 / 응답으로 별도 노출.
       const siteCode = isDd ? 'BHC2' : 'BK10';
@@ -6406,7 +6413,7 @@ async function handleRequest(req, res) {
                COUNT(DISTINCT RTRIM(inv.ItemCode)) AS item_count,
                SUM(CASE WHEN inv.OhQty > 0 THEN inv.OhQty ELSE 0 END) AS total_qty
         FROM mmInventory inv WITH (NOLOCK)
-        WHERE inv.SiteCode = 'BK10' AND inv.WhCode IS NOT NULL AND RTRIM(inv.WhCode) <> ''
+        WHERE inv.SiteCode = '${XERP_SITE_CODE}' AND inv.WhCode IS NOT NULL AND RTRIM(inv.WhCode) <> ''
         GROUP BY RTRIM(inv.WhCode)
         ORDER BY item_count DESC
       `);
@@ -7100,7 +7107,7 @@ async function handleRequest(req, res) {
             const specMap = {};
             const validSpecSet = new Set(validSpecCodes.map(c => c.toUpperCase()));
             // ★ 2026-04-28: PARTITION 범위를 후보 코드 IN 절로 축소.
-            //    이전: SiteCode='BK10' 전체 mmInoutItem 정렬 (수십만~수백만 row, 매 동기화마다 ~30~120s 부하)
+            //    이전: SiteCode='${XERP_SITE_CODE}' 전체 mmInoutItem 정렬 (수십만~수백만 row, 매 동기화마다 ~30~120s 부하)
             //    이후: 후보 코드만 partition. 첫 동기화 후엔 후보가 거의 비어 ~수초 → ~수백ms 으로 수렴.
             //    IN 절은 영숫자/_/- 만 (위 정규식 검증) — SQL injection 안전. plan compile 비용 고려해 1000개 chunk.
             const t0spec = Date.now();
@@ -7117,7 +7124,7 @@ async function handleRequest(req, res) {
                            RTRIM(ItemSpec) AS item_spec,
                            ROW_NUMBER() OVER (PARTITION BY RTRIM(ItemCode) ORDER BY InoutDate DESC, InoutSerNo DESC) AS rn
                     FROM mmInoutItem WITH (NOLOCK)
-                    WHERE SiteCode = 'BK10' AND RTRIM(ItemCode) IN (${inClause})
+                    WHERE SiteCode = '${XERP_SITE_CODE}' AND RTRIM(ItemCode) IN (${inClause})
                   ) t
                   WHERE t.rn = 1 AND t.item_spec <> ''
                 `);
@@ -7220,7 +7227,7 @@ async function handleRequest(req, res) {
           FROM mmInoutHeader h WITH (NOLOCK)
           JOIN mmInoutItem i WITH (NOLOCK)
             ON h.SiteCode = i.SiteCode AND h.InoutNo = i.InoutNo AND h.InoutGubun = i.InoutGubun
-          WHERE h.SiteCode = 'BK10'
+          WHERE h.SiteCode = '${XERP_SITE_CODE}'
             AND h.InoutGubun = 'SI'
             AND h.InoutDate >= @fromDate AND h.InoutDate <= @toDate
         `);
@@ -7283,7 +7290,7 @@ async function handleRequest(req, res) {
           const r = await reqQ.query(`
             SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty, COUNT(DISTINCT RTRIM(InoutDate)) AS ship_days
             FROM mmInoutItem WITH (NOLOCK)
-            WHERE SiteCode = 'BK10' AND InoutGubun = 'SO'
+            WHERE SiteCode = '${XERP_SITE_CODE}' AND InoutGubun = 'SO'
               AND InoutDate >= @start3m AND InoutDate < @today
               AND RTRIM(ItemCode) IN (${inClause})
             GROUP BY RTRIM(ItemCode)
@@ -7360,7 +7367,7 @@ async function handleRequest(req, res) {
                RTRIM(InoutDate) AS InoutDate, RTRIM(InoutGubun) AS gubun,
                SUM(InoutQty) AS qty, SUM(InoutAmnt) AS amnt
         FROM mmInoutItem WITH (NOLOCK)
-        WHERE SiteCode = 'BK10'
+        WHERE SiteCode = '${XERP_SITE_CODE}'
           AND InoutGubun IN (${gubunPlaceholders})
           AND InoutDate >= @startDate AND InoutDate < @endDate
         GROUP BY RTRIM(ItemCode), RTRIM(InoutDate), RTRIM(InoutGubun)
@@ -7456,7 +7463,7 @@ async function handleRequest(req, res) {
         SELECT RTRIM(ItemCode) AS ic, RTRIM(WhCode) AS wh,
                SUM(CASE WHEN ISNULL(OhQty,0) > 0 THEN OhQty ELSE 0 END) AS stock_qty
         FROM mmInventory WITH (NOLOCK)
-        WHERE SiteCode = 'BK10'
+        WHERE SiteCode = '${XERP_SITE_CODE}'
         GROUP BY RTRIM(ItemCode), RTRIM(WhCode)
       `);
       const stockMap = {};
@@ -7470,7 +7477,7 @@ async function handleRequest(req, res) {
       const whResult = await xerpPool.request().query(`
         SELECT DISTINCT RTRIM(WhCode) AS wh_code
         FROM mmInoutItem WITH (NOLOCK)
-        WHERE SiteCode = 'BK10' AND WhCode IS NOT NULL AND RTRIM(WhCode) <> ''
+        WHERE SiteCode = '${XERP_SITE_CODE}' AND WhCode IS NOT NULL AND RTRIM(WhCode) <> ''
         ORDER BY RTRIM(WhCode)
       `);
       const warehouses = whResult.recordset.map(r => ({
@@ -7494,7 +7501,7 @@ async function handleRequest(req, res) {
                SUM(CASE WHEN InoutGubun IN ('SI','MI') THEN InoutAmnt ELSE 0 END) AS in_amnt,
                SUM(CASE WHEN InoutGubun IN ('SO','MO') THEN InoutAmnt ELSE 0 END) AS out_amnt
         FROM mmInoutItem WITH (NOLOCK)
-        WHERE SiteCode = 'BK10'
+        WHERE SiteCode = '${XERP_SITE_CODE}'
           AND InoutDate >= @startDate AND InoutDate < @endDate
           ${whereExtra}
         GROUP BY RTRIM(ItemCode), RTRIM(WhCode)
@@ -9405,12 +9412,12 @@ async function handleRequest(req, res) {
               const safeList = [...codes].filter(c => /^[A-Za-z0-9_\-]+$/.test(c)).map(c => `'${c}'`).join(',');
               if (safeList) {
                 // ★ 양수 OhQty 만 SUM — XERP 스마트재고현황과 일치 (음수 예약/조정 lot 제외)
-                const invR = await xerpPool.request().query(`SELECT RTRIM(ItemCode) AS code, SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='BK10' AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
+                const invR = await xerpPool.request().query(`SELECT RTRIM(ItemCode) AS code, SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS qty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='${XERP_SITE_CODE}' AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
                 for (const r of (invR.recordset||[])) { invMap[r.code.trim()] = { stock: Math.round(r.qty||0), monthly: 0 }; }
                 // 월출고
                 const today = new Date(); const s3m = new Date(today); s3m.setMonth(s3m.getMonth()-3);
                 const fmt = d => d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
-                const shipR = await xerpPool.request().input('s3',sql.NChar(16),fmt(s3m)).input('t',sql.NChar(16),fmt(today)).query(`SELECT RTRIM(ItemCode) AS code, SUM(InoutQty) AS qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='BK10' AND InoutGubun='SO' AND InoutDate>=@s3 AND InoutDate<@t AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
+                const shipR = await xerpPool.request().input('s3',sql.NChar(16),fmt(s3m)).input('t',sql.NChar(16),fmt(today)).query(`SELECT RTRIM(ItemCode) AS code, SUM(InoutQty) AS qty FROM mmInoutItem WITH(NOLOCK) WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO' AND InoutDate>=@s3 AND InoutDate<@t AND RTRIM(ItemCode) IN (${safeList}) GROUP BY RTRIM(ItemCode)`);
                 for (const r of (shipR.recordset||[])) { const c=r.code.trim(); if(invMap[c]) invMap[c].monthly = Math.round((r.qty||0)/3); }
               }
             }
@@ -10716,7 +10723,7 @@ async function handleRequest(req, res) {
                    h.OrderDate AS order_date, i.OrderQty AS qty, RTRIM(h.CsCode) AS vendor_code
             FROM poOrderHeader h WITH (NOLOCK)
             JOIN poOrderItem i WITH (NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-            WHERE h.SiteCode = 'BK10' AND h.OrderDate >= @startDate
+            WHERE h.SiteCode = '${XERP_SITE_CODE}' AND h.OrderDate >= @startDate
               AND RTRIM(i.ItemCode) IN (${placeholders})
             ORDER BY h.OrderDate DESC
           `);
@@ -10788,7 +10795,7 @@ async function handleRequest(req, res) {
                 SELECT RTRIM(h.OrderNo) AS OrderNo, RTRIM(i.ItemCode) AS ItemCode
                 FROM poOrderHeader h WITH (NOLOCK)
                 JOIN poOrderItem i WITH (NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-                WHERE h.SiteCode = 'BK10' AND h.OrderDate >= @startDate
+                WHERE h.SiteCode = '${XERP_SITE_CODE}' AND h.OrderDate >= @startDate
                   AND RTRIM(h.OrderNo) IN (${placeholders})
               `);
               for (const row of xresult.recordset) {
@@ -12022,7 +12029,7 @@ async function handleRequest(req, res) {
                  SUM(InoutAmnt) AS total_amount,
                  COUNT(*) AS cnt
           FROM mmInoutItem WITH (NOLOCK)
-          WHERE SiteCode = 'BK10'
+          WHERE SiteCode = '${XERP_SITE_CODE}'
             AND InoutGubun = 'MI'
             AND InoutDate >= @fromDate AND InoutDate < @toDate
             ${matCodes.length ? 'AND ItemCode IN (' + codePlaceholders + ')' : ''}
@@ -12093,7 +12100,7 @@ async function handleRequest(req, res) {
                SUM(i.OrderAmnt) AS amt
         FROM poOrderHeader h WITH (NOLOCK)
         JOIN poOrderItem i WITH (NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-        WHERE h.SiteCode = 'BK10'
+        WHERE h.SiteCode = '${XERP_SITE_CODE}'
           AND h.OrderDate >= @fromDate AND h.OrderDate <= @toDate
         GROUP BY RTRIM(h.CsCode), LEFT(h.OrderDate,4), SUBSTRING(h.OrderDate,5,2)
         ORDER BY RTRIM(h.CsCode), LEFT(h.OrderDate,4), SUBSTRING(h.OrderDate,5,2)
@@ -12161,7 +12168,7 @@ async function handleRequest(req, res) {
         FROM poOrderHeader h WITH (NOLOCK)
         JOIN poOrderItem i WITH (NOLOCK)
           ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-        WHERE h.SiteCode='BK10'
+        WHERE h.SiteCode='${XERP_SITE_CODE}'
           AND h.OrderDate >= @fromDate AND h.OrderDate <= @toDate
           AND RTRIM(h.CsCode) IN ('2015259','2100005','2100013','2100006','2013391')
         GROUP BY RTRIM(h.CsCode), RTRIM(i.ItemCode), LEFT(h.OrderDate,6)
@@ -12256,7 +12263,7 @@ async function handleRequest(req, res) {
                SUM(i.OrderQty) AS qty
         FROM poOrderHeader h WITH (NOLOCK)
         JOIN poOrderItem i WITH (NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-        WHERE h.SiteCode = 'BK10'
+        WHERE h.SiteCode = '${XERP_SITE_CODE}'
           AND h.CsCode = @vendorCode
           AND h.OrderDate >= '20240101' AND h.OrderDate <= '20261231'
         GROUP BY RTRIM(i.ItemCode), LEFT(h.OrderDate,4), SUBSTRING(h.OrderDate,5,2)
@@ -12395,7 +12402,7 @@ async function handleRequest(req, res) {
                SUM(i.OrderQty) AS qty
         FROM poOrderHeader h WITH (NOLOCK)
         JOIN poOrderItem i WITH (NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-        WHERE h.SiteCode = 'BK10'
+        WHERE h.SiteCode = '${XERP_SITE_CODE}'
           AND h.CsCode = @vendorCode
           AND h.OrderDate >= @fromDate AND h.OrderDate <= @toDate
         GROUP BY RTRIM(i.ItemCode), LEFT(h.OrderDate,4), SUBSTRING(h.OrderDate,5,2)
@@ -12993,7 +13000,7 @@ async function handleRequest(req, res) {
         .query(`
           SELECT LEFT(RTRIM(InoutDate),6) AS ym, SUM(InoutQty) AS qty
           FROM mmInoutItem WITH (NOLOCK)
-          WHERE SiteCode='BK10' AND InoutGubun='SO'
+          WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
             AND RTRIM(ItemCode)=@code
             AND InoutDate>=@startD AND InoutDate<@endD
           GROUP BY LEFT(RTRIM(InoutDate),6)
@@ -13023,7 +13030,7 @@ async function handleRequest(req, res) {
         .query(`
           SELECT TOP 20 RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
           FROM mmInoutItem WITH (NOLOCK)
-          WHERE SiteCode='BK10' AND InoutGubun='SO'
+          WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
             AND InoutDate>=@startD AND InoutDate<@endD
           GROUP BY RTRIM(ItemCode)
           ORDER BY SUM(InoutQty) DESC
@@ -13037,7 +13044,7 @@ async function handleRequest(req, res) {
         .query(`
           SELECT RTRIM(ItemCode) AS item_code, LEFT(RTRIM(InoutDate),6) AS ym, SUM(InoutQty) AS qty
           FROM mmInoutItem WITH (NOLOCK)
-          WHERE SiteCode='BK10' AND InoutGubun='SO'
+          WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
             AND InoutDate>=@startD2 AND InoutDate<@endD2
             AND RTRIM(ItemCode) IN (${safeList})
           GROUP BY RTRIM(ItemCode), LEFT(RTRIM(InoutDate),6)
@@ -14848,7 +14855,7 @@ async function handleRequest(req, res) {
             const result = await req.query(`
               SELECT RTRIM(ItemCode) AS item_code, SUM(InoutQty) AS total_qty
               FROM mmInoutItem WITH (NOLOCK)
-              WHERE SiteCode='BK10' AND InoutGubun='SO'
+              WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
                 AND InoutDate >= '20260101'
                 AND ItemCode IN (${placeholders})
               GROUP BY RTRIM(ItemCode)
@@ -15531,7 +15538,7 @@ async function handleRequest(req, res) {
         SELECT RTRIM(ItemCode) AS product_code, RTRIM(WhCode) AS wh_code,
                SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS quantity
         FROM mmInventory WITH (NOLOCK)
-        WHERE SiteCode = 'BK10'
+        WHERE SiteCode = '${XERP_SITE_CODE}'
         GROUP BY RTRIM(ItemCode), RTRIM(WhCode)
       `);
       // 로컬 products 테이블에서 품목명 매칭
@@ -15659,7 +15666,7 @@ async function handleRequest(req, res) {
   }
 
   // 헬퍼: 더기프트 매출 쿼리 (mmInoutItem 출고 기반, 기간별)
-  // 더기프트 = XERP mmInoutItem에서 SiteCode='BK10', InoutGubun='SO', 등록된 gift_sets의 xerp_code 매칭
+  // 더기프트 = XERP mmInoutItem에서 SiteCode='${XERP_SITE_CODE}', InoutGubun='SO', 등록된 gift_sets의 xerp_code 매칭
   async function queryGiftSales(pool, startYMD, endYMD) {
     // gift_sets에서 등록된 xerp_code 목록
     const giftSets = await db.prepare("SELECT xerp_code, set_name FROM gift_sets WHERE status='active' AND xerp_code != ''").all();
@@ -15676,7 +15683,7 @@ async function handleRequest(req, res) {
              ISNULL(SUM(InoutQty),0) AS total_qty,
              COUNT(DISTINCT RTRIM(ItemCode)) AS items
       FROM mmInoutItem WITH (NOLOCK)
-      WHERE SiteCode='BK10' AND InoutGubun='SO'
+      WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
         AND InoutDate >= @startDate AND InoutDate <= @endDate
         AND RTRIM(ItemCode) IN (${placeholders})`);
     const row = r.recordset[0] || {};
@@ -15698,7 +15705,7 @@ async function handleRequest(req, res) {
              ISNULL(SUM(InoutAmnt),0) AS total_sales,
              ISNULL(SUM(InoutQty),0) AS total_qty
       FROM mmInoutItem WITH (NOLOCK)
-      WHERE SiteCode='BK10' AND InoutGubun='SO'
+      WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
         AND InoutDate >= @startDate AND InoutDate <= @endDate
         AND RTRIM(ItemCode) IN (${placeholders})
       GROUP BY RTRIM(InoutDate) ORDER BY RTRIM(InoutDate)`);
@@ -15727,7 +15734,7 @@ async function handleRequest(req, res) {
              ISNULL(SUM(InoutAmnt),0) AS total_sales,
              ISNULL(SUM(InoutQty),0) AS total_qty
       FROM mmInoutItem WITH (NOLOCK)
-      WHERE SiteCode='BK10' AND InoutGubun='SO'
+      WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
         AND InoutDate >= @startDate AND InoutDate <= @endDate
         AND RTRIM(ItemCode) IN (${placeholders})
       GROUP BY RTRIM(ItemCode), RTRIM(ItemName)
@@ -16083,7 +16090,7 @@ async function handleRequest(req, res) {
                    ISNULL(SUM(InoutAmnt),0) AS total_sales,
                    ISNULL(SUM(InoutQty),0) AS total_qty
             FROM mmInoutItem WITH (NOLOCK)
-            WHERE SiteCode='BK10' AND InoutGubun='SO'
+            WHERE SiteCode='${XERP_SITE_CODE}' AND InoutGubun='SO'
               AND InoutDate >= @s AND InoutDate <= @e
               AND RTRIM(ItemCode) IN (${ph})
             GROUP BY LEFT(RTRIM(InoutDate),6) ORDER BY sale_month`);
@@ -17716,7 +17723,7 @@ async function handleRequest(req, res) {
       const dReq = pool.request().input('from', from).input('to', to).input('offset', offset).input('limit', limit);
       if (arAp) { whereExtra += ' AND h.ArApGubun = @arAp'; cReq.input('arAp', arAp); dReq.input('arAp', arAp); }
       if (search) { whereExtra += " AND (h.InvoiceNo LIKE @search OR h.CsCode LIKE @search)"; cReq.input('search', '%'+search+'%'); dReq.input('search', '%'+search+'%'); }
-      const countR = await cReq.query(`SELECT COUNT(*) AS cnt FROM rpInvoiceHeader h WITH(NOLOCK) WHERE h.SiteCode='BK10' AND h.InvoiceDate >= @from AND h.InvoiceDate <= @to ${whereExtra}`);
+      const countR = await cReq.query(`SELECT COUNT(*) AS cnt FROM rpInvoiceHeader h WITH(NOLOCK) WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.InvoiceDate >= @from AND h.InvoiceDate <= @to ${whereExtra}`);
       totalCount = countR.recordset[0].cnt;
       const dataR = await dReq.query(`
         SELECT RTRIM(h.InvoiceNo) AS invoice_no, h.InvoiceDate, h.ArApGubun,
@@ -17725,7 +17732,7 @@ async function handleRequest(req, res) {
                h.TaxCode, RTRIM(h.DocNo) AS doc_no, h.EseroUp, h.RelCheck, h.BillCheck,
                RTRIM(h.CsEmail) AS cs_email
         FROM rpInvoiceHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND h.InvoiceDate >= @from AND h.InvoiceDate <= @to ${whereExtra}
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.InvoiceDate >= @from AND h.InvoiceDate <= @to ${whereExtra}
         ORDER BY h.InvoiceDate DESC, h.InvoiceNo DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -17757,7 +17764,7 @@ async function handleRequest(req, res) {
                ISNULL(h.SupplyAmnt,0) AS supply_amt, ISNULL(h.VatAmnt,0) AS vat_amt,
                h.TaxCode, RTRIM(h.DocNo) AS doc_no, h.EseroUp, h.RelCheck,
                RTRIM(h.CsEmail) AS cs_email, RTRIM(h.CsMobile) AS cs_mobile
-        FROM rpInvoiceHeader h WITH(NOLOCK) WHERE h.SiteCode='BK10' AND RTRIM(h.InvoiceNo)=@no
+        FROM rpInvoiceHeader h WITH(NOLOCK) WHERE h.SiteCode='${XERP_SITE_CODE}' AND RTRIM(h.InvoiceNo)=@no
       `);
       if (hR.recordset.length > 0) header = hR.recordset[0];
       const iR = await pool.request().input('no', invoiceNo).query(`
@@ -17765,7 +17772,7 @@ async function handleRequest(req, res) {
                ISNULL(i.ItemQty,0) AS qty, ISNULL(i.ItemPrice,0) AS price,
                ISNULL(i.ItemAmnt,0) AS amt, ISNULL(i.ItemVatAmnt,0) AS vat
         FROM rpInvoiceItem i WITH(NOLOCK)
-        WHERE i.SiteCode='BK10' AND RTRIM(i.InvoiceNo)=@no
+        WHERE i.SiteCode='${XERP_SITE_CODE}' AND RTRIM(i.InvoiceNo)=@no
         ORDER BY i.InvoiceSerNo
       `);
       items = iR.recordset;
@@ -17791,7 +17798,7 @@ async function handleRequest(req, res) {
                ISNULL(SUM(h.VatAmnt),0) AS vat,
                SUM(CASE WHEN RTRIM(h.EseroUp)='Y' THEN 1 ELSE 0 END) AS electronic
         FROM rpInvoiceHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND h.InvoiceDate >= @yearStart AND h.InvoiceDate <= @yearEnd
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.InvoiceDate >= @yearStart AND h.InvoiceDate <= @yearEnd
         GROUP BY LEFT(h.InvoiceDate,6), h.ArApGubun
         ORDER BY LEFT(h.InvoiceDate,6), h.ArApGubun
       `);
@@ -17958,7 +17965,7 @@ async function handleRequest(req, res) {
                  MAX(h.InoutDate) AS last_date
           FROM mmInoutItem i WITH(NOLOCK)
           JOIN mmInoutHeader h WITH(NOLOCK) ON i.SiteCode=h.SiteCode AND i.InoutNo=h.InoutNo AND i.InoutGubun=h.InoutGubun
-          WHERE h.SiteCode='BK10' AND h.InoutGubun='MI'
+          WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.InoutGubun='MI'
             AND h.InoutDate>=@from6m AND h.InoutDate<=@toNow
             AND RTRIM(i.ItemCode) LIKE 'BP%' ${xSearch}
           GROUP BY RTRIM(i.ItemCode)
@@ -18092,7 +18099,7 @@ async function handleRequest(req, res) {
                MIN(d.CurPrice) AS min_price, MAX(d.CurPrice) AS max_price
         FROM mmInoutItem d WITH(NOLOCK)
         INNER JOIN mmInoutHeader h WITH(NOLOCK) ON d.SiteCode=h.SiteCode AND d.InoutNo=h.InoutNo
-        WHERE d.SiteCode='BK10' AND h.InoutDate>=@from AND h.InoutDate<=@to
+        WHERE d.SiteCode='${XERP_SITE_CODE}' AND h.InoutDate>=@from AND h.InoutDate<=@to
           AND h.InoutType IN ('10','11') ${searchWhere}
         GROUP BY RTRIM(d.ItemCode), RTRIM(d.ItemName), RTRIM(d.ItemStnd), RTRIM(d.ItemUnit)
         ORDER BY RTRIM(d.ItemCode)
@@ -18134,7 +18141,7 @@ async function handleRequest(req, res) {
     const vendorCodes = Object.keys(vendorCodeMap);
     // 동적으로 poOrderHeader에서 신규 거래처 코드 수집
     try {
-      const dynVendors = await pool.request().query("SELECT DISTINCT RTRIM(CsCode) AS code FROM poOrderHeader WHERE SiteCode='BK10' AND RTRIM(CsCode) NOT IN ('2015259','2100005','2100013','2100006','2013391')");
+      const dynVendors = await pool.request().query(`SELECT DISTINCT RTRIM(CsCode) AS code FROM poOrderHeader WHERE SiteCode='${XERP_SITE_CODE}' AND RTRIM(CsCode) NOT IN ('2015259','2100005','2100013','2100006','2013391')`);
       for (const dv of (dynVendors.recordset||[])) { if (dv.code && !vendorCodeMap[dv.code]) { vendorCodeMap[dv.code] = dv.code; vendorCodes.push(dv.code); } }
     } catch(_) {}
     try {
@@ -18161,7 +18168,7 @@ async function handleRequest(req, res) {
                CASE WHEN SUM(i.OrderQty)>0 THEN SUM(i.OrderAmnt)/SUM(i.OrderQty) ELSE 0 END AS avg_price
         FROM poOrderHeader h WITH(NOLOCK)
         JOIN poOrderItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.OrderNo=i.OrderNo
-        WHERE h.SiteCode='BK10' AND h.OrderDate>=@from AND h.OrderDate<=@to
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.OrderDate>=@from AND h.OrderDate<=@to
           AND RTRIM(h.CsCode) IN (${vendorCodes.map(c => "'"+c+"'").join(',')}) ${extraWhere}
         GROUP BY RTRIM(h.CsCode), RTRIM(i.ItemCode), LEFT(h.OrderDate,6)
         ORDER BY RTRIM(h.CsCode), RTRIM(i.ItemCode), LEFT(h.OrderDate,6)
@@ -18877,7 +18884,7 @@ async function handleRequest(req, res) {
       const invR = await xerpPool.request().query(`
         SELECT RTRIM(ItemCode) AS item_code, RTRIM(ItemName) AS item_name,
           RTRIM(ItemStnd) AS item_spec, SUM(OhQty) AS oh_qty, RTRIM(WhCode) AS wh_code
-        FROM mmInventory WITH (NOLOCK) WHERE SiteCode='BK10' AND OhQty > 0
+        FROM mmInventory WITH (NOLOCK) WHERE SiteCode='${XERP_SITE_CODE}' AND OhQty > 0
         GROUP BY RTRIM(ItemCode), RTRIM(ItemName), RTRIM(ItemStnd), RTRIM(WhCode)`);
       const invRows = invR.recordset || [];
       const upsertLot = db.prepare(`INSERT INTO batch_master (batch_number,product_code,product_name,warehouse,received_qty,current_qty,quality_status,notes,created_by)
@@ -18897,7 +18904,7 @@ async function handleRequest(req, res) {
         .input('e', sql.NVarChar(16), fmt(end))
         .query(`SELECT RTRIM(ItemCode) AS item_code, RTRIM(ItemName) AS item_name,
           InoutDate, InoutGubun, SUM(InoutQty) AS qty, SUM(InoutAmnt) AS amt
-          FROM mmInoutItem WITH (NOLOCK) WHERE SiteCode='BK10' AND InoutDate >= @s AND InoutDate <= @e
+          FROM mmInoutItem WITH (NOLOCK) WHERE SiteCode='${XERP_SITE_CODE}' AND InoutDate >= @s AND InoutDate <= @e
           GROUP BY RTRIM(ItemCode), RTRIM(ItemName), InoutDate, InoutGubun`);
       const txnRows = txnR.recordset || [];
       const typeMap = {MI:'receipt', MO:'usage', SO:'usage', SI:'return'};
@@ -19235,7 +19242,7 @@ async function handleRequest(req, res) {
     // XERP 재고에서 안전재고 규칙 자동 생성 (현재재고의 30%를 min_qty로 설정)
     try {
       const pool = await ensureXerpPool();
-      const r = await pool.request().query(`SELECT RTRIM(ItemCode) AS code, RTRIM(ItemName) AS name, OhQty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='BK10' AND OhQty > 0`);
+      const r = await pool.request().query(`SELECT RTRIM(ItemCode) AS code, RTRIM(ItemName) AS name, OhQty FROM mmInventory WITH(NOLOCK) WHERE SiteCode='${XERP_SITE_CODE}' AND OhQty > 0`);
       const upsert = db.prepare("INSERT OR IGNORE INTO safety_stock_rules (product_code,product_name,min_qty,reorder_qty,reorder_point) VALUES (?,?,?,?,?)");
       let cnt = 0;
       for (const row of r.recordset||[]) {
@@ -19677,7 +19684,7 @@ async function handleRequest(req, res) {
       const result = await pool.request().query(`
         SELECT DISTINCT RTRIM(AccCode) AS acc_code
         FROM glDocItem WITH (NOLOCK)
-        WHERE SiteCode = 'BK10' AND AccCode IS NOT NULL AND RTRIM(AccCode) != ''
+        WHERE SiteCode = '${XERP_SITE_CODE}' AND AccCode IS NOT NULL AND RTRIM(AccCode) != ''
       `);
       const upsert = db.prepare(`INSERT INTO gl_account_map (acc_code, acc_name, acc_type, acc_group, parent_code, depth, sort_order, updated_at)
         VALUES (?,?,?,?,?,?,?,datetime('now','localtime'))
@@ -19750,7 +19757,7 @@ async function handleRequest(req, res) {
                  SUM(CASE WHEN i.DrCr = 'C' THEN i.DocAmnt ELSE 0 END) AS total_cr
           FROM glDocHeader h WITH (NOLOCK)
           JOIN glDocItem i WITH (NOLOCK) ON h.SiteCode = i.SiteCode AND h.DocNo = i.DocNo
-          WHERE h.SiteCode = 'BK10' AND h.RelCheck = 'Y'
+          WHERE h.SiteCode = '${XERP_SITE_CODE}' AND h.RelCheck = 'Y'
             AND h.RelDate >= @fromDate AND h.RelDate <= @toDate
           GROUP BY RTRIM(i.AccCode)
           ORDER BY SUM(i.DocAmnt) DESC
@@ -19793,7 +19800,7 @@ async function handleRequest(req, res) {
       if (search) { whereExtra += " AND (h.DocNo LIKE @search OR h.DocDescr LIKE @search)"; req2.input('search', '%' + search + '%'); }
       const countResult = await req2.query(`
         SELECT COUNT(*) AS cnt FROM glDocHeader h WITH (NOLOCK)
-        WHERE h.SiteCode = 'BK10' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
+        WHERE h.SiteCode = '${XERP_SITE_CODE}' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
       `);
       totalCount = countResult.recordset[0].cnt;
       const req3 = pool.request().input('fromDate', from).input('toDate', to).input('offset', offset).input('limit', limit);
@@ -19807,7 +19814,7 @@ async function handleRequest(req, res) {
            FROM glDocItem i2 WITH(NOLOCK) WHERE i2.SiteCode=h.SiteCode AND i2.DocNo=h.DocNo) AS total_credit,
           (SELECT COUNT(*) FROM glDocItem i3 WITH(NOLOCK) WHERE i3.SiteCode=h.SiteCode AND i3.DocNo=h.DocNo) AS line_count
         FROM glDocHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${whereExtra}
         ORDER BY h.RelDate DESC, h.DocNo DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -19830,14 +19837,14 @@ async function handleRequest(req, res) {
         SELECT h.DocNo, h.DocDate, h.DocGubun, h.DocType, h.DocDescr,
                h.RelCheck, h.RelDate, h.EmpCode, h.OriginNo, h.DeptCode
         FROM glDocHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND h.DocNo=@docNo
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.DocNo=@docNo
       `);
       if (hResult.recordset.length > 0) header = hResult.recordset[0];
       const iResult = await pool.request().input('docNo', docNo).query(`
         SELECT i.DocSerNo, RTRIM(i.AccCode) AS acc_code, i.DrCr, i.DocAmnt,
                i.DocDescr, RTRIM(i.CsCode) AS cs_code, i.VatBillNo, i.TeCode
         FROM glDocItem i WITH(NOLOCK)
-        WHERE i.SiteCode='BK10' AND i.DocNo=@docNo
+        WHERE i.SiteCode='${XERP_SITE_CODE}' AND i.DocNo=@docNo
         ORDER BY i.DocSerNo
       `);
       items = iResult.recordset;
@@ -19880,7 +19887,7 @@ async function handleRequest(req, res) {
                SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS total_cr
         FROM glDocHeader h WITH(NOLOCK)
         JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y'
           AND RTRIM(i.AccCode)=@acc AND h.RelDate < @fromDate
       `);
       if (openResult.recordset[0]) {
@@ -19897,7 +19904,7 @@ async function handleRequest(req, res) {
                RTRIM(i.CsCode) AS cs_code, i.VatBillNo
         FROM glDocHeader h WITH(NOLOCK)
         JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y'
           AND RTRIM(i.AccCode)=@acc
           AND h.RelDate >= @fromDate AND h.RelDate <= @toDate ${csWhere}
         ORDER BY h.RelDate, h.DocNo, i.DocSerNo
@@ -19960,7 +19967,7 @@ async function handleRequest(req, res) {
                SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS period_cr
         FROM glDocHeader h WITH(NOLOCK)
         JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-        WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y'
           AND h.RelDate >= @fromDate AND h.RelDate <= @toDate
         GROUP BY RTRIM(i.AccCode)
       `);
@@ -19974,7 +19981,7 @@ async function handleRequest(req, res) {
                  SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS prior_cr
           FROM glDocHeader h WITH(NOLOCK)
           JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-          WHERE h.SiteCode='BK10' AND h.RelCheck='Y'
+          WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y'
             AND h.RelDate >= @fiscalStart AND h.RelDate < @beforeDate
           GROUP BY RTRIM(i.AccCode)
         `);
@@ -20064,7 +20071,7 @@ async function handleRequest(req, res) {
                    SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS pc
             FROM glDocHeader h WITH(NOLOCK)
             JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-            WHERE h.SiteCode='BK10' AND h.RelCheck='Y' AND h.RelDate>=@f AND h.RelDate<=@t
+            WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y' AND h.RelDate>=@f AND h.RelDate<=@t
             GROUP BY RTRIM(i.AccCode)`),
           fromDate !== fiscalStart ?
             pool.request().input('fs', fiscalStart).input('bf', fromDate).query(`
@@ -20073,7 +20080,7 @@ async function handleRequest(req, res) {
                      SUM(CASE WHEN i.DrCr='C' THEN i.DocAmnt ELSE 0 END) AS oc
               FROM glDocHeader h WITH(NOLOCK)
               JOIN glDocItem i WITH(NOLOCK) ON h.SiteCode=i.SiteCode AND h.DocNo=i.DocNo
-              WHERE h.SiteCode='BK10' AND h.RelCheck='Y' AND h.RelDate>=@fs AND h.RelDate<@bf
+              WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.RelCheck='Y' AND h.RelDate>=@fs AND h.RelDate<@bf
               GROUP BY RTRIM(i.AccCode)`)
             : Promise.resolve({ recordset: [] })
         ]);
@@ -20156,7 +20163,7 @@ async function handleRequest(req, res) {
                ISNULL(SUM(h.VatAmnt),0) AS total_vat,
                ISNULL(SUM(h.MoneySumAmnt),0) AS total_collected
         FROM rpBillHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND h.ArApGubun=@arAp
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND h.ArApGubun=@arAp
           AND h.BillDate >= @from AND h.BillDate <= @to
         GROUP BY RTRIM(h.CsCode)
         ORDER BY SUM(h.BillAmnt) DESC
@@ -20199,7 +20206,7 @@ async function handleRequest(req, res) {
             SUM(CASE WHEN me.ExpectDate < @d90 THEN me.ExpectRemainAmnt ELSE 0 END) AS over_90,
             SUM(me.ExpectRemainAmnt) AS total_outstanding
           FROM rpMoneyExpect me WITH(NOLOCK)
-          WHERE me.SiteCode='BK10' AND me.ExpectRemainAmnt > 0
+          WHERE me.SiteCode='${XERP_SITE_CODE}' AND me.ExpectRemainAmnt > 0
           GROUP BY RTRIM(me.CsCode)
           HAVING SUM(me.ExpectRemainAmnt) > 0
           ORDER BY SUM(me.ExpectRemainAmnt) DESC
@@ -20236,7 +20243,7 @@ async function handleRequest(req, res) {
                ISNULL(h.BillAmnt,0) AS bill_amt, ISNULL(h.VatAmnt,0) AS vat_amt,
                ISNULL(h.MoneySumAmnt,0) AS collected, h.BillDescr
         FROM rpBillHeader h WITH(NOLOCK)
-        WHERE h.SiteCode='BK10' AND RTRIM(h.CsCode)=@cs
+        WHERE h.SiteCode='${XERP_SITE_CODE}' AND RTRIM(h.CsCode)=@cs
           AND h.BillDate >= @from AND h.BillDate <= @to
         ORDER BY h.BillDate DESC
       `);
@@ -20245,7 +20252,7 @@ async function handleRequest(req, res) {
         SELECT ma.OriginNo, ma.AllocDate, ISNULL(ma.AllocAmnt,0) AS alloc_amt, ma.PayCode, me.ArApGubun
         FROM rpExpectMoneyAlloc ma WITH(NOLOCK)
         JOIN rpMoneyExpect me WITH(NOLOCK) ON ma.SiteCode=me.SiteCode AND ma.OriginNo=me.OriginNo AND ma.OriginSerNo=me.OriginSerNo
-        WHERE me.SiteCode='BK10' AND RTRIM(me.CsCode)=@cs
+        WHERE me.SiteCode='${XERP_SITE_CODE}' AND RTRIM(me.CsCode)=@cs
         ORDER BY ma.AllocDate DESC
         OFFSET 0 ROWS FETCH NEXT 200 ROWS ONLY
       `);

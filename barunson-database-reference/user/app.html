@@ -7060,6 +7060,17 @@ function authFetch(url, opts = {}) {
   return fetch(url, opts);
 }
 
+// 인증 + r.ok 검증 + JSON 파싱 한 번에 — 신규 코드는 fetch+then(r.json) 패턴 대신 이걸 사용.
+// 실패 시 throw (서버 응답 본문 200자까지 메시지에 포함). 호출처에서 try/catch 또는 .catch 로 처리.
+async function apiFetch(url, opts = {}) {
+  const r = await authFetch(url, opts);
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error('API ' + r.status + ': ' + ((txt || '').slice(0, 200) || r.statusText));
+  }
+  return r.json();
+}
+
 // 로그인/회원가입 폼 토글
 function toggleLoginRegister(showRegister) {
   document.getElementById('loginForm').style.display = showRegister ? 'none' : '';
@@ -11400,7 +11411,7 @@ async function loadMpLatest() {
       if(sel){
         var curVal=sel.value;
         sel.innerHTML='<option value="">전체 제지사</option>';
-        _mpVendors.forEach(function(v){sel.innerHTML+='<option value="'+esc(v)+'">'+esc(v)+'</option>';});
+        sel.insertAdjacentHTML('beforeend', _mpVendors.map(function(v){return '<option value="'+esc(v)+'">'+esc(v)+'</option>';}).join(''));
         sel.value=curVal;
       }
     }
@@ -12421,10 +12432,9 @@ async function loadTaskAssigneeList() {
     const sel = document.getElementById('tkAssignee');
     if (!sel) return;
     const curVal = sel.value;
-    sel.innerHTML = '<option value="">담당자 선택</option>';
-    (Array.isArray(users) ? users : users.data || []).filter(u => u.is_active !== 0).forEach(u => {
-      sel.innerHTML += `<option value="${esc(u.display_name||u.username)}">${esc(u.display_name||u.username)}</option>`;
-    });
+    const _activeUsers = (Array.isArray(users) ? users : users.data || []).filter(u => u.is_active !== 0);
+    sel.innerHTML = '<option value="">담당자 선택</option>'
+      + _activeUsers.map(u => `<option value="${esc(u.display_name||u.username)}">${esc(u.display_name||u.username)}</option>`).join('');
     if (curVal) sel.value = curVal;
   } catch(e) {}
 }
@@ -20972,12 +20982,12 @@ async function loadInventoryLedger() {
     // 창고 드롭다운
     const whSel = document.getElementById('ilWarehouse');
     const curWh = whSel.value;
-    whSel.innerHTML = '<option value="">전체 창고</option>';
-    ilWarehouses.forEach(w => {
-      const c = typeof w === 'object' ? w.code : w;
-      const n = typeof w === 'object' ? w.name : w;
-      whSel.innerHTML += `<option value="${esc(c)}" ${c===curWh?'selected':''}>${esc(c)} ${esc(n)}</option>`;
-    });
+    whSel.innerHTML = '<option value="">전체 창고</option>'
+      + ilWarehouses.map(w => {
+        const c = typeof w === 'object' ? w.code : w;
+        const n = typeof w === 'object' ? w.name : w;
+        return `<option value="${esc(c)}" ${c===curWh?'selected':''}>${esc(c)} ${esc(n)}</option>`;
+      }).join('');
 
     // KPI
     const t = data.totals || {};
@@ -27874,12 +27884,12 @@ async function loadAuditLogPage() {
     var uf = document.getElementById('auditUserFilter');
     var af = document.getElementById('auditActionFilter');
     var rf = document.getElementById('auditResourceFilter');
-    uf.innerHTML = '<option value="">전체 사용자</option>';
-    af.innerHTML = '<option value="">전체 액션</option>';
-    rf.innerHTML = '<option value="">전체 대상</option>';
-    (data.users||[]).forEach(function(u){if(u)uf.innerHTML+='<option value="'+esc(u)+'">'+esc(u)+'</option>'});
-    (data.actions||[]).forEach(function(a){af.innerHTML+='<option value="'+esc(a)+'">'+(AUDIT_ACTION_LABELS[a]||esc(a))+'</option>'});
-    (data.resources||[]).forEach(function(r){if(r)rf.innerHTML+='<option value="'+esc(r)+'">'+esc(r)+'</option>'});
+    uf.innerHTML = '<option value="">전체 사용자</option>'
+      + (data.users||[]).filter(Boolean).map(u => '<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
+    af.innerHTML = '<option value="">전체 액션</option>'
+      + (data.actions||[]).map(a => '<option value="'+esc(a)+'">'+(AUDIT_ACTION_LABELS[a]||esc(a))+'</option>').join('');
+    rf.innerHTML = '<option value="">전체 대상</option>'
+      + (data.resources||[]).filter(Boolean).map(r => '<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
   } catch(e){}
   // 기본 날짜 (최근 30일)
   var now = new Date();
@@ -32670,10 +32680,8 @@ async function loadReportBuilderPage() {
     _rbTypes = (d.ok !== false) ? (d.data || d) : [];
     if (Array.isArray(_rbTypes)) {
       var sel = document.getElementById('rbReportType');
-      sel.innerHTML = '<option value="">보고서 유형 선택</option>';
-      _rbTypes.forEach(function(t) {
-        sel.innerHTML += '<option value="'+t.type+'">'+esc(t.name)+' — '+esc(t.description)+'</option>';
-      });
+      sel.innerHTML = '<option value="">보고서 유형 선택</option>'
+        + _rbTypes.map(t => '<option value="'+t.type+'">'+esc(t.name)+' — '+esc(t.description)+'</option>').join('');
     }
   } catch(_) {}
   showRbBuilderUI();
