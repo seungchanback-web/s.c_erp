@@ -10714,6 +10714,28 @@ async function handleRequest(req, res) {
         `);
         out.xerp_inventory_rows = r.recordset;
         out.xerp_inventory_total_pos = (r.recordset || []).reduce((s, x) => s + (Number(x.qty_pos) || 0), 0);
+
+        // 4-2) mmInoutItem (출고) 직접 조회 — InoutGubun 분포 + SiteCode 분포 + 최근 3개월 합계
+        // 디디 출고가 'SO' 가 아닌 다른 gubun 으로 들어가 있는지, SiteCode 가 BK10 이외 인지 확인
+        const today = new Date();
+        const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
+        const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+        const r2 = await xerpPool.request()
+          .input('s3', sql.NChar(16), fmt(start3m))
+          .input('t', sql.NChar(16), fmt(today))
+          .query(`
+            SELECT RTRIM(SiteCode) AS site, RTRIM(InoutGubun) AS gubun,
+                   COUNT(*) AS rows, SUM(InoutQty) AS total_qty
+            FROM mmInoutItem WITH (NOLOCK)
+            WHERE (RTRIM(ItemCode) = '${safe}'
+                OR REPLACE(REPLACE(RTRIM(ItemCode),'_',''),'-','') = '${safeNorm}')
+              AND InoutDate >= @s3 AND InoutDate < @t
+            GROUP BY RTRIM(SiteCode), RTRIM(InoutGubun)
+            ORDER BY total_qty DESC
+          `);
+        out.xerp_inoutitem_3m = r2.recordset;
+        out.xerp_so_total_3m = (r2.recordset || []).filter(x => x.gubun === 'SO').reduce((s,x)=>s+(Number(x.total_qty)||0), 0);
+        out.xerp_inoutitem_total_3m = (r2.recordset || []).reduce((s,x)=>s+(Number(x.total_qty)||0), 0);
       } else {
         out.xerp_error = 'XERP pool not connected';
       }
@@ -10731,6 +10753,14 @@ async function handleRequest(req, res) {
       if (out.xerp_inventory_total_pos === 0) return 'XERP 에 row 는 있지만 모든 OhQty 음수/0 — XERP 측 데이터가 진짜 0';
       if (!out.snapshot) return 'snapshot 에 row 없음 — 마지막 sync 가 이 품목까지 안 갔거나 UPSERT 실패';
       if ((out.snapshot.current_stock || 0) === 0 && out.xerp_inventory_total_pos > 0) return `★ snapshot.current_stock=0 인데 XERP 양수 합계는 ${out.xerp_inventory_total_pos} — sync 단계에서 매칭 실패한 것. resolveLocal 정규화 또는 SiteCode 분기 점검 필요`;
+      // 출고 적은 케이스 진단
+      if ((out.snapshot.monthly_out || 0) === 0 && out.xerp_inoutitem_total_3m > 0 && out.xerp_so_total_3m === 0) {
+        const gubuns = (out.xerp_inoutitem_3m || []).map(x => x.gubun).filter((v,i,a)=>a.indexOf(v)===i).join(',');
+        return `★ 출고 0 — XERP 에 ItemCode row 는 있는데(InoutGubun: ${gubuns}) InoutGubun='SO' 가 없음. 디디는 다른 gubun 코드로 출고하는 것일 수 있음 — 코드 분기 필요`;
+      }
+      if ((out.snapshot.monthly_out || 0) === 0 && out.xerp_so_total_3m > 0) {
+        return `★ snapshot.monthly_out=0 인데 XERP SO 합계는 ${out.xerp_so_total_3m} — sync 매칭 단계에서 출고 누락`;
+      }
       return 'OK 정상으로 보임';
     })();
     ok(res, out);
