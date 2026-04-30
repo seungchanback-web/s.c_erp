@@ -5943,8 +5943,14 @@ async function handleRequest(req, res) {
       const statusFilter = isDd
         ? "(status = 'active' OR status = 'inactive')"  // DD: inactive 포함
         : "status = 'active'";
+      // DD 는 출고를 DD MySQL 에서 가져오므로 temp_code(=online_code) 매핑이 필요. 컬럼 부재 환경 대비 try/catch.
+      let _hasTempCodeFci = false;
+      if (isDd) {
+        try { await db.prepare('SELECT temp_code FROM products LIMIT 1').get(); _hasTempCodeFci = true; } catch(_) {}
+      }
+      const _selectCols = `product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor${(isDd && _hasTempCodeFci) ? ', temp_code' : ''}`;
       const rawRegistered = await db.prepare(
-        `SELECT product_code, product_name, brand, origin, material_code, material_name, cut_spec, jopan, paper_maker, post_vendor FROM products WHERE ${statusFilter} AND ${originFilter}`
+        `SELECT ${_selectCols} FROM products WHERE ${statusFilter} AND ${originFilter}`
       ).all();
       if (!rawRegistered.length) return [];
 
@@ -6012,12 +6018,30 @@ async function handleRequest(req, res) {
           const k = normalizeCode(c);
           if (k && !normMap[k]) normMap[k] = c.toUpperCase();
         }
-        // XERP 코드 → 로컬 코드 매핑 함수 (원본 우선, 정규화 폴백)
-        const resolveLocal = xerpCode => {
-          const upper = (xerpCode || '').toUpperCase();
+        // DD 의 경우 DD MySQL order_items.product_code 가 dd_master 의 online_code(=local temp_code) 로 들어 있을 수 있어
+        // 별도 temp_code → local product_code 매핑 테이블도 구성. (정규화 매핑보다 우선)
+        const tempCodeMap = {};   // temp_code(upper) → 원본 로컬코드
+        const tempCodeMapNorm = {}; // 정규화 temp_code → 원본 로컬코드
+        if (isDd && _hasTempCodeFci) {
+          for (const p of registeredProducts) {
+            const tc = (p.temp_code || '').toString().trim();
+            if (!tc) continue;
+            const tcUp = tc.toUpperCase();
+            if (!tempCodeMap[tcUp]) tempCodeMap[tcUp] = p.product_code.toUpperCase();
+            const tcNorm = normalizeCode(tcUp);
+            if (tcNorm && !tempCodeMapNorm[tcNorm]) tempCodeMapNorm[tcNorm] = p.product_code.toUpperCase();
+          }
+        }
+        // XERP/DD 코드 → 로컬 코드 매핑 함수 (원본 → temp_code → 정규화 폴백)
+        const resolveLocal = extCode => {
+          const upper = (extCode || '').toUpperCase();
           if (validCodeSet.has(upper)) return upper;
+          if (isDd && tempCodeMap[upper]) return tempCodeMap[upper];
           const norm = normalizeCode(upper);
-          return norm ? (normMap[norm] || null) : null;
+          if (!norm) return null;
+          if (normMap[norm]) return normMap[norm];
+          if (isDd && tempCodeMapNorm[norm]) return tempCodeMapNorm[norm];
+          return null;
         };
 
         // 1. 현재고 — 단일 쿼리, ItemCode + WhCode + SiteCode 별로 GROUP BY.
@@ -6060,45 +6084,88 @@ async function handleRequest(req, res) {
           throw invErr; // 전체 sync 실패 처리 (기존 snapshot 유지)
         }
 
-        // 2. 최근 3개월 출고 — 단일 쿼리, SiteCode 분포도 함께 집계
+        // 2. 최근 3개월 출고
+        //   - barunson: 종전대로 XERP mmInoutItem (InoutGubun='SO')
+        //   - dd: DD MySQL wedding.order_items + orders (DD XERP 미반영 품목이 다수 → 실제 판매 데이터 사용)
+        //          매칭 키: oi.product_code → resolveLocal (원본/temp_code/정규화 폴백)
+        //          취소 제외: o.order_state != 'C'  (queryDdSales 기존 로직과 일관)
         const today = new Date();
         const start3m = new Date(today); start3m.setMonth(start3m.getMonth() - 3);
         const fmt = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
         const shipMap = {};
         const shipSiteDist = {};
-        try {
-          const req = workPool.request()
-            .input('start3m', sql.NChar(16), fmt(start3m))
-            .input('today', sql.NChar(16), fmt(today));
-          req.timeout = 120000;
-          const r = await req.query(`
-            SELECT RTRIM(ItemCode) AS item_code,
-                   RTRIM(SiteCode) AS site_code,
-                   SUM(InoutQty)   AS total_qty
-            FROM mmInoutItem WITH (NOLOCK)
-            WHERE ${shipmentFilter} AND InoutGubun = 'SO'
-              AND InoutDate >= @start3m AND InoutDate < @today
-            GROUP BY RTRIM(ItemCode), RTRIM(SiteCode)
-          `);
-          let _shipNormMatched = 0;
-          for (const row of r.recordset) {
-            const rawCode = (row.item_code || '').trim().toUpperCase();
-            const code = resolveLocal(rawCode);
-            const sc   = (row.site_code || '').trim();
-            if (code) {
+        if (isDd) {
+          try {
+            const ddP = await ensureDdPool();
+            if (!ddP) throw new Error('DD MySQL pool unavailable (DD_DB_SERVER 미설정 또는 연결 실패)');
+            const startISO = start3m.toISOString().slice(0, 10);
+            const endISO   = today.toISOString().slice(0, 10);
+            // 컬럼명 호환: 일부 환경의 order_items 에는 created_at 이 없고 orders.created_at 만 있을 수 있어
+            // 조인 대상의 created_at 으로 필터.
+            const [rows] = await ddP.query(
+              `SELECT oi.product_code AS item_code, SUM(oi.qty) AS total_qty
+               FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id
+               WHERE o.created_at >= ? AND o.created_at < ?
+                 AND o.order_state <> 'C'
+                 AND oi.product_code IS NOT NULL AND oi.product_code <> ''
+               GROUP BY oi.product_code`,
+              [startISO, endISO]
+            );
+            let _shipNormMatched = 0;
+            let _ddRowCount = 0;
+            let _ddUnmatched = 0;
+            for (const row of (rows || [])) {
+              _ddRowCount++;
+              const rawCode = (row.item_code || '').toString().trim().toUpperCase();
+              const code = resolveLocal(rawCode);
+              if (!code) { _ddUnmatched++; continue; }
               if (code !== rawCode) _shipNormMatched++;
-              const total = Math.round(row.total_qty || 0);
-              // 동일 코드가 여러 SiteCode 에 있을 수 있으므로 합산
+              const total = Math.round(Number(row.total_qty) || 0);
               const prev = shipMap[code] || { total: 0 };
               const newTotal = prev.total + total;
               shipMap[code] = { total: newTotal, monthly: Math.round(newTotal / 3), daily: Math.round(newTotal / 90) };
-              if (sc) shipSiteDist[sc] = (shipSiteDist[sc] || 0) + 1;
             }
+            shipSiteDist['DD-MySQL'] = _ddRowCount;
+            console.log(`[xerp-inv ${legalEntity}] 출고 DD MySQL 쿼리 성공: rows=${_ddRowCount}, 매칭=${Object.keys(shipMap).length} (정규화/temp_code 보정 ${_shipNormMatched}건), 미매칭=${_ddUnmatched}, 기간=${startISO}~${endISO}`);
+          } catch (shipErr) {
+            console.warn(`[xerp-inv ${legalEntity}] 출고 DD MySQL 쿼리 실패 — 출고 0 으로 진행:`, shipErr.message);
+            // 출고 실패해도 재고만이라도 보이도록 계속 진행 (기존 동작 유지)
           }
-          console.log(`[xerp-inv ${legalEntity}] 출고 단일쿼리 성공: ${Object.keys(shipMap).length}개 매칭 (정규화 보정 ${_shipNormMatched}건, 3개월치), SiteCode 분포: ${JSON.stringify(shipSiteDist)}`);
-        } catch (shipErr) {
-          console.warn(`[xerp-inv ${legalEntity}] 출고 단일쿼리 실패 — 출고 0 으로 진행:`, shipErr.message);
-          // 출고는 실패해도 재고만이라도 보이도록 계속 진행
+        } else {
+          try {
+            const req = workPool.request()
+              .input('start3m', sql.NChar(16), fmt(start3m))
+              .input('today', sql.NChar(16), fmt(today));
+            req.timeout = 120000;
+            const r = await req.query(`
+              SELECT RTRIM(ItemCode) AS item_code,
+                     RTRIM(SiteCode) AS site_code,
+                     SUM(InoutQty)   AS total_qty
+              FROM mmInoutItem WITH (NOLOCK)
+              WHERE ${shipmentFilter} AND InoutGubun = 'SO'
+                AND InoutDate >= @start3m AND InoutDate < @today
+              GROUP BY RTRIM(ItemCode), RTRIM(SiteCode)
+            `);
+            let _shipNormMatched = 0;
+            for (const row of r.recordset) {
+              const rawCode = (row.item_code || '').trim().toUpperCase();
+              const code = resolveLocal(rawCode);
+              const sc   = (row.site_code || '').trim();
+              if (code) {
+                if (code !== rawCode) _shipNormMatched++;
+                const total = Math.round(row.total_qty || 0);
+                // 동일 코드가 여러 SiteCode 에 있을 수 있으므로 합산
+                const prev = shipMap[code] || { total: 0 };
+                const newTotal = prev.total + total;
+                shipMap[code] = { total: newTotal, monthly: Math.round(newTotal / 3), daily: Math.round(newTotal / 90) };
+                if (sc) shipSiteDist[sc] = (shipSiteDist[sc] || 0) + 1;
+              }
+            }
+            console.log(`[xerp-inv ${legalEntity}] 출고 단일쿼리 성공: ${Object.keys(shipMap).length}개 매칭 (정규화 보정 ${_shipNormMatched}건, 3개월치), SiteCode 분포: ${JSON.stringify(shipSiteDist)}`);
+          } catch (shipErr) {
+            console.warn(`[xerp-inv ${legalEntity}] 출고 단일쿼리 실패 — 출고 0 으로 진행:`, shipErr.message);
+            // 출고는 실패해도 재고만이라도 보이도록 계속 진행
+          }
         }
 
         // 3. 품목명 (S2_Card) — 바른손 모드에서만, 전체 Card 테이블 한 번에 가져와서 매칭
@@ -6150,7 +6217,8 @@ async function handleRequest(req, res) {
             '_후공정업체': p.post_vendor || '',
             '_warehouses': whMap,                         // {wh_code: qty} — 프론트 드롭다운 필터용
             'legal_entity': isDd ? 'dd' : 'barunson',
-            '_invSource': dbName,
+            // dd 는 재고=XERP, 출고=DD MySQL 이라는 hybrid 출처를 명시 (진단/감사 로그용)
+            '_invSource': isDd ? 'XERP+DD' : dbName,
             '_siteCode': siteCode
           });
         }
@@ -10776,6 +10844,54 @@ async function handleRequest(req, res) {
         out.xerp_error = 'XERP pool not connected';
       }
     } catch (e) { out.xerp_inventory_error = e.message; }
+
+    // 4-3) DD 품목인 경우 DD MySQL 출고도 함께 진단 (재고는 XERP, 출고는 DD MySQL 분리 후 추가)
+    const _isDdCode = (out.products_row && out.products_row.legal_entity === 'dd')
+                   || /^DD/i.test(code)
+                   || (out.products_row && out.products_row.origin === 'DD');
+    if (_isDdCode) {
+      try {
+        const ddP = await ensureDdPool();
+        if (!ddP) { out.dd_mysql_error = 'DD MySQL pool 미연결 (DD_DB_SERVER 미설정 또는 연결 실패)'; }
+        else {
+          const today = new Date();
+          const s3m = new Date(today); s3m.setMonth(s3m.getMonth() - 3);
+          const startISO = s3m.toISOString().slice(0, 10);
+          const endISO = today.toISOString().slice(0, 10);
+          // products 의 temp_code(=online_code) 값도 후보로 같이 조회 — DD MySQL order_items.product_code 가
+          // 그쪽 표기로 들어 있는 케이스 식별.
+          let tempCode = '';
+          try {
+            const r = await db.prepare('SELECT temp_code FROM products WHERE product_code=?').get(code);
+            tempCode = (r && r.temp_code) ? String(r.temp_code).trim() : '';
+          } catch(_){}
+          const candidates = [code];
+          if (tempCode && tempCode !== code) candidates.push(tempCode);
+          // 정규화 후보 — 언더바/하이픈 제거
+          const norm = code.replace(/[_\-\s]/g, '');
+          if (norm !== code && !candidates.includes(norm)) candidates.push(norm);
+          const placeholders = candidates.map(()=>'?').join(',');
+          const [rows] = await ddP.query(
+            `SELECT oi.product_code AS code,
+                    COUNT(DISTINCT oi.order_id) AS order_count,
+                    SUM(oi.qty) AS total_qty,
+                    SUM(CASE WHEN o.order_state IN ('D','F') OR o.shipping_state='Y' THEN oi.qty ELSE 0 END) AS shipped_qty,
+                    SUM(CASE WHEN o.order_state='C' THEN oi.qty ELSE 0 END) AS canceled_qty
+             FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id
+             WHERE o.created_at >= ? AND o.created_at < ?
+               AND oi.product_code IN (${placeholders})
+             GROUP BY oi.product_code`,
+            [startISO, endISO, ...candidates]
+          );
+          out.dd_mysql_rows = rows || [];
+          out.dd_mysql_candidates = candidates;
+          out.dd_mysql_period = { start: startISO, end: endISO };
+          out.dd_mysql_total_qty_noncancel = (rows || []).reduce((s, r) => s + (Number(r.total_qty) - Number(r.canceled_qty || 0)), 0);
+          out.dd_mysql_temp_code = tempCode;
+        }
+      } catch (e) { out.dd_mysql_error = e.message; }
+    }
+
     // 5) 최근 sync_log 3건 (마지막 sync 가 success 였는지)
     try {
       out.recent_sync_log = await db.prepare("SELECT id, status, started_at, finished_at, success_count, fail_count, error_msg FROM sync_log WHERE sync_type='xerp_inventory' ORDER BY id DESC LIMIT 3").all();
@@ -10785,11 +10901,27 @@ async function handleRequest(req, res) {
       if (!out.products_row) return 'products 테이블에 그 코드 없음 → 재고현황에 안 나오는 게 정상';
       if (out.products_row.status !== 'active' && out.products_row.status !== 'inactive') return `products.status='${out.products_row.status}' — 재고현황 SELECT 필터에서 제외됨 (active/inactive 만 표시)`;
       if (out.xerp_error) return out.xerp_error + ' — XERP DB 미연결로 sync 자체가 실패';
-      if (!out.xerp_inventory_rows || out.xerp_inventory_rows.length === 0) return 'XERP mmInventory 에 그 ItemCode 자체가 없음 (정규화 매칭 포함) → sync 매칭 실패가 정상';
+      if (!out.xerp_inventory_rows || out.xerp_inventory_rows.length === 0) {
+        // DD 품목이면 재고는 XERP에 없을 수 있고, 출고는 DD MySQL 사용으로 변경됨 — 진단 메시지 분기
+        if (_isDdCode) {
+          if (out.dd_mysql_error) return `DD 품목 — XERP mmInventory 매칭 없음(재고 0 정상). DD MySQL 진단 실패: ${out.dd_mysql_error}`;
+          if (!out.dd_mysql_rows || out.dd_mysql_rows.length === 0) return 'DD 품목 — XERP/DD MySQL 양쪽 모두 매칭 없음. order_items.product_code 표기 확인 + temp_code 매핑 필요';
+          if ((out.dd_mysql_total_qty_noncancel || 0) === 0) return 'DD MySQL 매칭은 됐는데 3개월 비취소 출고가 0 — 실제 판매가 없는 상태';
+          return `DD 품목 정상 — XERP 재고 없음(0)/DD MySQL 3개월 출고 ${out.dd_mysql_total_qty_noncancel} 개`;
+        }
+        return 'XERP mmInventory 에 그 ItemCode 자체가 없음 (정규화 매칭 포함) → sync 매칭 실패가 정상';
+      }
       if (out.xerp_inventory_total_pos === 0) return 'XERP 에 row 는 있지만 모든 OhQty 음수/0 — XERP 측 데이터가 진짜 0';
       if (!out.snapshot) return 'snapshot 에 row 없음 — 마지막 sync 가 이 품목까지 안 갔거나 UPSERT 실패';
       if ((out.snapshot.current_stock || 0) === 0 && out.xerp_inventory_total_pos > 0) return `★ snapshot.current_stock=0 인데 XERP 양수 합계는 ${out.xerp_inventory_total_pos} — sync 단계에서 매칭 실패한 것. resolveLocal 정규화 또는 SiteCode 분기 점검 필요`;
-      // 출고 적은 케이스 진단
+      // DD 품목: 출고는 DD MySQL 기준으로 진단
+      if (_isDdCode) {
+        if ((out.snapshot.monthly_out || 0) === 0 && (out.dd_mysql_total_qty_noncancel || 0) > 0) {
+          return `★ snapshot.monthly_out=0 인데 DD MySQL 3개월 비취소 합계는 ${out.dd_mysql_total_qty_noncancel} — sync 매칭 단계에서 출고 누락 (temp_code 매핑 점검)`;
+        }
+        return 'OK 정상으로 보임 (DD: 재고=XERP, 출고=DD MySQL)';
+      }
+      // barunson: 출고 적은 케이스 진단
       if ((out.snapshot.monthly_out || 0) === 0 && out.xerp_inoutitem_total_3m > 0 && out.xerp_so_total_3m === 0) {
         const gubuns = (out.xerp_inoutitem_3m || []).map(x => x.gubun).filter((v,i,a)=>a.indexOf(v)===i).join(',');
         return `★ 출고 0 — XERP 에 ItemCode row 는 있는데(InoutGubun: ${gubuns}) InoutGubun='SO' 가 없음. 디디는 다른 gubun 코드로 출고하는 것일 수 있음 — 코드 분기 필요`;
