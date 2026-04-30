@@ -3006,7 +3006,7 @@ function closeMegaMenu() { /* no-op */ }
       <input type="date" id="poClosingFrom" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#475569" title="원재료 마감 시작일">
       <span style="color:#9ca3af;font-size:12px">~</span>
       <input type="date" id="poClosingTo" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#475569" title="원재료 마감 종료일 (미포함)">
-      <input type="text" id="poClosingVendor" list="poClosingVendorList" placeholder="매입처(전체)" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#475569;width:120px" title="매입처 부분일치 검색 — 비우면 전체">
+      <input type="text" id="poClosingVendor" list="poClosingVendorList" placeholder="매입처(전체)" oninput="renderPOList()" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#475569;width:120px" title="매입처 부분일치 검색 — 비우면 전체. 입력하면 PO 카드도 즉시 필터링.">
       <datalist id="poClosingVendorList"></datalist>
       <button class="btn btn-sm" onclick="downloadRawMaterialClosing()" style="white-space:nowrap;background:#fef3c7;border:1px solid #fbbf24;color:#92400e" title="원재료 PO 마감용 — 매입처/제품/OS등록여부 포함 (XERP 등록 + 거래처 원장 대조)">📊 원재료 마감 엑셀</button>
       <button class="btn btn-sm" onclick="downloadPOExcel()" style="white-space:nowrap">엑셀 다운로드</button>
@@ -16740,8 +16740,17 @@ function renderPOList(){
   let data=poList;
   if(poStatusFilter!=='all') data=data.filter(po=>po.status===poStatusFilter);
 
+  // 매입처 검색 필터 — #poClosingVendor input 에 글자 있으면 vendor_name 부분일치
+  // (마감 엑셀 다운로드 input 과 공유 — 한 번 입력으로 화면 필터 + 엑셀 필터 동시에)
+  const _vendorEl = document.getElementById('poClosingVendor');
+  const _vendorQ = (_vendorEl && _vendorEl.value || '').trim().toLowerCase();
+  if (_vendorQ) {
+    data = data.filter(po => (po.vendor_name||'').toLowerCase().includes(_vendorQ));
+  }
+
   if(!data.length){
-    container.innerHTML='<div style="text-align:center;color:var(--text-muted);padding:40px">발주 내역이 없습니다</div>';
+    const msg = _vendorQ ? `매입처 "${esc(_vendorEl.value)}" 와 일치하는 PO 가 없습니다` : '발주 내역이 없습니다';
+    container.innerHTML='<div style="text-align:center;color:var(--text-muted);padding:40px">' + msg + '</div>';
     return;
   }
 
