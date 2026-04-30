@@ -10888,6 +10888,21 @@ async function handleRequest(req, res) {
           out.dd_mysql_period = { start: startISO, end: endISO };
           out.dd_mysql_total_qty_noncancel = (rows || []).reduce((s, r) => s + (Number(r.total_qty) - Number(r.canceled_qty || 0)), 0);
           out.dd_mysql_temp_code = tempCode;
+
+          // 진단: order_state 분포 — 'B'(draft/미결제), 'P'(paid), 'D'(shipped), 'F'(delivered), 'C'(canceled), 기타
+          // shipped_qty=0 인 케이스에서 '대부분 B 인지(=장바구니 부풀림) vs 대부분 P 인지(=DD 운영이 P 에서 종료)' 구분.
+          try {
+            const [stRows] = await ddP.query(
+              `SELECT o.order_state AS state, COUNT(DISTINCT oi.order_id) AS orders, SUM(oi.qty) AS qty
+               FROM order_items oi INNER JOIN orders o ON oi.order_id = o.id
+               WHERE o.created_at >= ? AND o.created_at < ?
+                 AND oi.product_code IN (${placeholders})
+               GROUP BY o.order_state
+               ORDER BY qty DESC`,
+              [startISO, endISO, ...candidates]
+            );
+            out.dd_mysql_state_dist = stRows || [];
+          } catch (sErr) { out.dd_mysql_state_dist_error = sErr.message; }
         }
       } catch (e) { out.dd_mysql_error = e.message; }
     }
