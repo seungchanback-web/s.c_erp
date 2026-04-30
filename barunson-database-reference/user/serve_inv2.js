@@ -10678,6 +10678,65 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /api/admin/inventory-trace?code=PRODUCT_CODE — 한 품목의 sync 상태를 모든 단계에서 진단
+  //   응답: products / product_post_vendor / inventory_snapshot / XERP mmInventory 결과 / 마지막 sync 로그
+  //   재고 0 / 입고처 빈값 / 화면 미표시 등 모든 진단의 단일 진입점
+  if (pathname === '/api/admin/inventory-trace' && method === 'GET') {
+    const code = (parsed.searchParams.get('code') || '').trim();
+    if (!code) { fail(res, 400, 'code 쿼리 파라미터 필수'); return; }
+    if (!/^[A-Za-z0-9_\-]+$/.test(code)) { fail(res, 400, 'code 형식 오류 (영숫자/_/- 만 허용)'); return; }
+    const out = { code, ts: new Date().toISOString() };
+    // 1) products 테이블 row
+    try {
+      out.products_row = await db.prepare('SELECT product_code, product_name, brand, origin, status, legal_entity, material_code, material_name, cut_spec, jopan, spec, product_spec FROM products WHERE product_code = ?').get(code);
+    } catch (e) { out.products_error = e.message; }
+    // 2) product_post_vendor row 들 (입고처 lookup 의 소스)
+    try {
+      out.post_vendors = await db.prepare('SELECT process_type, vendor_name, step_order FROM product_post_vendor WHERE product_code = ? ORDER BY step_order').all(code);
+      out.post_vendors_with_name = (out.post_vendors || []).filter(r => r.vendor_name).length;
+    } catch (e) { out.post_vendors_error = e.message; }
+    // 3) inventory_snapshot row (재고현황 화면이 보는 값)
+    try {
+      out.snapshot = await db.prepare('SELECT product_code, legal_entity, site_code, current_stock, monthly_out, daily_out, total_3m, item_name, synced_at FROM inventory_snapshot WHERE product_code = ?').get(code);
+    } catch (e) { out.snapshot_error = e.message; }
+    // 4) XERP mmInventory 직접 조회 (sync 단계 끊긴 곳 식별)
+    try {
+      if (await ensureXerpPool()) {
+        const safe = code.replace(/'/g, "''");
+        const safeNorm = safe.replace(/[_\-]/g, '');
+        const r = await xerpPool.request().query(`
+          SELECT RTRIM(SiteCode) AS site, RTRIM(WhCode) AS wh, RTRIM(ItemCode) AS item_code,
+                 SUM(OhQty) AS qty_all, SUM(CASE WHEN OhQty>0 THEN OhQty ELSE 0 END) AS qty_pos, COUNT(*) AS rows
+          FROM mmInventory WITH (NOLOCK)
+          WHERE RTRIM(ItemCode) = '${safe}'
+             OR REPLACE(REPLACE(RTRIM(ItemCode),'_',''),'-','') = '${safeNorm}'
+          GROUP BY RTRIM(SiteCode), RTRIM(WhCode), RTRIM(ItemCode)
+        `);
+        out.xerp_inventory_rows = r.recordset;
+        out.xerp_inventory_total_pos = (r.recordset || []).reduce((s, x) => s + (Number(x.qty_pos) || 0), 0);
+      } else {
+        out.xerp_error = 'XERP pool not connected';
+      }
+    } catch (e) { out.xerp_inventory_error = e.message; }
+    // 5) 최근 sync_log 3건 (마지막 sync 가 success 였는지)
+    try {
+      out.recent_sync_log = await db.prepare("SELECT id, status, started_at, finished_at, success_count, fail_count, error_msg FROM sync_log WHERE sync_type='xerp_inventory' ORDER BY id DESC LIMIT 3").all();
+    } catch (e) { out.sync_log_error = e.message; }
+    // 6) 진단 hint
+    out.hint = (() => {
+      if (!out.products_row) return 'products 테이블에 그 코드 없음 → 재고현황에 안 나오는 게 정상';
+      if (out.products_row.status !== 'active' && out.products_row.status !== 'inactive') return `products.status='${out.products_row.status}' — 재고현황 SELECT 필터에서 제외됨 (active/inactive 만 표시)`;
+      if (out.xerp_error) return out.xerp_error + ' — XERP DB 미연결로 sync 자체가 실패';
+      if (!out.xerp_inventory_rows || out.xerp_inventory_rows.length === 0) return 'XERP mmInventory 에 그 ItemCode 자체가 없음 (정규화 매칭 포함) → sync 매칭 실패가 정상';
+      if (out.xerp_inventory_total_pos === 0) return 'XERP 에 row 는 있지만 모든 OhQty 음수/0 — XERP 측 데이터가 진짜 0';
+      if (!out.snapshot) return 'snapshot 에 row 없음 — 마지막 sync 가 이 품목까지 안 갔거나 UPSERT 실패';
+      if ((out.snapshot.current_stock || 0) === 0 && out.xerp_inventory_total_pos > 0) return `★ snapshot.current_stock=0 인데 XERP 양수 합계는 ${out.xerp_inventory_total_pos} — sync 단계에서 매칭 실패한 것. resolveLocal 정규화 또는 SiteCode 분기 점검 필요`;
+      return 'OK 정상으로 보임';
+    })();
+    ok(res, out);
+    return;
+  }
+
   // GET /api/po/raw-material-export — 원재료 PO 마감용 엑셀 다운로드 (사용자 마감 작업 + OS번호 등록 대조)
   //   ?from=YYYY-MM-DD&to=YYYY-MM-DD     기본: 이번 달 1일 ~ 다음 달 1일
   //   ?vendor=거래처명                    선택. 있으면 그 거래처명 부분일치(LIKE) 만 필터. 없으면 전체.
