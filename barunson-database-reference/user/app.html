@@ -8928,14 +8928,18 @@ function showOrderPanel(){
 function hideOrderPanel(){document.getElementById('orderPanel').classList.remove('show');}
 
 // ===== GET ORDER ITEMS (PRESERVED EXACTLY - with deduplication) =====
+// window._activePOCodes: 진행중 PO에 이미 포함된 품목코드 Set (loadCreatePO 에서 채움)
+//   → 같은 품목을 중복 발주하지 않도록 마법사 후보에서 자동 제외
 function getOrderItems(){
   const seen={};
+  const activeSet = window._activePOCodes instanceof Set ? window._activePOCodes : null;
   return RAW.filter(p=>{
     const code=p['제품코드']||p['품목코드']||'';
     if(!code)return false;
     if(!orderQty[code]||orderQty[code]<=0)return false;
     if(orderChecked[code]===false)return false;
     if(seen[code])return false;
+    if(activeSet && activeSet.has(code))return false;
     seen[code]=true;return true;
   });
 }
@@ -14866,9 +14870,13 @@ function generatePONumber(){
 async function loadCreatePO(){
   const deliv = document.getElementById('poDeliveryDate');
   if (deliv) deliv.value = new Date().toISOString().slice(0,10);
-  // 후공정 업체 매핑 + 업체 리스트 로드
+  // 후공정 업체 매핑 + 업체 리스트 로드 + 진행중 PO 품목코드 로드
   try{
-    const [r1,r2]=await Promise.all([fetch('/api/product-post-vendor'), fetch('/api/vendors')]);
+    const [r1,r2,r3]=await Promise.all([
+      fetch('/api/product-post-vendor'),
+      fetch('/api/vendors'),
+      fetch('/api/po/active-product-codes')
+    ]);
     const d1=await r1.json(), d2=await r2.json();
     const rows=d1.data||d1;
     postVendorMap={};
@@ -14881,7 +14889,11 @@ async function loadCreatePO(){
     window._allVendors = vendors;
     window._postVendorNames=vendors.filter(v=>v.type==='후공정').map(v=>v.name);
     window._matVendorNames=vendors.filter(v=>v.type==='원재료' || !v.type).map(v=>v.name);
-  }catch(e){ console.warn('후공정 매핑 로드 실패:', e); }
+    try {
+      const d3 = await r3.json();
+      window._activePOCodes = new Set((d3.codes||d3.data||[]).filter(Boolean));
+    } catch(_) { window._activePOCodes = new Set(); }
+  }catch(e){ console.warn('후공정 매핑 로드 실패:', e); window._activePOCodes = window._activePOCodes || new Set(); }
   currentPOTab='all';
 
   // ── 한국 origin이면 마법사 모드, 아니면 기존 UI ──

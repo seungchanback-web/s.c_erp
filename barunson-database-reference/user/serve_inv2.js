@@ -8622,6 +8622,27 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // GET /api/po/active-product-codes — 진행중 PO에 포함된 품목코드 목록 (마법사 후보 제외용)
+  // 마법사 Step 2 가 이미 발주 완료된 건을 또 노출하는 문제 방지
+  if (pathname === '/api/po/active-product-codes' && method === 'GET') {
+    try {
+      const rows = await db.prepare(`
+        SELECT DISTINCT poi.product_code
+        FROM po_items poi
+        JOIN po_header poh ON poh.po_id = poi.po_id
+        WHERE poh.status NOT IN ('cancelled','completed','os_pending')
+          AND poh.po_type = '원재료'
+          AND poh.po_date >= date('now','-60 days','localtime')
+      `).all();
+      const codes = rows.map(r => r.product_code).filter(Boolean);
+      ok(res, { codes, count: codes.length });
+    } catch (e) {
+      console.error('[active-product-codes] 실패:', e.message);
+      ok(res, { codes: [], count: 0, error: e.message });
+    }
+    return;
+  }
+
   // POST /api/po/korea-wizard — 마법사 확정 (원재료 PO N장 + 후가공 PO M장 생성)
   if (pathname === '/api/po/korea-wizard' && method === 'POST') {
     const body = await readJSON(req);
