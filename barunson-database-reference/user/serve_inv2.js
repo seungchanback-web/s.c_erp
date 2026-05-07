@@ -8715,8 +8715,8 @@ async function handleRequest(req, res) {
             (po_number, po_type, vendor_name, material_vendor_name, process_vendor_name, status,
              due_date, total_qty, notes, origin, po_date, tolerance_pct, process_chain, process_step, parent_po_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,date('now','localtime'),?,?,?,?)`)
-            .run(postPoNumber, '후공정', postVendor, matVendor, postVendor, 'draft',
-                 expectedDate, postTotalQty, `후가공(${info.process}) 대기 - 원재료 입고 후 발송`, '한국', tolerancePct,
+            .run(postPoNumber, '후공정', postVendor, matVendor, postVendor, 'sent',
+                 expectedDate, postTotalQty, `후가공(${info.process}) 발주 (원재료와 동시 발송)`, '한국', tolerancePct,
                  JSON.stringify(info.items[0].process_chain || []), 1, matPoId);
           const postPoId = postInfo.lastInsertRowid;
           for (const it of info.items) {
@@ -8731,6 +8731,7 @@ async function handleRequest(req, res) {
       }
 
       // ─ 이메일 발송 (비동기, 실패해도 응답은 성공) ─
+      // 사용자 요청: 원재료/후가공 업체에 동시 발송 (원재료 출고 대기 없이 후가공도 즉시 발송)
       (async () => {
         for (const m of materialPos) {
           try {
@@ -8742,8 +8743,16 @@ async function handleRequest(req, res) {
             }
           } catch (e) { console.warn(`[korea-wizard] 원재료 이메일 실패 (${m.vendor}):`, e.message); }
         }
-        // 후가공은 원재료 입고 후 자동 발송되므로 여기서 즉시 발송하지 않음 (draft 상태 유지)
-        // 사용자가 원재료 입고 확정 시 기존 vendor-portal PATCH 로직이 자동으로 후가공 PO를 sent로 전환하며 이메일 발송
+        for (const p of processPos) {
+          try {
+            const vendorRow = await db.prepare("SELECT email, email_cc FROM vendors WHERE name=?").get(p.vendor);
+            if (vendorRow?.email) {
+              const postPo = await db.prepare("SELECT * FROM po_header WHERE po_id=?").get(p.po_id);
+              const postItems = await db.prepare("SELECT * FROM po_items WHERE po_id=?").all(p.po_id);
+              await sendPOEmail(postPo, postItems, vendorRow.email, p.vendor, true, vendorRow.email_cc);
+            }
+          } catch (e) { console.warn(`[korea-wizard] 후가공 이메일 실패 (${p.vendor}/${p.process}):`, e.message); }
+        }
       })().catch(e => console.error('[korea-wizard] 비동기 이메일 오류:', e.message));
 
       if (currentUser) auditLog(currentUser.userId, currentUser.username, 'po_create_wizard', 'po_header', null,
@@ -9664,7 +9673,8 @@ async function handleRequest(req, res) {
           details: `${vendor.name} 원재료 출고`
         });
         // 후공정 PO 찾기 (같은 날짜, 대기 상태, 후공정 타입)
-        const postPOs = await db.prepare(`SELECT * FROM po_header WHERE po_date = ? AND status IN ('draft','sent') AND po_type = '후공정'`).all(po.po_date);
+        // 마법사 발주 시 후공정 PO도 'sent'로 즉시 발송하므로 여기서는 'draft'만 체인 트리거 (중복 메일 방지)
+        const postPOs = await db.prepare(`SELECT * FROM po_header WHERE po_date = ? AND status = 'draft' AND po_type = '후공정'`).all(po.po_date);
         const _chainOk = [];
         const _chainNoEmail = [];
         const _chainEmailFail = [];
