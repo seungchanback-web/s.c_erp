@@ -17370,19 +17370,24 @@ async function handleRequest(req, res) {
       result.sources.mm_inout_item = { error: e.message };
     }
 
-    // 3) 비교 요약
+    // 3) 비교 요약 (전체출고=SO+MO 기준)
     const sales = result.sources.erp_sales_data || {};
     const inout = result.sources.mm_inout_item || {};
     const soQty = ((inout.by_gubun||{}).SO || {}).sum_qty || 0;
+    const moQty = ((inout.by_gubun||{}).MO || {}).sum_qty || 0;
+    const totalOutQty = soQty + moQty;
     const salesQty = sales.sum_qty || 0;
     result.comparison = {
       erp_sales_qty: salesQty,
       mm_so_qty: soQty,
-      diff: soQty - salesQty,
-      diff_pct: salesQty > 0 ? Math.round((soQty - salesQty) / salesQty * 1000) / 10 : null,
-      hint: soQty > salesQty
-        ? '출고(SO) > 매출 — 무상출고/사은품/덤 가능성 또는 매출 미확정 출고'
-        : (soQty < salesQty ? '매출 > 출고(SO) — 분할 출고 미완료 또는 다음달 출고 예정 가능성' : '동일')
+      mm_mo_qty: moQty,
+      mm_total_out_qty: totalOutQty,
+      non_sales_qty: totalOutQty - salesQty,
+      diff_total_vs_sales: totalOutQty - salesQty,
+      diff_pct: salesQty > 0 ? Math.round((totalOutQty - salesQty) / salesQty * 1000) / 10 : null,
+      hint: totalOutQty > salesQty
+        ? '전체출고(SO+MO) > 매출 ' + (totalOutQty - salesQty).toLocaleString() + '개 차이 = 비매출 출고 (사은품/증정/샘플/원자재투입)'
+        : (totalOutQty < salesQty ? '매출 > 전체출고 — 분할 출고 미완료 또는 매출 선등록' : '동일')
     };
 
     ok(res, result);
@@ -17391,6 +17396,7 @@ async function handleRequest(req, res) {
 
   // ── GET /api/sales/pivot ─ 판매현황 대시보드 (연도×월×제품 피벗) ──
   // 쿼리: years=2024,2025,2026 (기본: 최근 3년) / source=all|xerp|dd|gift / limit=100 / search=
+  // 셀 데이터: 매출수량(ERP_SalesData) / 매출액 / 전체출고수량(mmInoutItem SO+MO) / 비매출=전체출고-매출
   if (pathname === '/api/sales/pivot' && method === 'GET') {
     const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
     if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
@@ -17404,28 +17410,43 @@ async function handleRequest(req, res) {
     const source = parsed.searchParams.get('source') || 'all';
     const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '100', 10) || 100, 500);
     const search = (parsed.searchParams.get('search') || '').trim().toLowerCase();
+    // 전체출고 정의 (기본 SO+MO). gubun=SO 면 매출출고만.
+    const outGubunParam = (parsed.searchParams.get('out_gubun') || 'SO,MO').trim();
+    const outGubunList = outGubunParam.split(',').map(s => s.trim()).filter(g => ['SO','MO','SI','MI'].includes(g));
+    if (!outGubunList.length) outGubunList.push('SO');
     const yMin = years[0], yMax = years[years.length - 1];
     const startYMD = String(yMin) + '0101';
     const endYMD = String(yMax) + '1231';
+    const endExclusiveYMD = String(yMax + 1) + '0101'; // mmInoutItem 은 < 사용
 
-    const productMap = {}; // code -> { code, name, brand, source, monthly: { 'YYYY-MM': {qty, sales} } }
-    const monthlyTotals = {}; // 'YYYY-MM' -> {qty, sales}
+    // monthly cell schema: { sales_qty, sales_amnt, out_qty, out_amnt }
+    const productMap = {};
+    const monthlyTotals = {};
     const sources = {};
     const xerpCodes = new Set();
 
-    function addRow(code, qty, sales, ym, src) {
-      if (!code) return;
-      if (!productMap[code]) productMap[code] = { code, name: code, brand: '', source: src, monthly: {} };
+    function ensureCell(code, ym, srcLabel) {
+      if (!code) return null;
+      if (!productMap[code]) productMap[code] = { code, name: code, brand: '', source: srcLabel || '', monthly: {} };
       const m = productMap[code].monthly;
-      if (!m[ym]) m[ym] = { qty: 0, sales: 0 };
-      m[ym].qty += Number(qty || 0);
-      m[ym].sales += Number(sales || 0);
-      if (!monthlyTotals[ym]) monthlyTotals[ym] = { qty: 0, sales: 0 };
-      monthlyTotals[ym].qty += Number(qty || 0);
-      monthlyTotals[ym].sales += Number(sales || 0);
+      if (!m[ym]) m[ym] = { sales_qty: 0, sales_amnt: 0, out_qty: 0, out_amnt: 0 };
+      if (!monthlyTotals[ym]) monthlyTotals[ym] = { sales_qty: 0, sales_amnt: 0, out_qty: 0, out_amnt: 0 };
+      return m[ym];
+    }
+    function addSalesRow(code, ym, qty, amnt, srcLabel) {
+      const c = ensureCell(code, ym, srcLabel); if (!c) return;
+      const q = Number(qty || 0), a = Number(amnt || 0);
+      c.sales_qty += q; c.sales_amnt += a;
+      monthlyTotals[ym].sales_qty += q; monthlyTotals[ym].sales_amnt += a;
+    }
+    function addOutRow(code, ym, qty, amnt) {
+      const c = ensureCell(code, ym, 'xerp'); if (!c) return;
+      const q = Number(qty || 0), a = Number(amnt || 0);
+      c.out_qty += q; c.out_amnt += a;
+      monthlyTotals[ym].out_qty += q; monthlyTotals[ym].out_amnt += a;
     }
 
-    // XERP (ERP_SalesData) — 바른손/더기프트 모두 포함
+    // 1) XERP ERP_SalesData — 매출 데이터 (h_date 기준)
     if (source === 'all' || source === 'xerp' || source === 'gift') {
       try {
         const pool = await ensureXerpPool();
@@ -17448,17 +17469,59 @@ async function handleRequest(req, res) {
             const ym = ym0.slice(0,4) + '-' + ym0.slice(4,6);
             const code = (row.code || '').trim();
             xerpCodes.add(code);
-            addRow(code, row.qty, row.sales, ym, 'xerp');
+            addSalesRow(code, ym, row.qty, row.sales, 'xerp');
           }
         }
         sources.xerp = 'connected';
       } catch (e) {
-        console.error('Sales pivot XERP error:', e.message);
+        console.error('Sales pivot ERP_SalesData error:', e.message);
         sources.xerp = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
       }
     }
 
-    // DD (MySQL)
+    // 2) XERP mmInoutItem — 전체출고 (기본 SO+MO, InoutDate 기준)
+    if (source === 'all' || source === 'xerp' || source === 'gift') {
+      try {
+        const pool = await ensureXerpPool();
+        if (!pool) throw new Error('XERP pool unavailable');
+        const chunks = getMonthChunks(startYMD, endYMD);
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const chunk = chunks[ci];
+          // 청크 마지막 날 +1일 = exclusive end
+          const cyy = parseInt(chunk.end.slice(0,4),10), cmm = parseInt(chunk.end.slice(4,6),10), cdd = parseInt(chunk.end.slice(6,8),10);
+          const endNext = new Date(cyy, cmm-1, cdd+1);
+          const endNextStr = endNext.getFullYear() + String(endNext.getMonth()+1).padStart(2,'0') + String(endNext.getDate()).padStart(2,'0');
+          const reqQ = pool.request()
+            .input('s', sql.NChar(16), chunk.start)
+            .input('e', sql.NChar(16), endNextStr);
+          outGubunList.forEach((g, i) => reqQ.input('og' + i, sql.VarChar(4), g));
+          const ph = outGubunList.map((_, i) => '@og' + i).join(',');
+          const r = await reqQ.query(`SELECT LEFT(RTRIM(InoutDate),6) AS ym, RTRIM(ItemCode) AS code,
+                                             ISNULL(SUM(InoutQty),0) AS qty,
+                                             ISNULL(SUM(InoutAmnt),0) AS amnt
+                                      FROM mmInoutItem WITH (NOLOCK)
+                                      WHERE SiteCode = '${XERP_SITE_CODE}'
+                                        AND InoutGubun IN (${ph})
+                                        AND InoutDate >= @s AND InoutDate < @e
+                                      GROUP BY LEFT(RTRIM(InoutDate),6), RTRIM(ItemCode)`);
+          for (const row of r.recordset) {
+            const ym0 = (row.ym || '').trim();
+            if (!ym0 || ym0.length < 6) continue;
+            const ym = ym0.slice(0,4) + '-' + ym0.slice(4,6);
+            const code = (row.code || '').trim();
+            if (!code) continue;
+            xerpCodes.add(code);
+            addOutRow(code, ym, row.qty, row.amnt);
+          }
+        }
+        sources.mm_inout_item = 'connected';
+      } catch (e) {
+        console.error('Sales pivot mmInoutItem error:', e.message);
+        sources.mm_inout_item = (e.message.includes('permission') || e.message.includes('denied')) ? 'access_denied' : 'error';
+      }
+    }
+
+    // 3) DD (MySQL) — DD 는 출고 트랜잭션이 별도 없어 매출수량만
     if (source === 'all' || source === 'dd') {
       try {
         const pool = await ensureDdPool();
@@ -17475,9 +17538,10 @@ async function handleRequest(req, res) {
            GROUP BY DATE_FORMAT(o.created_at, '%Y-%m'), oi.product_code`, [startISO, endISO]);
         for (const row of rows) {
           const code = (row.code || '').trim();
+          if (!code) continue;
           if (!productMap[code]) productMap[code] = { code, name: row.name || code, brand: 'DD', source: 'dd', monthly: {} };
           else if (!productMap[code].name || productMap[code].name === code) productMap[code].name = row.name || code;
-          addRow(code, row.qty, row.sales, row.ym, 'dd');
+          addSalesRow(code, row.ym, row.qty, row.sales, 'dd');
         }
         sources.dd = 'connected';
       } catch (e) {
@@ -17486,7 +17550,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // bar_shop1에서 XERP 품목명/브랜드 매핑
+    // bar_shop1 에서 XERP 품목명/브랜드 매핑
     if (xerpCodes.size > 0) {
       try {
         await withBarShop1Pool(async (bar1) => {
@@ -17513,42 +17577,62 @@ async function handleRequest(req, res) {
       }
     }
 
-    // 정렬/필터/제한
+    // 정렬/필터/제한 + 비매출수량 계산
     let products = Object.values(productMap);
     if (search) products = products.filter(p =>
       (p.code || '').toLowerCase().includes(search) ||
       (p.name || '').toLowerCase().includes(search) ||
       (p.brand || '').toLowerCase().includes(search));
     products.forEach(p => {
-      let qty = 0, sales = 0;
+      let sales_qty = 0, sales_amnt = 0, out_qty = 0, out_amnt = 0;
       const yearTotals = {};
-      for (const y of years) yearTotals[y] = { qty: 0, sales: 0 };
+      for (const y of years) yearTotals[y] = { sales_qty: 0, sales_amnt: 0, out_qty: 0, out_amnt: 0 };
       for (const ym of Object.keys(p.monthly)) {
         const y = parseInt(ym.slice(0, 4), 10);
         const cell = p.monthly[ym];
-        qty += cell.qty; sales += cell.sales;
-        if (yearTotals[y]) { yearTotals[y].qty += cell.qty; yearTotals[y].sales += cell.sales; }
+        cell.non_sales_qty = (cell.out_qty || 0) - (cell.sales_qty || 0); // 음수도 표시(데이터 이상)
+        sales_qty += cell.sales_qty; sales_amnt += cell.sales_amnt;
+        out_qty += cell.out_qty; out_amnt += cell.out_amnt;
+        if (yearTotals[y]) {
+          yearTotals[y].sales_qty += cell.sales_qty;
+          yearTotals[y].sales_amnt += cell.sales_amnt;
+          yearTotals[y].out_qty += cell.out_qty;
+          yearTotals[y].out_amnt += cell.out_amnt;
+        }
       }
-      p.totals = { qty, sales };
+      p.totals = { sales_qty, sales_amnt, out_qty, out_amnt, non_sales_qty: out_qty - sales_qty };
+      Object.keys(yearTotals).forEach(y => { yearTotals[y].non_sales_qty = (yearTotals[y].out_qty || 0) - (yearTotals[y].sales_qty || 0); });
       p.yearTotals = yearTotals;
     });
-    products.sort((a, b) => b.totals.sales - a.totals.sales);
+    products.sort((a, b) => b.totals.sales_amnt - a.totals.sales_amnt);
     const truncated = products.length > limit;
     products = products.slice(0, limit).map((p, i) => ({ ...p, rank: i + 1 }));
 
-    const grandTotals = { qty: 0, sales: 0, byYear: {}, byYM: monthlyTotals };
-    for (const y of years) grandTotals.byYear[y] = { qty: 0, sales: 0 };
+    const grandTotals = { sales_qty: 0, sales_amnt: 0, out_qty: 0, out_amnt: 0, non_sales_qty: 0, byYear: {}, byYM: monthlyTotals };
+    for (const y of years) grandTotals.byYear[y] = { sales_qty: 0, sales_amnt: 0, out_qty: 0, out_amnt: 0, non_sales_qty: 0 };
     for (const ym of Object.keys(monthlyTotals)) {
       const y = parseInt(ym.slice(0, 4), 10);
-      grandTotals.qty += monthlyTotals[ym].qty;
-      grandTotals.sales += monthlyTotals[ym].sales;
+      const t = monthlyTotals[ym];
+      t.non_sales_qty = (t.out_qty || 0) - (t.sales_qty || 0);
+      grandTotals.sales_qty += t.sales_qty; grandTotals.sales_amnt += t.sales_amnt;
+      grandTotals.out_qty += t.out_qty; grandTotals.out_amnt += t.out_amnt;
       if (grandTotals.byYear[y]) {
-        grandTotals.byYear[y].qty += monthlyTotals[ym].qty;
-        grandTotals.byYear[y].sales += monthlyTotals[ym].sales;
+        grandTotals.byYear[y].sales_qty += t.sales_qty;
+        grandTotals.byYear[y].sales_amnt += t.sales_amnt;
+        grandTotals.byYear[y].out_qty += t.out_qty;
+        grandTotals.byYear[y].out_amnt += t.out_amnt;
       }
     }
+    grandTotals.non_sales_qty = grandTotals.out_qty - grandTotals.sales_qty;
+    Object.keys(grandTotals.byYear).forEach(y => { grandTotals.byYear[y].non_sales_qty = (grandTotals.byYear[y].out_qty || 0) - (grandTotals.byYear[y].sales_qty || 0); });
 
-    ok(res, { years, months: [1,2,3,4,5,6,7,8,9,10,11,12], products, grandTotals, truncated, totalProducts: Object.keys(productMap).length, sources });
+    ok(res, {
+      years, months: [1,2,3,4,5,6,7,8,9,10,11,12],
+      out_gubun: outGubunList,
+      products, grandTotals, truncated,
+      totalProducts: Object.keys(productMap).length,
+      sources
+    });
     return;
   }
 

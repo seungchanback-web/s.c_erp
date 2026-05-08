@@ -6337,8 +6337,15 @@ function closeMegaMenu() { /* no-op */ }
     </select>
     <label style="font-size:12px;font-weight:600;color:#334155;margin-left:8px">표시값</label>
     <select id="ssMetric" onchange="renderSalesStatus()" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px">
-      <option value="sales">매출액</option>
-      <option value="qty">수량</option>
+      <option value="compare" selected>📊 3종 비교 (전체출고/매출/비매출)</option>
+      <option value="out_qty">전체출고수량 (SO+MO)</option>
+      <option value="sales_qty">매출수량</option>
+      <option value="non_sales_qty">비매출수량 (샘플/증정)</option>
+      <option value="sales_amnt">매출액</option>
+    </select>
+    <select id="ssOutGubun" onchange="loadSalesStatusPage()" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px" title="전체출고로 합산할 mmInoutItem 구분">
+      <option value="SO,MO" selected>전체출고=SO+MO</option>
+      <option value="SO">전체출고=SO만</option>
     </select>
     <input type="text" id="ssSearch" placeholder="제품코드/품목명 검색" oninput="renderSalesStatus()" style="padding:4px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;min-width:200px">
     <label style="font-size:12px;color:#64748b">상위 N
@@ -27993,33 +28000,80 @@ function _renderYearChips(containerId, selected, onChange) {
 function _ymKey(y, m) { return String(y) + '-' + String(m).padStart(2,'0'); }
 function _fmtNum(n, kind) {
   n = Number(n||0);
-  if (kind === 'sales') return n === 0 ? '-' : formatKRW(n);
+  // 금액 키: sales_amnt / out_amnt / sales (legacy 출고현황)
+  if (kind === 'sales_amnt' || kind === 'out_amnt' || kind === 'sales') return n === 0 ? '-' : formatKRW(n);
   return n === 0 ? '-' : Math.round(n).toLocaleString();
 }
-function _heatBg(v, max) {
+function _heatBg(v, max, color) {
   if (!v || !max) return '';
-  var ratio = Math.min(1, v / max);
-  var alpha = 0.05 + ratio * 0.4;
-  return 'background:rgba(37,99,235,'+alpha.toFixed(3)+')';
+  var ratio = Math.min(1, Math.abs(v) / max);
+  var alpha = 0.05 + ratio * 0.35;
+  var rgb = color || '37,99,235';
+  return 'background:rgba('+rgb+','+alpha.toFixed(3)+')';
+}
+
+// 메트릭별 셀 렌더링. compare 모드면 한 셀에 3줄 (전체출고/매출/비매출).
+function _renderCell(cell, metric, maxes) {
+  if (!cell) cell = {};
+  if (metric === 'compare') {
+    var oq = Number(cell.out_qty||0), sq = Number(cell.sales_qty||0), nq = Number(cell.non_sales_qty||0);
+    if (!oq && !sq && !nq) return '<td style="padding:3px 4px;border:1px solid #f1f5f9;text-align:right;color:#cbd5e1">-</td>';
+    var nqColor = nq > 0 ? '#a16207' : (nq < 0 ? '#dc2626' : '#94a3b8');
+    return '<td style="padding:3px 4px;border:1px solid #f1f5f9;text-align:right;line-height:1.35;font-size:10px;'+_heatBg(oq, maxes.out_qty, '220,38,38')+'">'
+      + '<div style="font-weight:700;color:#dc2626" title="전체출고(SO+MO)">'+(oq?Math.round(oq).toLocaleString():'-')+'</div>'
+      + '<div style="color:#2563eb" title="매출(ERP_SalesData)">'+(sq?Math.round(sq).toLocaleString():'-')+'</div>'
+      + '<div style="color:'+nqColor+';font-style:italic" title="비매출(샘플/증정)">'+(nq?(nq>0?'+':'')+Math.round(nq).toLocaleString():'-')+'</div>'
+      + '</td>';
+  }
+  var v = Number(cell[metric]||0);
+  var rgb = (metric === 'out_qty') ? '220,38,38' : (metric === 'sales_qty' || metric === 'sales_amnt' ? '37,99,235' : (metric === 'non_sales_qty' ? '161,98,7' : '37,99,235'));
+  return '<td style="padding:5px 6px;border:1px solid #f1f5f9;text-align:right;'+_heatBg(v, maxes[metric], rgb)+'">'+_fmtNum(v, metric)+'</td>';
+}
+
+function _renderTotalCell(t, metric, bg) {
+  if (!t) t = {};
+  if (metric === 'compare') {
+    var oq = Number(t.out_qty||0), sq = Number(t.sales_qty||0), nq = Number(t.non_sales_qty||0);
+    var nqColor = nq > 0 ? '#a16207' : (nq < 0 ? '#dc2626' : '#94a3b8');
+    return '<td style="padding:4px 6px;border:1px solid #e2e8f0;text-align:right;background:'+bg+';line-height:1.35;font-size:10px">'
+      + '<div style="font-weight:700;color:#dc2626">'+(oq?Math.round(oq).toLocaleString():'-')+'</div>'
+      + '<div style="color:#2563eb">'+(sq?Math.round(sq).toLocaleString():'-')+'</div>'
+      + '<div style="color:'+nqColor+';font-style:italic">'+(nq?(nq>0?'+':'')+Math.round(nq).toLocaleString():'-')+'</div>'
+      + '</td>';
+  }
+  return '<td style="padding:5px 6px;border:1px solid #e2e8f0;text-align:right;background:'+bg+';font-weight:600">'+_fmtNum(t[metric]||0, metric)+'</td>';
 }
 
 function _renderPivotTable(d, metric, opts) {
   if (!d || !d.products) return '<div style="text-align:center;padding:60px;color:#94a3b8">데이터가 없습니다</div>';
   var years = d.years, months = d.months;
-  var qLabel = (metric === 'sales') ? '금액' : '수량';
-  // max for heatmap (per metric)
-  var maxCell = 0;
+  // max for heatmap (per metric kind)
+  // 모든 가능한 키에 대해 max 계산 (shipment-status는 qty/sales legacy 키 사용)
+  var maxes = { out_qty: 0, sales_qty: 0, sales_amnt: 0, non_sales_qty: 0, qty: 0, sales: 0 };
   d.products.forEach(function(p){
     months.forEach(function(m){
       years.forEach(function(y){
-        var v = (p.monthly[_ymKey(y,m)]||{})[metric] || 0;
-        if (v > maxCell) maxCell = v;
+        var c = p.monthly[_ymKey(y,m)] || {};
+        Object.keys(maxes).forEach(function(k){
+          var v = Math.abs(Number(c[k]||0));
+          if (v > maxes[k]) maxes[k] = v;
+        });
       });
     });
   });
 
-  var h = '<table style="border-collapse:collapse;font-size:11px;min-width:100%;background:#fff">';
-  // Header row 1: years
+  // compare 모드 안내 배지
+  var legendBadge = '';
+  if (metric === 'compare') {
+    legendBadge = '<div style="margin-bottom:6px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#92400e">'
+      + '<span style="color:#dc2626;font-weight:700">■ 전체출고(SO+MO)</span> · '
+      + '<span style="color:#2563eb;font-weight:700">■ 매출(ERP_SalesData)</span> · '
+      + '<span style="color:#a16207;font-weight:700;font-style:italic">■ 비매출(샘플/증정)</span>'
+      + ' — 같은 셀에 3줄로 표시됩니다'
+      + '</div>';
+  }
+
+  var h = legendBadge + '<table style="border-collapse:collapse;font-size:11px;min-width:100%;background:#fff">';
   h += '<thead><tr style="background:#f8fafc;position:sticky;top:0;z-index:2">';
   h += '<th rowspan="2" style="position:sticky;left:0;background:#f8fafc;z-index:3;padding:6px 8px;border:1px solid #e2e8f0;text-align:center;min-width:36px">#</th>';
   h += '<th rowspan="2" style="position:sticky;left:36px;background:#f8fafc;z-index:3;padding:6px 8px;border:1px solid #e2e8f0;text-align:left;min-width:100px">제품코드</th>';
@@ -28045,29 +28099,54 @@ function _renderPivotTable(d, metric, opts) {
     years.forEach(function(y){
       months.forEach(function(m){
         var cell = p.monthly[_ymKey(y,m)] || {};
-        var v = Number(cell[metric]||0);
-        h += '<td style="padding:5px 6px;border:1px solid #f1f5f9;text-align:right;'+_heatBg(v, maxCell)+'">'+_fmtNum(v, metric)+'</td>';
+        h += _renderCell(cell, metric, maxes);
       });
       var yt = (p.yearTotals && p.yearTotals[y]) || {};
-      h += '<td style="padding:5px 6px;border:1px solid #e2e8f0;text-align:right;background:#dbeafe;font-weight:600;color:#1d4ed8">'+_fmtNum(yt[metric]||0, metric)+'</td>';
+      h += _renderTotalCell(yt, metric, '#dbeafe');
     });
-    h += '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;background:#fef9c3;font-weight:700;color:#a16207">'+_fmtNum((p.totals||{})[metric]||0, metric)+'</td>';
+    h += _renderTotalCell(p.totals||{}, metric, '#fef9c3');
     h += '</tr>';
   });
 
-  // Footer: 합계 행
   var gt = d.grandTotals || { byYear:{}, byYM:{} };
   h += '<tfoot><tr style="background:#0f172a;color:#fff;font-weight:700;position:sticky;bottom:0">';
   h += '<td colspan="4" style="padding:6px 8px;border:1px solid #0f172a;text-align:right">합계</td>';
   years.forEach(function(y){
     months.forEach(function(m){
-      var v = ((gt.byYM||{})[_ymKey(y,m)]||{})[metric] || 0;
-      h += '<td style="padding:6px 6px;border:1px solid #0f172a;text-align:right">'+_fmtNum(v, metric)+'</td>';
+      var t = (gt.byYM||{})[_ymKey(y,m)] || {};
+      if (metric === 'compare') {
+        var oq = Number(t.out_qty||0), sq = Number(t.sales_qty||0), nq = Number(t.non_sales_qty||0);
+        h += '<td style="padding:4px 6px;border:1px solid #0f172a;text-align:right;line-height:1.35;font-size:10px">'
+          + '<div>'+(oq?Math.round(oq).toLocaleString():'-')+'</div>'
+          + '<div style="opacity:0.85">'+(sq?Math.round(sq).toLocaleString():'-')+'</div>'
+          + '<div style="opacity:0.7;font-style:italic">'+(nq?(nq>0?'+':'')+Math.round(nq).toLocaleString():'-')+'</div>'
+          + '</td>';
+      } else {
+        h += '<td style="padding:6px 6px;border:1px solid #0f172a;text-align:right">'+_fmtNum(t[metric]||0, metric)+'</td>';
+      }
     });
     var yt = (gt.byYear||{})[y] || {};
-    h += '<td style="padding:6px 6px;border:1px solid #0f172a;text-align:right;background:#1d4ed8">'+_fmtNum(yt[metric]||0, metric)+'</td>';
+    if (metric === 'compare') {
+      var oqY = Number(yt.out_qty||0), sqY = Number(yt.sales_qty||0), nqY = Number(yt.non_sales_qty||0);
+      h += '<td style="padding:4px 6px;border:1px solid #0f172a;text-align:right;background:#1d4ed8;line-height:1.35;font-size:10px">'
+        + '<div>'+(oqY?Math.round(oqY).toLocaleString():'-')+'</div>'
+        + '<div>'+(sqY?Math.round(sqY).toLocaleString():'-')+'</div>'
+        + '<div style="font-style:italic">'+(nqY?(nqY>0?'+':'')+Math.round(nqY).toLocaleString():'-')+'</div>'
+        + '</td>';
+    } else {
+      h += '<td style="padding:6px 6px;border:1px solid #0f172a;text-align:right;background:#1d4ed8">'+_fmtNum(yt[metric]||0, metric)+'</td>';
+    }
   });
-  h += '<td style="padding:6px 8px;border:1px solid #0f172a;text-align:right;background:#a16207">'+_fmtNum((gt[metric]||0), metric)+'</td>';
+  if (metric === 'compare') {
+    var oqG = Number(gt.out_qty||0), sqG = Number(gt.sales_qty||0), nqG = Number(gt.non_sales_qty||0);
+    h += '<td style="padding:4px 6px;border:1px solid #0f172a;text-align:right;background:#a16207;line-height:1.35;font-size:10px">'
+      + '<div>'+oqG.toLocaleString()+'</div>'
+      + '<div>'+sqG.toLocaleString()+'</div>'
+      + '<div style="font-style:italic">'+(nqG>0?'+':'')+nqG.toLocaleString()+'</div>'
+      + '</td>';
+  } else {
+    h += '<td style="padding:6px 8px;border:1px solid #0f172a;text-align:right;background:#a16207">'+_fmtNum((gt[metric]||0), metric)+'</td>';
+  }
   h += '</tr></tfoot></table>';
   return h;
 }
@@ -28096,7 +28175,7 @@ function _renderYearMonthChart(canvasId, d, metric, oldChart) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'top' } },
-      scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return metric === 'sales' ? formatKRW(v) : Number(v).toLocaleString(); } } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return (metric === 'sales_amnt' || metric === 'out_amnt') ? formatKRW(v) : Number(v).toLocaleString(); } } } }
     }
   });
 }
@@ -28109,12 +28188,13 @@ async function loadSalesStatusPage() {
   }
   var src = (document.getElementById('ssSource')||{}).value || 'xerp';
   var lim = parseInt((document.getElementById('ssLimit')||{}).value || '100', 10);
+  var outGubun = (document.getElementById('ssOutGubun')||{}).value || 'SO,MO';
   var pivot = document.getElementById('ssPivotArea');
   var meta = document.getElementById('ssMeta');
-  pivot.innerHTML = '<div style="text-align:center;padding:60px;color:#94a3b8">로딩중... (수개월 분량 데이터 집계, 최대 1~2분 소요될 수 있습니다)</div>';
+  pivot.innerHTML = '<div style="text-align:center;padding:60px;color:#94a3b8">로딩중... (ERP_SalesData + mmInoutItem 두 테이블 동시 집계, 1~3분 소요될 수 있습니다)</div>';
   meta.textContent = '';
   try {
-    var url = '/api/sales/pivot?years=' + _ssYears.join(',') + '&source=' + encodeURIComponent(src) + '&limit=' + lim;
+    var url = '/api/sales/pivot?years=' + _ssYears.join(',') + '&source=' + encodeURIComponent(src) + '&limit=' + lim + '&out_gubun=' + encodeURIComponent(outGubun);
     var r = await authFetch(url);
     var json = await r.json();
     if (!json.ok) throw new Error(json.error || '조회 실패');
@@ -28128,40 +28208,42 @@ async function loadSalesStatusPage() {
 function renderSalesStatus() {
   if (!_ssData) return;
   var d = _ssData;
-  var metric = (document.getElementById('ssMetric')||{}).value || 'sales';
+  var metric = (document.getElementById('ssMetric')||{}).value || 'compare';
   var search = ((document.getElementById('ssSearch')||{}).value || '').toLowerCase().trim();
-  // 검색 필터: 클라이언트 측에서 이미 받은 products를 필터링
   var filtered = d.products;
   if (search) filtered = filtered.filter(function(p){
     return (p.code||'').toLowerCase().indexOf(search) >= 0
         || (p.name||'').toLowerCase().indexOf(search) >= 0
         || (p.brand||'').toLowerCase().indexOf(search) >= 0;
   });
-  // KPI
+  // KPI — 전체출고/매출/비매출 한꺼번에
   var gt = d.grandTotals || {};
   var kh = '';
-  kh += salesKpiCard('총 매출액', formatKRW(gt.sales||0), '연도: ' + d.years.join(', '), '#d97706');
-  kh += salesKpiCard('총 판매수량', Number(gt.qty||0).toLocaleString()+'개', '', '#2563eb');
-  kh += salesKpiCard('표시 품목수', filtered.length.toLocaleString()+' / 전체 '+(d.totalProducts||0).toLocaleString(), d.truncated ? '상위 N으로 제한됨' : '', '#059669');
-  // 최근 연도 vs 이전 연도 YoY
+  kh += salesKpiCard('전체출고 수량', Number(gt.out_qty||0).toLocaleString()+'개', 'mmInoutItem ('+(d.out_gubun||['SO','MO']).join('+')+')', '#dc2626');
+  kh += salesKpiCard('매출수량', Number(gt.sales_qty||0).toLocaleString()+'개', 'ERP_SalesData', '#2563eb');
+  kh += salesKpiCard('비매출수량 (샘플/증정)', Number(gt.non_sales_qty||0).toLocaleString()+'개', '전체출고 - 매출', '#a16207');
+  kh += salesKpiCard('총 매출액', formatKRW(gt.sales_amnt||0), '연도: ' + d.years.join(', '), '#d97706');
+  // YoY
   if (d.years.length >= 2) {
     var ly = d.years[d.years.length - 2], cy = d.years[d.years.length - 1];
-    var lyV = ((gt.byYear||{})[ly]||{})[metric] || 0;
-    var cyV = ((gt.byYear||{})[cy]||{})[metric] || 0;
+    var key = metric === 'compare' ? 'out_qty' : metric;
+    var lyV = ((gt.byYear||{})[ly]||{})[key] || 0;
+    var cyV = ((gt.byYear||{})[cy]||{})[key] || 0;
     var yoy = lyV > 0 ? ((cyV - lyV) / lyV * 100) : 0;
     var color = yoy >= 0 ? '#16a34a' : '#dc2626';
-    kh += salesKpiCard(cy+' vs '+ly+' YoY', (yoy>=0?'+':'')+yoy.toFixed(1)+'%', cy+': '+_fmtNum(cyV, metric)+' / '+ly+': '+_fmtNum(lyV, metric), color);
+    var label = metric === 'compare' ? '전체출고' : (metric === 'sales_qty' ? '매출수량' : (metric === 'sales_amnt' ? '매출액' : (metric === 'non_sales_qty' ? '비매출' : '전체출고')));
+    kh += salesKpiCard(cy+' vs '+ly+' YoY ('+label+')', (yoy>=0?'+':'')+yoy.toFixed(1)+'%', cy+': '+_fmtNum(cyV, key)+' / '+ly+': '+_fmtNum(lyV, key), color);
   }
   document.getElementById('ssKpiArea').innerHTML = kh;
   // Chart
   var chartArea = document.getElementById('ssYearMonthChart');
-  chartArea.innerHTML = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;height:260px"><div style="font-weight:600;margin-bottom:6px;font-size:13px;color:#334155">📈 연도별 월간 추이 ('+(metric==='sales'?'매출액':'수량')+')</div><div style="position:relative;height:210px"><canvas id="ssYmCanvas"></canvas></div></div>';
-  _ssChart = _renderYearMonthChart('ssYmCanvas', d, metric, _ssChart);
+  var chartTitle = metric === 'compare' ? '연도별 월간 추이 (전체출고)' : ('연도별 월간 추이 ('+(metric==='sales_amnt'?'매출액':metric==='sales_qty'?'매출수량':metric==='non_sales_qty'?'비매출수량':'전체출고수량')+')');
+  chartArea.innerHTML = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;height:260px"><div style="font-weight:600;margin-bottom:6px;font-size:13px;color:#334155">📈 '+chartTitle+'</div><div style="position:relative;height:210px"><canvas id="ssYmCanvas"></canvas></div></div>';
+  _ssChart = _renderYearMonthChart('ssYmCanvas', d, metric === 'compare' ? 'out_qty' : metric, _ssChart);
   // Pivot table
   document.getElementById('ssPivotArea').innerHTML = _renderPivotTable({ ...d, products: filtered }, metric, {});
-  // Meta
   var sources = d.sources || {};
-  document.getElementById('ssMeta').innerHTML = salesSourceBadge(sources) + ' · 조회연도 ' + d.years.join(', ') + ' · 표시 ' + filtered.length + ' / 전체 ' + (d.totalProducts||0) + (d.truncated ? ' (상위 N 제한)' : '');
+  document.getElementById('ssMeta').innerHTML = salesSourceBadge(sources) + ' · 조회연도 ' + d.years.join(', ') + ' · 전체출고=' + (d.out_gubun||[]).join('+') + ' · 표시 ' + filtered.length + ' / 전체 ' + (d.totalProducts||0) + (d.truncated ? ' (상위 N 제한)' : '');
 }
 
 function exportSalesStatusExcel() {
@@ -28202,12 +28284,14 @@ function renderDiagResult(d) {
 
   var h = '';
 
-  // 비교 요약 (가장 위)
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">';
-  h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px"><div style="font-size:11px;color:#1d4ed8;font-weight:600">📊 ERP_SalesData (매출)</div><div style="font-size:22px;font-weight:700;color:#0f172a;margin-top:4px">'+Number(cmp.erp_sales_qty||0).toLocaleString()+'</div><div style="font-size:11px;color:#64748b">SUM(b_OrderNum) · '+Number(sales.row_count||0).toLocaleString()+'행</div></div>';
-  h += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px"><div style="font-size:11px;color:#dc2626;font-weight:600">📦 mmInoutItem (출고/SO)</div><div style="font-size:22px;font-weight:700;color:#0f172a;margin-top:4px">'+Number(cmp.mm_so_qty||0).toLocaleString()+'</div><div style="font-size:11px;color:#64748b">SUM(InoutQty) · '+Number((byG.SO||{}).row_count||0).toLocaleString()+'행</div></div>';
-  var diffColor = cmp.diff > 0 ? '#dc2626' : (cmp.diff < 0 ? '#2563eb' : '#16a34a');
-  h += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px"><div style="font-size:11px;color:#a16207;font-weight:600">⚖️ 차이 (출고 - 매출)</div><div style="font-size:22px;font-weight:700;color:'+diffColor+';margin-top:4px">'+(cmp.diff>=0?'+':'')+Number(cmp.diff||0).toLocaleString()+(cmp.diff_pct!=null?' ('+cmp.diff_pct+'%)':'')+'</div><div style="font-size:11px;color:#64748b">'+esc(cmp.hint||'')+'</div></div>';
+  // 비교 요약: 전체출고(SO+MO) / 매출 / 비매출
+  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">';
+  h += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px"><div style="font-size:11px;color:#dc2626;font-weight:600">📦 전체출고 (SO+MO)</div><div style="font-size:22px;font-weight:700;color:#0f172a;margin-top:4px">'+Number(cmp.mm_total_out_qty||0).toLocaleString()+'</div><div style="font-size:11px;color:#64748b">SO '+Number(cmp.mm_so_qty||0).toLocaleString()+' + MO '+Number(cmp.mm_mo_qty||0).toLocaleString()+'</div></div>';
+  h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px"><div style="font-size:11px;color:#1d4ed8;font-weight:600">📊 매출 (ERP_SalesData)</div><div style="font-size:22px;font-weight:700;color:#0f172a;margin-top:4px">'+Number(cmp.erp_sales_qty||0).toLocaleString()+'</div><div style="font-size:11px;color:#64748b">SUM(b_OrderNum) · '+Number(sales.row_count||0).toLocaleString()+'행</div></div>';
+  var nonSales = cmp.non_sales_qty || 0;
+  var nonSalesColor = nonSales > 0 ? '#a16207' : (nonSales < 0 ? '#dc2626' : '#16a34a');
+  h += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px"><div style="font-size:11px;color:#a16207;font-weight:600">🎁 비매출 (전체-매출)</div><div style="font-size:22px;font-weight:700;color:'+nonSalesColor+';margin-top:4px">'+(nonSales>=0?'+':'')+Number(nonSales).toLocaleString()+(cmp.diff_pct!=null?' ('+cmp.diff_pct+'%)':'')+'</div><div style="font-size:11px;color:#64748b">샘플/증정/원자재투입</div></div>';
+  h += '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px"><div style="font-size:11px;color:#15803d;font-weight:600">💡 분석</div><div style="font-size:11px;color:#0f172a;margin-top:4px;line-height:1.5">'+esc(cmp.hint||'')+'</div></div>';
   h += '</div>';
 
   // mmInoutItem 구분별 합계
@@ -28338,40 +28422,50 @@ function exportShipmentStatusExcel() {
 
 function _exportPivotExcel(d, metric, title, prefix) {
   if (typeof XLSX === 'undefined') { whToast('XLSX 라이브러리 미로드'); return; }
-  var rows = [];
-  // 헤더 1
-  var h1 = ['#','제품코드','품목명','브랜드'];
-  d.years.forEach(function(y){ for (var m = 1; m <= 12; m++) h1.push(y+'-'+String(m).padStart(2,'0')); h1.push(y+' 소계'); });
-  h1.push('전체합계');
-  rows.push(h1);
-  d.products.forEach(function(p){
-    var row = [p.rank, p.code, p.name||p.code, p.brand||''];
+  var wb = XLSX.utils.book_new();
+  // 판매현황의 경우 항상 4종 시트 모두 내보내기 (전체출고/매출수량/비매출/매출액)
+  var sheetSpecs;
+  if (prefix === 'sales-status') {
+    sheetSpecs = [
+      { metric: 'out_qty', name: '전체출고수량' },
+      { metric: 'sales_qty', name: '매출수량' },
+      { metric: 'non_sales_qty', name: '비매출수량' },
+      { metric: 'sales_amnt', name: '매출액' }
+    ];
+  } else {
+    sheetSpecs = [{ metric: metric, name: (metric==='sales'?'금액':'수량') }];
+  }
+  sheetSpecs.forEach(function(spec){
+    var rows = [];
+    var h1 = ['#','제품코드','품목명','브랜드'];
+    d.years.forEach(function(y){ for (var m = 1; m <= 12; m++) h1.push(y+'-'+String(m).padStart(2,'0')); h1.push(y+' 소계'); });
+    h1.push('전체합계');
+    rows.push(h1);
+    d.products.forEach(function(p){
+      var row = [p.rank, p.code, p.name||p.code, p.brand||''];
+      d.years.forEach(function(y){
+        for (var m = 1; m <= 12; m++) {
+          var c = (p.monthly[_ymKey(y,m)]||{});
+          row.push(Number(c[spec.metric]||0));
+        }
+        var yt = (p.yearTotals||{})[y] || {};
+        row.push(Number(yt[spec.metric]||0));
+      });
+      row.push(Number((p.totals||{})[spec.metric]||0));
+      rows.push(row);
+    });
+    var gt = d.grandTotals || {};
+    var foot = ['','','합계',''];
     d.years.forEach(function(y){
       for (var m = 1; m <= 12; m++) {
-        var c = (p.monthly[_ymKey(y,m)]||{});
-        row.push(Number(c[metric]||0));
+        foot.push(Number(((gt.byYM||{})[_ymKey(y,m)]||{})[spec.metric] || 0));
       }
-      var yt = (p.yearTotals||{})[y] || {};
-      row.push(Number(yt[metric]||0));
+      foot.push(Number(((gt.byYear||{})[y]||{})[spec.metric] || 0));
     });
-    row.push(Number((p.totals||{})[metric]||0));
-    rows.push(row);
+    foot.push(Number(gt[spec.metric]||0));
+    rows.push(foot);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), spec.name);
   });
-  // 합계 행
-  var gt = d.grandTotals || {};
-  var foot = ['','','합계',''];
-  d.years.forEach(function(y){
-    for (var m = 1; m <= 12; m++) {
-      foot.push(Number(((gt.byYM||{})[_ymKey(y,m)]||{})[metric] || 0));
-    }
-    foot.push(Number(((gt.byYear||{})[y]||{})[metric] || 0));
-  });
-  foot.push(Number(gt[metric]||0));
-  rows.push(foot);
-
-  var ws = XLSX.utils.aoa_to_sheet(rows);
-  var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, title + '_' + (metric==='sales'?'금액':'수량'));
   var ymd = new Date().toISOString().slice(0,10).replace(/-/g,'');
   XLSX.writeFile(wb, prefix + '_' + ymd + '.xlsx');
 }
