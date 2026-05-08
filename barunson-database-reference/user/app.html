@@ -1473,6 +1473,7 @@ var _megaData = {
       {icon:'🏢',bg:'#ecfdf5',fg:'#059669',name:'창고별 재고',desc:'창고별 현황/이동/조정',page:'warehouse',companies:['barunson']},
       {icon:'🔄',bg:'#fff7ed',fg:'#ea580c',name:'입출고 현황',desc:'입고/출고 내역 조회',page:'shipments'},
       {icon:'📈',bg:'#fef2f2',fg:'#b91c1c',name:'출고현황',desc:'연도/월/제품별 출고 대시보드',page:'shipment-status'},
+      {icon:'📒',bg:'#fef9c3',fg:'#a16207',name:'재고수불부',desc:'월별 시작/입고/출고/종료재고 + XERP 검증',page:'stock-ledger'},
       {icon:'📊',bg:'#dbeafe',fg:'#1d4ed8',name:'수불원장',desc:'창고별/품목별 입출고 원장',page:'inventory-ledger',companies:['barunson']},
       {icon:'🏷️',bg:'#f5f3ff',fg:'#7c3aed',name:'Lot 추적',desc:'Lot/시리얼 이력 관리',page:'lot-tracking',companies:['barunson']},
       {icon:'🛡️',bg:'#fef2f2',fg:'#dc2626',name:'안전재고',desc:'안전재고 규칙/알림',page:'safety-stock'},
@@ -2028,6 +2029,10 @@ function closeMegaMenu() { /* no-op */ }
         <div class="hm-icon" style="background:#fef2f2;color:#b91c1c">📈</div>
         <div><div class="hm-name">출고현황</div><div class="hm-desc">연도/월/제품별 출고 대시보드</div></div>
       </div>
+      <div class="hm-item" data-page="stock-ledger" onclick="showPage('stock-ledger')">
+        <div class="hm-icon" style="background:#fef9c3;color:#a16207">📒</div>
+        <div><div class="hm-name">재고수불부</div><div class="hm-desc">월별 시작/입고/출고/종료재고</div></div>
+      </div>
     </div>
 
     <!-- 생산관리 -->
@@ -2466,6 +2471,51 @@ function closeMegaMenu() { /* no-op */ }
       <div id="inv2AdjModalBody" style="font-size:12px"></div>
     </div>
   </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PAGE: 재고수불부 (Stock Ledger) — XERP mminvMonth + inv2_inout -->
+<!-- ============================================================ -->
+<div class="page" id="page-stock-ledger">
+  <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#a16207;line-height:1.6">
+    <b>재고수불부</b> — XERP <code>mminvMonth</code>(월말재고) + <code>mmInoutItem</code>(입출고)을 우리 DB에 적재해 월별 [<b>시작재고 + 입고 - 출고 = 종료재고</b>] 산출.
+    적재 후 [XERP 검증] 으로 합계 자동 비교 가능.
+  </div>
+
+  <!-- 관리자 패널 -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="font-weight:700;font-size:13px;color:#0f172a">📦 데이터 적재 (관리자)</div>
+      <span style="font-size:11px;color:#64748b">기본 기간: 2024-12 ~ 2026-03 (시작재고 산출용 직전월 포함)</span>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm" onclick="slBackfillMonthly()" style="background:#dc2626;color:#fff;font-size:12px">월별재고 적재 (mminvMonth)</button>
+      <button class="btn btn-sm" onclick="slBackfillInout()" style="background:#ea580c;color:#fff;font-size:12px">입출고 적재 (mmInoutItem)</button>
+      <button class="btn btn-sm" onclick="slRefreshJobs()" style="background:#64748b;color:#fff;font-size:12px">작업 새로고침</button>
+    </div>
+    <div id="slJobsArea" style="margin-top:8px"></div>
+  </div>
+
+  <!-- 조회 필터 -->
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px">
+    <label style="font-size:12px;font-weight:600;color:#334155">기간</label>
+    <input type="text" id="slYmFrom" value="202501" maxlength="6" placeholder="YYYYMM" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:90px">
+    <span style="color:#94a3b8">~</span>
+    <input type="text" id="slYmTo" value="202603" maxlength="6" placeholder="YYYYMM" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:90px">
+    <input type="text" id="slItemCode" placeholder="제품코드 (선택)" style="padding:5px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;width:140px;text-transform:uppercase">
+    <button class="btn btn-sm" onclick="slLoadLedger()" style="background:#2563eb;color:#fff;font-size:12px;padding:5px 14px;border-radius:5px">🔍 조회</button>
+    <button class="btn btn-sm" onclick="slVerifyMonth()" style="background:#dc2626;color:#fff;font-size:12px;padding:5px 14px;border-radius:5px" title="ym_to 기준 월의 우리DB 합계 vs XERP 직접쿼리 합계">⚖️ XERP 검증 (ym_to 기준)</button>
+    <div style="flex:1"></div>
+    <span id="slResultInfo" style="font-size:11px;color:#94a3b8"></span>
+  </div>
+
+  <!-- 월별 합계 KPI -->
+  <div id="slMonthlyTotals" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px"></div>
+
+  <!-- 검증 결과 패널 (slVerifyMonth 클릭 시 표시) -->
+  <div id="slVerifyArea" style="display:none;margin-bottom:10px"></div>
+
+  <!-- 수불부 테이블 -->
+  <div id="slTableArea" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:calc(100vh - 480px);min-height:300px"></div>
 </div>
 
 <!-- 데이터 진단 모달 — ERP_SalesData vs mmInoutItem 비교 -->
@@ -7631,7 +7681,7 @@ var pageTitles={
   'invoices':'거래명세서','mat-purchase':'원재료 매입','china-shipment':'중국 선적',
   'vendors':'거래처 관리','notes':'미팅일지','bom':'제품공정','mrp':'MRP',
   'auto-order':'필수 자동발주','product-mgmt':'품목관리','shipments':'입출고 현황',
-  'inventory2':'재고현황2',
+  'inventory2':'재고현황2','stock-ledger':'재고수불부',
   'inventory-ledger':'수불원장',
   'post-process':'후공정 단가 관리','defects':'불량관리','production-req':'생산요청',
   'production-stock':'생산재고','closing':'마감현황','report':'보고서','settings':'설정',
@@ -10198,7 +10248,7 @@ function showPage(page, opts){
     'auto-order':'purchase','create-po':'purchase','po-list':'purchase','po-mgmt':'purchase','china-shipment':'purchase',
     'delivery-schedule':'purchase','receipts':'purchase','os-register':'purchase',
     'sales':'sales','sales-barun':'sales','sales-dd':'sales','sales-gift':'sales','customer-orders':'sales','shipping':'sales','sales-status':'sales',
-    'inventory':'stock','inventory2':'stock','warehouse':'stock','shipments':'stock','inventory-ledger':'stock','shipment-status':'stock',
+    'inventory':'stock','inventory2':'stock','warehouse':'stock','shipments':'stock','inventory-ledger':'stock','shipment-status':'stock','stock-ledger':'stock',
     'production-req':'production','production-stock':'production','mrp':'production',
     'invoices':'accounting','mat-purchase':'accounting','cost-mgmt':'accounting','closing':'accounting',
     'chart-of-accounts':'accounting','journal':'accounting','general-ledger':'accounting',
@@ -10263,6 +10313,7 @@ function showPage(page, opts){
   if(page==='analytics') loadDashboard();
   if(page==='inventory') loadInventoryPage();
   if(page==='inventory2') loadInventory2Page();
+  if(page==='stock-ledger') loadStockLedgerPage();
   if(page==='order-todo') loadOrderTodo();
   if(page==='create-po') loadCreatePO();
   if(page==='po-list') loadPOList();
@@ -28438,6 +28489,248 @@ function _buildDiagSummary(d) {
   lines.push('  mmInoutItem: WHERE SiteCode = \'' + (inout.site||'') + '\' AND InoutDate >= ' + d.period.start + ' AND InoutDate < ' + d.period.endExclusive + ' AND RTRIM(ItemCode) = \'' + d.code + '\'');
   return lines.join('\n');
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  재고수불부 (Stock Ledger) — XERP mminvMonth + inv2_inout
+// ════════════════════════════════════════════════════════════════════
+var _slData = null;
+var _slJobsTimer = null;
+
+async function loadStockLedgerPage() {
+  await slRefreshJobs();
+  await slLoadLedger();
+}
+
+function _slToast(msg, type) { try { whToast(msg, type); } catch(_) {} }
+
+async function slBackfillMonthly() {
+  var ymFrom = (document.getElementById('slYmFrom').value || '202412').trim();
+  var ymTo = (document.getElementById('slYmTo').value || '202603').trim();
+  // 시작재고 산출용으로 직전월부터 적재. ymFrom-1 자동 계산.
+  function prevYM(ym) {
+    var y = parseInt(ym.slice(0,4),10), m = parseInt(ym.slice(4,6),10) - 1;
+    if (m < 1) { m = 12; y--; }
+    return String(y) + String(m).padStart(2,'0');
+  }
+  var loadFrom = prevYM(ymFrom);
+  if (!confirm('XERP mminvMonth 의 ' + loadFrom + ' ~ ' + ymTo + ' 월별 재고를 우리 DB에 적재합니다.\n\n• 직전월(' + loadFrom + ')은 시작재고 산출용으로 자동 포함됩니다.\n• 백그라운드 실행, 작업 패널에서 진행률 확인.\n• 같은 월 재적재 시 기존 행은 삭제 후 새로 입력됩니다.\n\n진행하시겠습니까?')) return;
+  try {
+    var r = await authFetch('/api/inv2/monthly-inventory/backfill', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ym_from: loadFrom, ym_to: ymTo }) });
+    var json = await r.json();
+    if (!json.ok) throw new Error(json.error || '백필 등록 실패');
+    _slToast('월별재고 백필 작업 등록됨 (job_id ' + (json.data.job_id || '?') + ')');
+    slStartJobsPolling();
+  } catch (e) { _slToast('백필 실패: ' + e.message, 'error'); }
+}
+
+async function slBackfillInout() {
+  var ymFrom = (document.getElementById('slYmFrom').value || '202501').trim();
+  var ymTo = (document.getElementById('slYmTo').value || '202603').trim();
+  if (!/^\d{6}$/.test(ymFrom) || !/^\d{6}$/.test(ymTo)) { _slToast('YYYYMM 형식 입력 필요'); return; }
+  var startYMD = ymFrom + '01';
+  // ymTo 의 마지막 날
+  var y = parseInt(ymTo.slice(0,4),10), m = parseInt(ymTo.slice(4,6),10);
+  var lastDay = new Date(y, m, 0).getDate();
+  var endYMD = ymTo + String(lastDay).padStart(2,'0');
+  if (!confirm('XERP mmInoutItem 의 ' + startYMD + ' ~ ' + endYMD + ' 입출고를 우리 DB(inv2_inout)에 적재합니다.\n\n• 월 단위 청크 백그라운드 실행\n• 멱등 (같은 행 중복 안 됨)\n\n진행?')) return;
+  try {
+    var r = await authFetch('/api/inv2/backfill', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tables: ['inout'], start: startYMD, end: endYMD }) });
+    var json = await r.json();
+    if (!json.ok) throw new Error(json.error || '백필 등록 실패');
+    _slToast('입출고 백필 작업 ' + (json.data.jobs||[]).length + '건 등록됨');
+    slStartJobsPolling();
+  } catch (e) { _slToast('입출고 백필 실패: ' + e.message, 'error'); }
+}
+
+async function slRefreshJobs() {
+  try {
+    var r = await authFetch('/api/inv2/jobs');
+    var json = await r.json();
+    if (!json.ok) return;
+    var jobs = (json.data.jobs || []).filter(function(j){ return j.table_name === 'monthly_inventory' || j.table_name === 'inout'; });
+    var hasRunning = jobs.some(function(j){ return j.status === 'running' || j.status === 'queued'; });
+    if (!jobs.length) { document.getElementById('slJobsArea').innerHTML = ''; return; }
+    var jh = '<div style="font-size:11px;color:#64748b;margin-bottom:4px">최근 적재 작업 (월별재고 + 입출고)</div>';
+    jh += '<div style="max-height:160px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+    jh += '<thead><tr style="background:#f8fafc"><th style="padding:5px 8px;text-align:left">#</th><th style="padding:5px 8px;text-align:left">테이블</th><th style="padding:5px 8px;text-align:left">기간</th><th style="padding:5px 8px;text-align:center">상태</th><th style="padding:5px 8px;text-align:right">진행</th><th style="padding:5px 8px;text-align:right">행수</th><th style="padding:5px 8px;text-align:left">단계</th></tr></thead><tbody>';
+    jobs.slice(0, 10).forEach(function(j){
+      var col = j.status === 'completed' ? '#16a34a' : (j.status === 'failed' ? '#dc2626' : (j.status === 'running' ? '#2563eb' : '#64748b'));
+      jh += '<tr style="border-top:1px solid #f1f5f9"><td style="padding:4px 8px">'+j.job_id+'</td><td style="padding:4px 8px">'+esc(j.table_name)+'</td><td style="padding:4px 8px;font-family:monospace;font-size:10px">'+esc(j.range_start||'')+'~'+esc(j.range_end||'')+'</td><td style="padding:4px 8px;text-align:center;color:'+col+';font-weight:600">'+esc(j.status)+'</td><td style="padding:4px 8px;text-align:right">'+(j.progress_pct||0)+'%</td><td style="padding:4px 8px;text-align:right">'+Number(j.rows_inserted||0).toLocaleString()+'</td><td style="padding:4px 8px;color:#64748b">'+esc(j.current_step||'')+(j.error_msg ? ' <span style="color:#dc2626">— '+esc(j.error_msg)+'</span>' : '')+'</td></tr>';
+    });
+    jh += '</tbody></table></div>';
+    document.getElementById('slJobsArea').innerHTML = jh;
+    if (hasRunning) slStartJobsPolling(); else slStopJobsPolling();
+  } catch(_){}
+}
+function slStartJobsPolling() { if (_slJobsTimer) return; _slJobsTimer = setInterval(slRefreshJobs, 3000); }
+function slStopJobsPolling() { if (_slJobsTimer) { clearInterval(_slJobsTimer); _slJobsTimer = null; } }
+
+async function slLoadLedger() {
+  var ymFrom = (document.getElementById('slYmFrom').value || '202501').trim();
+  var ymTo = (document.getElementById('slYmTo').value || '202603').trim();
+  var item = ((document.getElementById('slItemCode')||{}).value || '').trim().toUpperCase();
+  document.getElementById('slItemCode').value = item;
+  var area = document.getElementById('slTableArea');
+  area.innerHTML = '<div style="text-align:center;padding:60px;color:#94a3b8">조회 중...</div>';
+  document.getElementById('slMonthlyTotals').innerHTML = '';
+  document.getElementById('slVerifyArea').style.display = 'none';
+  try {
+    var url = '/api/inv2/stock-ledger?ym_from=' + ymFrom + '&ym_to=' + ymTo + '&limit=500';
+    if (item) url += '&item_code=' + encodeURIComponent(item);
+    var r = await authFetch(url);
+    var json = await r.json();
+    if (!json.ok) throw new Error(json.error || '조회 실패');
+    _slData = json.data;
+    slRenderLedger();
+  } catch (e) {
+    area.innerHTML = '<div style="text-align:center;padding:60px;color:#ef4444">조회 실패: ' + esc(e.message) + '</div>';
+  }
+}
+
+function slRenderLedger() {
+  var d = _slData; if (!d) return;
+  // 월별 합계 KPI
+  var months = d.months || [];
+  var mt = d.monthly_totals || {};
+  var kh = '';
+  months.forEach(function(ym){
+    var t = mt[ym] || {};
+    var diff = Number(t.diff_qty||0);
+    var diffColor = Math.abs(diff) < 1 ? '#16a34a' : '#dc2626';
+    var ymLabel = ym.slice(0,4) + '-' + ym.slice(4,6);
+    kh += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;border-left:4px solid '+(Math.abs(diff)<1?'#16a34a':'#d97706')+'"><div style="font-size:11px;color:#94a3b8">'+ymLabel+' ('+Number(t.item_count||0)+'품목)</div><div style="font-size:13px;font-weight:600;color:#0f172a;margin-top:3px">시:'+Number(t.start_qty||0).toLocaleString()+' +입:'+Number(t.in_qty||0).toLocaleString()+' -출:'+Number(t.out_qty||0).toLocaleString()+'</div><div style="font-size:13px;font-weight:700;color:#0f172a">=종:'+Number(t.end_qty||0).toLocaleString()+'</div><div style="font-size:11px;color:'+diffColor+';font-weight:600;margin-top:2px">차이: '+(diff>=0?'+':'')+diff.toLocaleString()+'</div></div>';
+  });
+  document.getElementById('slMonthlyTotals').innerHTML = kh;
+
+  // 테이블
+  var rows = d.rows || [];
+  var area = document.getElementById('slTableArea');
+  if (!rows.length) { area.innerHTML = '<div style="text-align:center;padding:60px;color:#94a3b8">데이터가 없습니다 — [월별재고 적재] / [입출고 적재] 먼저 실행하세요</div>'; document.getElementById('slResultInfo').textContent = ''; return; }
+  var h = '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff">';
+  h += '<thead style="position:sticky;top:0;background:#f8fafc;z-index:1"><tr>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:left">월</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:left">제품코드</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:left">품목명</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;color:#64748b">시작재고</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;color:#16a34a">+ 입고(SI+MI)</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;color:#dc2626">- 출고(SO+MO)</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;color:#0f172a">종료재고</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;color:#94a3b8">계산종료</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right">정합차이</th>';
+  h += '<th style="padding:8px 10px;border-bottom:2px solid #e2e8f0;text-align:right;font-size:10px;color:#94a3b8">SO/MO/SI/MI</th>';
+  h += '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    var diff = Number(r.diff_qty||0);
+    var diffOk = Math.abs(diff) < 1;
+    var ymLabel = r.ym.slice(0,4) + '-' + r.ym.slice(4,6);
+    var bg = diffOk ? '' : 'background:#fffbeb';
+    h += '<tr style="border-bottom:1px solid #f1f5f9;'+bg+'">'
+      + '<td style="padding:5px 10px">'+esc(ymLabel)+'</td>'
+      + '<td style="padding:5px 10px;font-family:monospace;font-size:11px">'+esc(r.item_code)+'</td>'
+      + '<td style="padding:5px 10px">'+esc(r.item_name||r.item_code)+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:#64748b">'+Number(r.start_qty||0).toLocaleString()+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:#16a34a;font-weight:600">'+Number(r.in_qty||0).toLocaleString()+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:#dc2626;font-weight:600">'+Number(r.out_qty||0).toLocaleString()+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;font-weight:700">'+Number(r.end_qty||0).toLocaleString()+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:#94a3b8;font-size:11px">'+Number(r.calc_end_qty||0).toLocaleString()+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:'+(diffOk?'#16a34a':'#dc2626')+';font-weight:700">'+(diffOk?'✓':((diff>=0?'+':'')+diff.toLocaleString()))+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:#94a3b8;font-size:10px">'+(r.by_gubun?(Number(r.by_gubun.SO||0).toLocaleString()+'/'+Number(r.by_gubun.MO||0).toLocaleString()+'/'+Number(r.by_gubun.SI||0).toLocaleString()+'/'+Number(r.by_gubun.MI||0).toLocaleString()):'')+'</td>'
+      + '</tr>';
+  });
+  h += '</tbody></table>';
+  area.innerHTML = h;
+  document.getElementById('slResultInfo').textContent = '표시 ' + rows.length + ' / 전체 ' + (d.total_rows||0) + (d.truncated ? ' (상위 500건)' : '') + ' · 정합차이 0 = ✓';
+}
+
+async function slVerifyMonth() {
+  var ym = (document.getElementById('slYmTo').value || '202603').trim();
+  if (!/^\d{6}$/.test(ym)) { _slToast('ym_to 가 YYYYMM 형식이어야 합니다'); return; }
+  var area = document.getElementById('slVerifyArea');
+  area.style.display = 'block';
+  area.innerHTML = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:30px;text-align:center;color:#94a3b8">XERP 직접 쿼리 + 우리 DB 합계 비교 중...</div>';
+  try {
+    var r = await authFetch('/api/inv2/stock-ledger/verify?ym=' + ym);
+    var json = await r.json();
+    if (!json.ok) throw new Error(json.error || '검증 실패');
+    var d = json.data;
+    var checks = d.checks || [];
+    var allOk = !!d.all_ok;
+    var statusBg = allOk ? '#f0fdf4' : '#fef2f2';
+    var statusBd = allOk ? '#bbf7d0' : '#fecaca';
+    var statusColor = allOk ? '#16a34a' : '#dc2626';
+    var statusLabel = allOk ? '✓ 모든 항목 일치' : '⚠ 불일치 항목 있음';
+
+    var h = '<div style="background:'+statusBg+';border:2px solid '+statusBd+';border-radius:8px;padding:14px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">';
+    h += '<div style="font-size:14px;font-weight:700;color:'+statusColor+'">⚖️ XERP 검증 결과 — '+esc(d.ym.slice(0,4)+'-'+d.ym.slice(4,6))+' · '+statusLabel+'</div>';
+    h += '<button onclick="slCopyVerifySummary()" style="background:#2563eb;color:#fff;border:none;padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer">📋 결과 복사 (Claude 에 붙이기)</button>';
+    h += '</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border-radius:6px;overflow:hidden">';
+    h += '<thead><tr style="background:#f8fafc"><th style="padding:6px 10px;text-align:left">항목</th><th style="padding:6px 10px;text-align:right">우리 DB</th><th style="padding:6px 10px;text-align:right">XERP 실시간</th><th style="padding:6px 10px;text-align:right">차이</th><th style="padding:6px 10px;text-align:center">상태</th></tr></thead><tbody>';
+    checks.forEach(function(c){
+      var col = c.ok ? '#16a34a' : '#dc2626';
+      h += '<tr style="border-top:1px solid #f1f5f9"><td style="padding:5px 10px">'+esc(c.name)+'</td>'
+        + '<td style="padding:5px 10px;text-align:right">'+Number(c.local).toLocaleString()+'</td>'
+        + '<td style="padding:5px 10px;text-align:right">'+Number(c.xerp).toLocaleString()+'</td>'
+        + '<td style="padding:5px 10px;text-align:right;color:'+col+';font-weight:600">'+(c.diff>=0?'+':'')+Number(c.diff).toLocaleString()+'</td>'
+        + '<td style="padding:5px 10px;text-align:center;font-weight:700;color:'+col+'">'+(c.ok?'✓':'✗')+'</td></tr>';
+    });
+    h += '</tbody></table>';
+    // 평문 요약 textarea
+    var summary = _slBuildVerifySummary(d);
+    h += '<textarea id="slVerifySummaryTxt" readonly style="margin-top:10px;width:100%;min-height:180px;padding:10px;border:1px solid '+statusBd+';border-radius:6px;font-family:monospace;font-size:11px;line-height:1.5;background:#fff;color:#0f172a">'+esc(summary)+'</textarea>';
+    h += '</div>';
+    area.innerHTML = h;
+  } catch (e) {
+    area.innerHTML = '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;color:#dc2626">검증 실패: '+esc(e.message)+'</div>';
+  }
+}
+
+function _slBuildVerifySummary(d) {
+  var lines = [];
+  lines.push('=== 재고수불부 XERP 검증 결과 ===');
+  lines.push('대상 월: ' + d.ym);
+  lines.push('전체 일치 여부: ' + (d.all_ok ? '✓ 모두 일치' : '⚠ 불일치 있음'));
+  lines.push('');
+  lines.push('[항목별 비교 — 우리 DB vs XERP 실시간]');
+  (d.checks || []).forEach(function(c){
+    lines.push('  ' + (c.ok ? '✓' : '✗') + ' ' + c.name);
+    lines.push('     우리DB=' + Number(c.local).toLocaleString() + ' / XERP=' + Number(c.xerp).toLocaleString() + ' / 차이=' + (c.diff>=0?'+':'') + Number(c.diff).toLocaleString());
+  });
+  // raw 합계
+  var local = (d.sources||{}).local_db || {};
+  var live = (d.sources||{}).xerp_live || {};
+  lines.push('');
+  lines.push('[원시 합계]');
+  lines.push('  우리 DB inv2_monthly_inventory: qty=' + Number((local.monthly_inventory||{}).qty||0).toLocaleString() + ' / amnt=' + Number((local.monthly_inventory||{}).amnt||0).toLocaleString() + ' / rows=' + Number((local.monthly_inventory||{}).rows||0).toLocaleString());
+  lines.push('  XERP mminvMonth:               qty=' + Number((live.monthly_inventory||{}).qty||0).toLocaleString() + ' / amnt=' + Number((live.monthly_inventory||{}).amnt||0).toLocaleString() + ' / rows=' + Number((live.monthly_inventory||{}).rows||0).toLocaleString());
+  ['SO','MO','SI','MI'].forEach(function(g){
+    var l = (local.inout_by_gubun||{})[g]||{};
+    var x = (live.inout_by_gubun||{})[g]||{};
+    lines.push('  ' + g + ': 우리DB qty='+Number(l.qty||0).toLocaleString()+' rows='+Number(l.rows||0).toLocaleString()+' / XERP qty='+Number(x.qty||0).toLocaleString()+' rows='+Number(x.rows||0).toLocaleString());
+  });
+  return lines.join('\n');
+}
+
+async function slCopyVerifySummary() {
+  var ta = document.getElementById('slVerifySummaryTxt');
+  if (!ta) return;
+  try {
+    if (navigator.clipboard) await navigator.clipboard.writeText(ta.value);
+    else { ta.select(); document.execCommand('copy'); }
+    _slToast('검증 요약을 클립보드에 복사했습니다');
+  } catch (e) { ta.select(); _slToast('자동 복사 실패 — 직접 복사하세요', 'error'); }
+}
+
+// 페이지 이탈 시 polling 정지
+(function(){
+  var _origShowPage = window.showPage;
+  if (typeof _origShowPage === 'function' && !_origShowPage._slWrapped) {
+    var prev = _origShowPage;
+    window.showPage = function(p, o){ if (p !== 'stock-ledger') slStopJobsPolling(); return prev(p, o); };
+    window.showPage._slWrapped = true;
+  }
+})();
 
 async function copyDiagSummary() {
   var ta = document.getElementById('diagSummaryTxt');

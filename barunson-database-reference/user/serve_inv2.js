@@ -1885,6 +1885,23 @@ try {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_inv2_sync_status ON inv2_sync_jobs(status)");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_inv2_sync_table ON inv2_sync_jobs(table_name)");
 
+  // 월별 재고 (XERP mminvMonth 1:1 적재) — 재고수불부 산출용
+  await db.exec(`CREATE TABLE IF NOT EXISTS inv2_monthly_inventory (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    inv_month     TEXT NOT NULL,
+    site_code     TEXT DEFAULT 'BK10',
+    wh_code       TEXT DEFAULT '',
+    item_code     TEXT NOT NULL,
+    inv_status    TEXT DEFAULT 'GOOD',
+    oh_qty        NUMERIC DEFAULT 0,
+    oh_price      NUMERIC DEFAULT 0,
+    oh_amnt       NUMERIC DEFAULT 0,
+    synced_at     TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+  try { await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_inv2_monthly_inv ON inv2_monthly_inventory(inv_month, site_code, wh_code, item_code, inv_status)"); } catch(_){}
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_inv2_minv_month ON inv2_monthly_inventory(inv_month)");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_inv2_minv_item ON inv2_monthly_inventory(item_code)");
+
   // 서버 재시작 시 stale running 작업 자동 해제 (sync_log 와 동일 패턴)
   try {
     const cleared = await db.prepare("UPDATE inv2_sync_jobs SET status='failed', error_msg='서버 재시작 감지 — 자동 해제', finished_at=datetime('now','localtime') WHERE status='running' OR status='queued'").run();
@@ -4030,6 +4047,7 @@ const ALL_PAGES = [
   { id: 'shipment-status', name: '출고현황', group: '재고' },
   { id: 'sales-status', name: '판매현황', group: '판매' },
   { id: 'inventory2', name: '재고현황2', group: '재고' },
+  { id: 'stock-ledger', name: '재고수불부', group: '재고' },
   // 생산
   { id: 'production-req', name: '생산요청', group: '생산' },
   { id: 'production-stock', name: '생산재고', group: '생산' },
@@ -4098,23 +4116,23 @@ const ALL_PAGES = [
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
 const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
-  purchase: ['dashboard', 'inventory', 'inventory2', 'warehouse', 'shipments', 'shipment-status', 'inventory-ledger', 'auto-order', 'create-po', 'po-list', 'os-register',
+  purchase: ['dashboard', 'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'shipment-status', 'inventory-ledger', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-status', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'work-order', 'lot-tracking',
     'approval', 'sales-order', 'budget', 'notification', 'safety-stock', 'cycle-count', 'mfg-cost', 'procurement', 'vendor-performance'],
-  production: ['dashboard', 'inventory', 'inventory2', 'warehouse', 'shipments', 'inventory-ledger', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking',
+  production: ['dashboard', 'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'inventory-ledger', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking',
     'process-routing', 'equipment', 'mfg-cost', 'safety-stock', 'work-order'],
-  logistics: ['dashboard', 'inventory', 'inventory2', 'warehouse', 'shipments', 'shipment-status', 'inventory-ledger', 'receipts', 'delivery-schedule', 'shipping', 'lot-tracking',
+  logistics: ['dashboard', 'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'shipment-status', 'inventory-ledger', 'receipts', 'delivery-schedule', 'shipping', 'lot-tracking',
     'safety-stock', 'cycle-count', 'barcode', 'tasks', 'notes', 'board', 'notification', 'customer-orders'],
   sales_team: ['dashboard', 'sales', 'sales-status', 'sales-barun', 'sales-dd', 'sales-gift', 'sales-order', 'customer-orders', 'shipping',
-    'inventory', 'inventory2', 'warehouse', 'shipments', 'shipment-status', 'ar-ap', 'invoices', 'tasks', 'notes', 'board', 'notification', 'exec-dashboard', 'analytics', 'report'],
+    'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'shipment-status', 'ar-ap', 'invoices', 'tasks', 'notes', 'board', 'notification', 'exec-dashboard', 'analytics', 'report'],
   accounting: ['dashboard', 'invoices', 'mat-purchase', 'cost-mgmt', 'closing', 'chart-of-accounts', 'journal', 'general-ledger',
     'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'budget', 'mfg-cost', 'vat-report', 'journal-auto',
     'sales', 'sales-status', 'sales-barun', 'sales-dd', 'sales-gift', 'tasks', 'notes', 'board', 'notification', 'approval', 'exec-dashboard'],
-  packaging: ['dashboard', 'inventory', 'inventory2', 'warehouse', 'shipments', 'production-req', 'production-stock', 'work-order', 'bom',
+  packaging: ['dashboard', 'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'production-req', 'production-stock', 'work-order', 'bom',
     'post-process', 'lot-tracking', 'receipts', 'tasks', 'notes', 'board', 'notification'],
-  viewer: ['dashboard', 'inventory', 'inventory2', 'warehouse', 'shipments', 'shipment-status', 'po-list', 'notes', 'sales', 'sales-status', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
+  viewer: ['dashboard', 'inventory', 'inventory2', 'stock-ledger', 'warehouse', 'shipments', 'shipment-status', 'po-list', 'notes', 'sales', 'sales-status', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
 };
 
@@ -4616,6 +4634,62 @@ async function _inv2RunInventorySnapshot(jobId) {
     await db.prepare("UPDATE inv2_sync_jobs SET finished_at=datetime('now','localtime') WHERE job_id=?").run(jobId);
   }
 }
+// XERP mminvMonth → inv2_monthly_inventory 적재 (월별 재고 — 재고수불부의 시작/종료 재고)
+// rangeStart/rangeEnd: YYYYMM (예: 202412 ~ 202603) — 시작재고로 직전월(2024-12)도 함께 적재 권장
+async function _inv2RunMonthlyInventoryBackfill(jobId, ymStart, ymEnd) {
+  try {
+    await _inv2UpdateJob(jobId, { status:'running', current_step:'XERP 연결 확인' });
+    await db.prepare("UPDATE inv2_sync_jobs SET started_at=datetime('now','localtime') WHERE job_id=? AND (started_at IS NULL OR started_at='')").run(jobId);
+    if (!await ensureXerpPool()) throw new Error('XERP 풀 연결 불가');
+    // 월 리스트 생성
+    const sy = parseInt(ymStart.slice(0,4),10), sm = parseInt(ymStart.slice(4,6),10);
+    const ey = parseInt(ymEnd.slice(0,4),10), em = parseInt(ymEnd.slice(4,6),10);
+    const ymList = [];
+    for (let y = sy, m = sm;;) {
+      ymList.push(String(y) + String(m).padStart(2,'0'));
+      if (y === ey && m === em) break;
+      m++; if (m > 12) { m = 1; y++; }
+      if (y > ey + 5) break; // safety
+    }
+    let inserted = 0;
+    for (let i = 0; i < ymList.length; i++) {
+      const ym = ymList[i];
+      await _inv2UpdateJob(jobId, { current_step: `[월별재고] ${ym} 조회 중...`, progress_pct: Math.floor(i / ymList.length * 100) });
+      const r = await xerpPool.request()
+        .input('ym', sql.NChar(12), ym)
+        .query(`SELECT RTRIM(WhCode) AS wh, RTRIM(ItemCode) AS code, RTRIM(InvStatus) AS st,
+                       OhQty AS qty, OhPrice AS price, OhAmnt AS amnt
+                FROM mminvMonth WITH (NOLOCK)
+                WHERE SiteCode = '${XERP_SITE_CODE}' AND InvMonth = @ym`);
+      const rows = r.recordset || [];
+      // 같은 월 기존 행 삭제 (재실행 시 중복 방지) — 백필 정책
+      await db.prepare("DELETE FROM inv2_monthly_inventory WHERE inv_month=? AND site_code=?").run(ym, XERP_SITE_CODE);
+      const insStmt = db.prepare(`INSERT INTO inv2_monthly_inventory
+        (inv_month, site_code, wh_code, item_code, inv_status, oh_qty, oh_price, oh_amnt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`);
+      const tx = db.transaction(async () => {
+        for (const row of rows) {
+          await insStmt.run(
+            ym, XERP_SITE_CODE, (row.wh||'').trim(),
+            (row.code||'').trim(), (row.st||'').trim() || 'GOOD',
+            Number(row.qty||0), Number(row.price||0), Number(row.amnt||0)
+          );
+        }
+      });
+      await tx();
+      inserted += rows.length;
+      await _inv2UpdateJob(jobId, { rows_inserted: inserted, current_step: `[월별재고] ${ym} 완료 (+${rows.length}행, 누적 ${inserted})` });
+    }
+    await _inv2UpdateJob(jobId, { status:'completed', progress_pct: 100, current_step:`완료 (${ymList.length}개월, 총 ${inserted}행)` });
+    await db.prepare("UPDATE inv2_sync_jobs SET finished_at=datetime('now','localtime') WHERE job_id=?").run(jobId);
+    console.log(`[inv2 job ${jobId}] monthly_inventory backfill done (+${inserted})`);
+  } catch (e) {
+    console.error(`[inv2 job ${jobId}] monthly_inventory backfill failed:`, e.message);
+    await _inv2UpdateJob(jobId, { status:'failed', error_msg: e.message });
+    await db.prepare("UPDATE inv2_sync_jobs SET finished_at=datetime('now','localtime') WHERE job_id=?").run(jobId);
+  }
+}
+
 async function _inv2EnqueueJob(jobType, tableName, rangeStart, rangeEnd, triggeredBy) {
   // 같은 (job_type, table_name) 이 running/queued 면 거부
   const existing = await db.prepare("SELECT job_id FROM inv2_sync_jobs WHERE table_name=? AND status IN ('running','queued') ORDER BY job_id DESC LIMIT 1").get(tableName);
@@ -4627,6 +4701,7 @@ async function _inv2EnqueueJob(jobType, tableName, rangeStart, rangeEnd, trigger
     if (tableName === 'inout') _inv2RunInoutBackfill(jobId, rangeStart, rangeEnd);
     else if (tableName === 'sales') _inv2RunSalesBackfill(jobId, rangeStart, rangeEnd);
     else if (tableName === 'inventory') _inv2RunInventorySnapshot(jobId);
+    else if (tableName === 'monthly_inventory') _inv2RunMonthlyInventoryBackfill(jobId, rangeStart, rangeEnd);
   });
   return { job_id: jobId };
 }
@@ -17784,6 +17859,259 @@ async function handleRequest(req, res) {
   //  - POST /api/inv2/adjust     : 수동 +/- 조정 (admin)
   //  - POST /api/po/:id/receive2 : 발주 입고처리 → 재고2 증가
   // ════════════════════════════════════════════════════════════════════
+
+  // POST /api/inv2/monthly-inventory/backfill — 월별 재고(mminvMonth) 백필
+  // body: { ym_from: '202412', ym_to: '202603' } — 시작재고 산출용으로 직전월(예: 202412) 함께 적재 권장
+  if (pathname === '/api/inv2/monthly-inventory/backfill' && method === 'POST') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded || decoded.role !== 'admin') { fail(res, 403, '관리자 권한이 필요합니다'); return; }
+    const body = await readJSON(req).catch(() => ({}));
+    const ymFrom = (body.ym_from && /^\d{6}$/.test(body.ym_from)) ? body.ym_from : '202412';
+    const ymTo = (body.ym_to && /^\d{6}$/.test(body.ym_to)) ? body.ym_to : '202603';
+    const triggeredBy = (decoded.username || decoded.userId || 'admin') + '';
+    const r = await _inv2EnqueueJob('backfill', 'monthly_inventory', ymFrom, ymTo, triggeredBy);
+    ok(res, { message: '월별재고 백필 작업 등록됨 (백그라운드 실행)', range: { ym_from: ymFrom, ym_to: ymTo }, ...r });
+    return;
+  }
+
+  // GET /api/inv2/stock-ledger — 재고수불부 조회 (시작/입고/출고/종료)
+  // 쿼리: ym_from=202501 & ym_to=202603 & item_code= (선택) & wh_code= (선택)
+  // 산출: 각 (월, 품목) 행
+  //   시작재고 = inv2_monthly_inventory[ym-1].oh_qty 합산
+  //   입고합계 = inv2_inout WHERE inout_gubun IN ('SI','MI') AND inout_date IN(ym)
+  //   출고합계 = inv2_inout WHERE inout_gubun IN ('SO','MO') AND inout_date IN(ym)
+  //   종료재고 = inv2_monthly_inventory[ym].oh_qty 합산
+  //   계산종료 = 시작 + 입고 - 출고
+  //   차이    = 종료 - 계산종료 (0 이면 정합)
+  if (pathname === '/api/inv2/stock-ledger' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const ymFrom = (parsed.searchParams.get('ym_from') || '').trim();
+    const ymTo = (parsed.searchParams.get('ym_to') || '').trim();
+    if (!/^\d{6}$/.test(ymFrom) || !/^\d{6}$/.test(ymTo)) { fail(res, 400, 'ym_from/ym_to 는 YYYYMM 형식'); return; }
+    const itemCode = (parsed.searchParams.get('item_code') || '').trim();
+    const whCode = (parsed.searchParams.get('wh_code') || '').trim();
+    const limit = Math.min(parseInt(parsed.searchParams.get('limit') || '500', 10) || 500, 2000);
+
+    try {
+      // 월 리스트 (ymFrom-1 부터 시작 — 시작재고를 위해 직전월 필요)
+      function prevYM(ym) {
+        let y = parseInt(ym.slice(0,4),10), m = parseInt(ym.slice(4,6),10) - 1;
+        if (m < 1) { m = 12; y--; }
+        return String(y) + String(m).padStart(2,'0');
+      }
+      const ymPrev = prevYM(ymFrom);
+      const monthList = [];
+      {
+        let y = parseInt(ymFrom.slice(0,4),10), m = parseInt(ymFrom.slice(4,6),10);
+        const ey = parseInt(ymTo.slice(0,4),10), em = parseInt(ymTo.slice(4,6),10);
+        for (;;) {
+          monthList.push(String(y) + String(m).padStart(2,'0'));
+          if (y === ey && m === em) break;
+          m++; if (m > 12) { m = 1; y++; }
+          if (monthList.length > 60) break;
+        }
+      }
+
+      const itemFilter = itemCode ? ' AND item_code = ?' : '';
+      const whFilter = whCode ? ' AND wh_code = ?' : '';
+      const params = [];
+      if (itemCode) params.push(itemCode);
+      if (whCode) params.push(whCode);
+
+      // 1) 월별재고 (시작용 ymPrev 부터 ymTo 까지)
+      const invRows = await db.prepare(`
+        SELECT inv_month, item_code, SUM(oh_qty) AS qty, SUM(oh_amnt) AS amnt
+        FROM inv2_monthly_inventory
+        WHERE site_code = ? AND inv_month >= ? AND inv_month <= ?
+          ${itemFilter} ${whFilter}
+        GROUP BY inv_month, item_code
+      `).all(XERP_SITE_CODE, ymPrev, ymTo, ...params);
+      // map: ym -> { code -> {qty, amnt} }
+      const invMap = {};
+      invRows.forEach(r => {
+        if (!invMap[r.inv_month]) invMap[r.inv_month] = {};
+        invMap[r.inv_month][(r.item_code||'').trim()] = { qty: Number(r.qty||0), amnt: Number(r.amnt||0) };
+      });
+
+      // 2) 입출고 (월별 × 품목별 × 구분별 합계)
+      const ymRangeStart = ymFrom + '01';
+      const ymRangeEnd = ymTo + '32'; // YYYYMMDD 비교, 32 는 월말 포함 보장
+      const ioParams = [ymRangeStart, ymRangeEnd];
+      if (itemCode) ioParams.push(itemCode);
+      if (whCode) ioParams.push(whCode);
+      const ioRows = await db.prepare(`
+        SELECT SUBSTR(inout_date, 1, 6) AS ym, item_code, inout_gubun,
+               SUM(inout_qty) AS qty, SUM(inout_amnt) AS amnt
+        FROM inv2_inout
+        WHERE inout_date >= ? AND inout_date <= ?
+          ${itemFilter} ${whFilter}
+        GROUP BY SUBSTR(inout_date, 1, 6), item_code, inout_gubun
+      `).all(...ioParams);
+      // map: ym -> { code -> { in_qty, in_amnt, out_qty, out_amnt } }
+      const ioMap = {};
+      ioRows.forEach(r => {
+        const ym = r.ym, code = (r.item_code||'').trim();
+        if (!ioMap[ym]) ioMap[ym] = {};
+        if (!ioMap[ym][code]) ioMap[ym][code] = { in_qty: 0, in_amnt: 0, out_qty: 0, out_amnt: 0, by_gubun: {SO:0,MO:0,SI:0,MI:0} };
+        const cell = ioMap[ym][code];
+        const g = (r.inout_gubun || '').trim();
+        cell.by_gubun[g] = (cell.by_gubun[g] || 0) + Number(r.qty || 0);
+        if (g === 'SI' || g === 'MI') { cell.in_qty += Number(r.qty||0); cell.in_amnt += Number(r.amnt||0); }
+        else if (g === 'SO' || g === 'MO') { cell.out_qty += Number(r.qty||0); cell.out_amnt += Number(r.amnt||0); }
+      });
+
+      // 3) 결과 행 빌드 — 모든 (ym, code) 조합
+      const codeSet = new Set();
+      Object.values(invMap).forEach(m => Object.keys(m).forEach(c => codeSet.add(c)));
+      Object.values(ioMap).forEach(m => Object.keys(m).forEach(c => codeSet.add(c)));
+      const allCodes = [...codeSet];
+
+      // 품목명 매핑
+      let nameMap = {};
+      if (allCodes.length > 0) {
+        try {
+          await withBarShop1Pool(async (bar1) => {
+            for (let i = 0; i < allCodes.length; i += 500) {
+              const batch = allCodes.slice(i, i + 500).filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
+              if (!batch.length) continue;
+              const safe = batch.map(c => "'" + c + "'").join(',');
+              const nr = await bar1.request().query(
+                `SELECT RTRIM(Card_Code) AS Card_Code, Card_Name FROM S2_Card WHERE RTRIM(Card_Code) IN (${safe})`);
+              nr.recordset.forEach(n => { nameMap[(n.Card_Code||'').trim()] = (n.Card_Name||'').trim(); });
+            }
+          });
+        } catch(_) {}
+      }
+
+      const rows = [];
+      for (const code of allCodes) {
+        for (const ym of monthList) {
+          const ymP = prevYM(ym);
+          const start = ((invMap[ymP]||{})[code] || {}).qty || 0;
+          const end = ((invMap[ym]||{})[code] || {}).qty || 0;
+          const io = (ioMap[ym]||{})[code] || { in_qty:0, in_amnt:0, out_qty:0, out_amnt:0, by_gubun:{SO:0,MO:0,SI:0,MI:0} };
+          const calcEnd = start + io.in_qty - io.out_qty;
+          const diff = end - calcEnd;
+          // 0 인 행은 스킵 (start/in/out/end 모두 0)
+          if (start === 0 && end === 0 && io.in_qty === 0 && io.out_qty === 0) continue;
+          rows.push({
+            ym, item_code: code, item_name: nameMap[code] || code,
+            start_qty: start, in_qty: io.in_qty, out_qty: io.out_qty, end_qty: end,
+            calc_end_qty: calcEnd, diff_qty: diff,
+            in_amnt: io.in_amnt, out_amnt: io.out_amnt,
+            by_gubun: io.by_gubun
+          });
+        }
+      }
+      // 정렬: 차이 큰 것 우선, 그 다음 종료재고
+      rows.sort((a, b) => Math.abs(b.diff_qty) - Math.abs(a.diff_qty) || (b.end_qty - a.end_qty));
+      const truncated = rows.length > limit;
+      const trimmed = rows.slice(0, limit);
+
+      // 월별 합계
+      const monthlyTotals = {};
+      monthList.forEach(ym => { monthlyTotals[ym] = { start_qty: 0, in_qty: 0, out_qty: 0, end_qty: 0, calc_end_qty: 0, diff_qty: 0, item_count: 0 }; });
+      rows.forEach(r => {
+        const t = monthlyTotals[r.ym]; if (!t) return;
+        t.start_qty += r.start_qty; t.in_qty += r.in_qty; t.out_qty += r.out_qty;
+        t.end_qty += r.end_qty; t.calc_end_qty += r.calc_end_qty; t.diff_qty += r.diff_qty;
+        t.item_count++;
+      });
+
+      ok(res, {
+        period: { ym_from: ymFrom, ym_to: ymTo, ym_prev: ymPrev },
+        months: monthList,
+        rows: trimmed, truncated, total_rows: rows.length,
+        monthly_totals: monthlyTotals,
+        filters: { item_code: itemCode, wh_code: whCode }
+      });
+    } catch (e) {
+      console.error('stock-ledger 조회 오류:', e.message);
+      fail(res, 500, '재고수불부 조회 오류: ' + e.message);
+    }
+    return;
+  }
+
+  // GET /api/inv2/stock-ledger/verify — 우리DB 합계 vs XERP 직접쿼리 합계 검증
+  // 쿼리: ym=202506 (단일 월)
+  if (pathname === '/api/inv2/stock-ledger/verify' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const ym = (parsed.searchParams.get('ym') || '').trim();
+    if (!/^\d{6}$/.test(ym)) { fail(res, 400, 'ym 은 YYYYMM 형식'); return; }
+    if (!await ensureXerpPool()) { fail(res, 503, 'XERP 데이터베이스 미연결'); return; }
+    const ymStart = ym + '01';
+    // YYYYMMDD: 다음달 1일 < 비교
+    const yyyy = parseInt(ym.slice(0,4),10), mm = parseInt(ym.slice(4,6),10);
+    const next = new Date(yyyy, mm, 1);
+    const ymExclusive = next.getFullYear() + String(next.getMonth()+1).padStart(2,'0') + '01';
+
+    const result = { ym, sources: {} };
+
+    // 1) 우리 DB
+    try {
+      const localInv = await db.prepare("SELECT SUM(oh_qty) AS qty, SUM(oh_amnt) AS amnt, COUNT(*) AS rows FROM inv2_monthly_inventory WHERE inv_month=? AND site_code=?").get(ym, XERP_SITE_CODE);
+      const localIo = await db.prepare(`
+        SELECT inout_gubun, SUM(inout_qty) AS qty, SUM(inout_amnt) AS amnt, COUNT(*) AS rows
+        FROM inv2_inout WHERE inout_date >= ? AND inout_date < ? AND site_code = ?
+        GROUP BY inout_gubun`).all(ymStart, ymExclusive, XERP_SITE_CODE);
+      const ioByG = { SO:{qty:0,amnt:0,rows:0}, MO:{qty:0,amnt:0,rows:0}, SI:{qty:0,amnt:0,rows:0}, MI:{qty:0,amnt:0,rows:0} };
+      localIo.forEach(r => { const g = (r.inout_gubun||'').trim(); if (ioByG[g]) ioByG[g] = { qty: Number(r.qty||0), amnt: Number(r.amnt||0), rows: Number(r.rows||0) }; });
+      result.sources.local_db = {
+        monthly_inventory: { qty: Number((localInv||{}).qty || 0), amnt: Number((localInv||{}).amnt || 0), rows: Number((localInv||{}).rows || 0) },
+        inout_by_gubun: ioByG
+      };
+    } catch (e) {
+      result.sources.local_db = { error: e.message };
+    }
+
+    // 2) XERP 실시간
+    try {
+      const invR = await xerpPool.request()
+        .input('ym', sql.NChar(12), ym)
+        .query(`SELECT ISNULL(SUM(OhQty),0) AS qty, ISNULL(SUM(OhAmnt),0) AS amnt, COUNT(*) AS rows
+                FROM mminvMonth WITH (NOLOCK) WHERE SiteCode = '${XERP_SITE_CODE}' AND InvMonth = @ym`);
+      const ioR = await xerpPool.request()
+        .input('s', sql.NChar(16), ymStart)
+        .input('e', sql.NChar(16), ymExclusive)
+        .query(`SELECT RTRIM(InoutGubun) AS gb, ISNULL(SUM(InoutQty),0) AS qty, ISNULL(SUM(InoutAmnt),0) AS amnt, COUNT(*) AS rows
+                FROM mmInoutItem WITH (NOLOCK)
+                WHERE SiteCode = '${XERP_SITE_CODE}' AND InoutDate >= @s AND InoutDate < @e
+                GROUP BY RTRIM(InoutGubun)`);
+      const xByG = { SO:{qty:0,amnt:0,rows:0}, MO:{qty:0,amnt:0,rows:0}, SI:{qty:0,amnt:0,rows:0}, MI:{qty:0,amnt:0,rows:0} };
+      ioR.recordset.forEach(r => { const g = (r.gb||'').trim(); if (xByG[g]) xByG[g] = { qty: Number(r.qty||0), amnt: Number(r.amnt||0), rows: Number(r.rows||0) }; });
+      const xinv = invR.recordset[0] || {};
+      result.sources.xerp_live = {
+        monthly_inventory: { qty: Number(xinv.qty||0), amnt: Number(xinv.amnt||0), rows: Number(xinv.rows||0) },
+        inout_by_gubun: xByG
+      };
+    } catch (e) {
+      result.sources.xerp_live = { error: e.message };
+    }
+
+    // 3) 비교
+    const local = result.sources.local_db || {}, live = result.sources.xerp_live || {};
+    const lInv = (local.monthly_inventory||{}), xInv = (live.monthly_inventory||{});
+    const lIo = local.inout_by_gubun || {}, xIo = live.inout_by_gubun || {};
+    const checks = [];
+    function chk(name, l, x) {
+      const diff = Number(l||0) - Number(x||0);
+      checks.push({ name, local: Number(l||0), xerp: Number(x||0), diff, ok: Math.abs(diff) < 0.001 });
+    }
+    chk('월별재고 수량합계 (mminvMonth)', lInv.qty, xInv.qty);
+    chk('월별재고 금액합계 (mminvMonth)', lInv.amnt, xInv.amnt);
+    chk('월별재고 행수 (mminvMonth)', lInv.rows, xInv.rows);
+    ['SO','MO','SI','MI'].forEach(g => {
+      chk('입출고 ' + g + ' 수량', (lIo[g]||{}).qty, (xIo[g]||{}).qty);
+      chk('입출고 ' + g + ' 행수', (lIo[g]||{}).rows, (xIo[g]||{}).rows);
+    });
+    result.checks = checks;
+    result.all_ok = checks.every(c => c.ok);
+
+    ok(res, result);
+    return;
+  }
 
   // POST /api/inv2/backfill — 2022-01-01 부터 어제까지 전체 백필
   if (pathname === '/api/inv2/backfill' && method === 'POST') {
