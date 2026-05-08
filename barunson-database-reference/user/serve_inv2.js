@@ -22106,6 +22106,95 @@ async function handleRequest(req, res) {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  //  Swagger UI (API 문서)
+  //  - GET /api/docs              : Swagger UI HTML (CDN)
+  //  - GET /api/docs/openapi.yaml : OpenAPI 명세 (test/api.yaml 파일)
+  // ════════════════════════════════════════════════════════════════════
+  if (pathname === '/api/docs' || pathname === '/api/docs/' || pathname === '/swagger' || pathname === '/swagger/') {
+    const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>바른컴퍼니 ERP API 문서</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; }
+    .topbar { display:flex;align-items:center;gap:14px;padding:10px 18px;background:#0f172a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif }
+    .topbar a { color:#93c5fd;text-decoration:none;font-size:13px }
+    .topbar a:hover { color:#fff }
+    .topbar h1 { margin:0;font-size:15px;font-weight:600 }
+    .topbar .badge { background:#1d4ed8;padding:2px 8px;border-radius:10px;font-size:11px }
+    .topbar .right { margin-left:auto;font-size:11px;color:#94a3b8 }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📘 바른컴퍼니 ERP API 문서</h1>
+    <span class="badge">OpenAPI 3.0.3</span>
+    <a href="/api/docs/openapi.yaml" target="_blank">YAML 다운로드</a>
+    <a href="/">← 메인으로</a>
+    <span class="right">로그인 후 우측상단 [Authorize] 버튼에 Bearer 토큰 입력</span>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: '/api/docs/openapi.yaml',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+        layout: 'StandaloneLayout',
+        persistAuthorization: true,
+        tryItOutEnabled: true,
+        requestInterceptor: function(req) {
+          // 같은 origin 으로 요청 → 서버 자체 host 사용
+          try {
+            var u = new URL(req.url);
+            if (u.origin !== window.location.origin) {
+              req.url = window.location.origin + u.pathname + u.search;
+            }
+          } catch (_) {}
+          return req;
+        }
+      });
+    };
+  </script>
+</body>
+</html>`;
+    res.writeHead(200, Object.assign({}, CORS, { 'Content-Type': 'text/html; charset=utf-8' }));
+    res.end(html);
+    return;
+  }
+  if (pathname === '/api/docs/openapi.yaml' || pathname === '/api/docs/openapi.yml') {
+    // 후보 경로 — 컨테이너 빌드/배포 환경에 따라 다름
+    const candidates = [
+      path.join(__dir, '..', '..', 'test', 'api.yaml'),
+      path.join(__dir, 'openapi.yaml'),
+      path.join(__dir, 'api.yaml'),
+      path.join(process.cwd(), 'test', 'api.yaml'),
+    ];
+    let found = null;
+    for (const p of candidates) { try { if (fs.existsSync(p)) { found = p; break; } } catch(_){} }
+    if (!found) {
+      res.writeHead(404, Object.assign({}, CORS, { 'Content-Type': 'text/plain; charset=utf-8' }));
+      res.end('OpenAPI YAML 파일을 찾을 수 없습니다 (test/api.yaml).\n검색한 경로:\n' + candidates.join('\n'));
+      return;
+    }
+    try {
+      const yaml = fs.readFileSync(found, 'utf8');
+      res.writeHead(200, Object.assign({}, CORS, { 'Content-Type': 'application/x-yaml; charset=utf-8' }));
+      res.end(yaml);
+    } catch (e) {
+      res.writeHead(500, Object.assign({}, CORS, { 'Content-Type': 'text/plain; charset=utf-8' }));
+      res.end('YAML 읽기 실패: ' + e.message);
+    }
+    return;
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   //  STATIC FILE ROUTES (existing, preserved)
   // ════════════════════════════════════════════════════════════════════
 
