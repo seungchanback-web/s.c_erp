@@ -6497,6 +6497,92 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── XERP 재고 raw 덤프 + products 매칭 진단 ──
+  // 가용재고 0 / 창고 드롭다운 비어있을 때 원인 진단용:
+  //   (a) mmInventory 자체가 비었는지 (XERP 쪽 문제)
+  //   (b) 데이터는 있는데 우리 products.product_code 와 매칭이 안 되는지 (정규화/대소문자/패딩)
+  // 응답: total_rows, site_dist, sample(상위 100), match_stats(matched/unmatched + 샘플)
+  if (pathname === '/api/debug/xerp-inventory-raw' && method === 'GET') {
+    try {
+      await ensureXerpPool();
+      if (!xerpPool) { fail(res, 503, 'XERP 풀 미연결'); return; }
+      const limit = Math.min(parseInt(parsed.searchParams.get('limit')) || 100, 1000);
+
+      // 1) raw 덤프 (상위 N건, OhQty 내림차순)
+      const rawR = await xerpPool.request().query(`
+        SELECT TOP ${limit}
+               RTRIM(ItemCode) AS item_code,
+               RTRIM(WhCode)   AS wh_code,
+               RTRIM(SiteCode) AS site_code,
+               OhQty           AS oh_qty
+        FROM mmInventory WITH (NOLOCK)
+        WHERE SiteCode = '${XERP_SITE_CODE}'
+        ORDER BY OhQty DESC
+      `);
+
+      // 2) 전체 통계 (SiteCode 분포 + 양수/0/음수 카운트)
+      const statR = await xerpPool.request().query(`
+        SELECT RTRIM(SiteCode) AS site_code,
+               COUNT(*)        AS row_count,
+               SUM(CASE WHEN OhQty > 0 THEN 1 ELSE 0 END) AS pos_count,
+               SUM(CASE WHEN OhQty = 0 THEN 1 ELSE 0 END) AS zero_count,
+               SUM(CASE WHEN OhQty < 0 THEN 1 ELSE 0 END) AS neg_count,
+               SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END) AS total_oh_qty
+        FROM mmInventory WITH (NOLOCK)
+        GROUP BY RTRIM(SiteCode)
+        ORDER BY row_count DESC
+      `);
+
+      // 3) 우리 products.product_code 와 매칭 시도
+      const localProducts = await db.prepare(
+        "SELECT product_code FROM products WHERE status='active' AND (product_code NOT LIKE 'DD%' AND origin != 'DD')"
+      ).all();
+      const localSet = new Set(localProducts.map(p => (p.product_code || '').replace(/[\s\u00A0\u200B\u200C\u200D\uFEFF]/g, '').trim().toUpperCase()));
+
+      const allInvR = await xerpPool.request().query(`
+        SELECT DISTINCT RTRIM(ItemCode) AS item_code
+        FROM mmInventory WITH (NOLOCK)
+        WHERE SiteCode = '${XERP_SITE_CODE}' AND OhQty > 0
+      `);
+      const xerpCodes = allInvR.recordset.map(r => (r.item_code || '').trim().toUpperCase());
+      const matched = [];
+      const unmatched = [];
+      for (const c of xerpCodes) {
+        if (localSet.has(c)) matched.push(c); else unmatched.push(c);
+      }
+      const localOnly = [];
+      for (const c of localSet) {
+        if (!xerpCodes.includes(c)) localOnly.push(c);
+      }
+
+      ok(res, {
+        site_code_filter: XERP_SITE_CODE,
+        warehouse_filter_active: XERP_INV_WH_LIST.length > 0,
+        warehouse_filter: XERP_INV_WH_LIST,
+        site_distribution: statR.recordset,
+        sample_top_n: rawR.recordset,
+        match_stats: {
+          local_active_count: localSet.size,
+          xerp_pos_qty_codes: xerpCodes.length,
+          matched_count: matched.length,
+          xerp_only_count: unmatched.length,
+          local_only_count: localOnly.length,
+          xerp_only_sample: unmatched.slice(0, 20),
+          local_only_sample: localOnly.slice(0, 20)
+        },
+        diagnosis_hint: (() => {
+          if (rawR.recordset.length === 0) return 'mmInventory 자체가 비어있음 (XERP 쪽 문제 — 백업/마이그레이션 진행 중일 가능성)';
+          if (matched.length === 0 && xerpCodes.length > 0) return '데이터는 있으나 매칭 0건 — ItemCode/product_code 형식 불일치 (대소문자, 공백, 패딩 의심)';
+          if (matched.length < xerpCodes.length * 0.5) return '매칭률 50% 미만 — 정규화 규칙 점검 필요';
+          return '매칭은 정상 — 다른 코드 경로 점검 필요';
+        })()
+      });
+    } catch (e) {
+      fail(res, 500, 'mmInventory raw 조회 실패: ' + e.message);
+    }
+    return;
+  }
+
   // ── BHC (디얼디어) DB 재고 진단 ──
   // 현재 DD sync 는 database='BHC' + SiteCode='BHC2' 로 쿼리함. DD 품목이 가용재고 0 으로
   // 찍히는 문제가 있어서 BHC 쪽에 실제 어떤 SiteCode 들이 있고 품목코드가 어떻게 저장돼
