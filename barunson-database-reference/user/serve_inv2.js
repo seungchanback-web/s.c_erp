@@ -6073,6 +6073,21 @@ async function handleRequest(req, res) {
             if (sc) invSiteDist[sc] = (invSiteDist[sc] || 0) + 1;
           }
           console.log(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 성공: ${Object.keys(invMap).length}개 품목 매칭 (정규화 보정 ${_normMatched}건), 창고-품목 조합 ${r.recordset.length}건, SiteCode 분포: ${JSON.stringify(invSiteDist)}`);
+
+          // ★ 매칭 0건 가드: 쿼리는 성공했지만 invMap 이 비어있거나(=mmInventory 0행 또는 SiteCode 불일치)
+          //   매칭률이 비정상적으로 낮을 때(<5%) 의도적으로 throw → 상위 catch 가 fallback:products 로 처리 →
+          //   /api/sync/xerp-inventory 의 allFallback 가드(line ~7148) 가 발동해 snapshot 0 덮어쓰기 방지.
+          //   이전 버그: 정상 쿼리인데 매칭 0건이면 invMap 빈 채로 진행 → 모든 품목 ohQty=0 으로 snapshot 저장 →
+          //   사용자 화면에서 가용재고/창고 영구 0.
+          const matchedCount = Object.keys(invMap).length;
+          const localActiveCount = registeredProducts.length;
+          const matchRate = localActiveCount > 0 ? (matchedCount / localActiveCount) : 0;
+          if (matchedCount === 0) {
+            throw new Error(`mmInventory 매칭 0건 (recordset=${r.recordset.length}, SiteCode 분포=${JSON.stringify(invSiteDist)}) — XERP 비어있거나 SiteCode/ItemCode 형식 변경 의심`);
+          }
+          if (matchRate < 0.05) {
+            throw new Error(`mmInventory 매칭률 ${(matchRate*100).toFixed(1)}% (matched=${matchedCount}/${localActiveCount}) — 비정상적으로 낮아 sync 중단, 기존 snapshot 보존`);
+          }
         } catch (invErr) {
           console.error(`[xerp-inv ${legalEntity}] 현재고 단일쿼리 실패 — 전체 sync 중단:`, invErr.message);
           throw invErr; // 전체 sync 실패 처리 (기존 snapshot 유지)
