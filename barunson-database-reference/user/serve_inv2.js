@@ -21164,21 +21164,20 @@ async function runDailyPOSummary() {
   console.log('[일일 발주 요약] Slack 전송 완료');
 }
 
-// XERP 데이터 자동 동기화: 매일 9:30 실행
+// XERP 데이터 자동 동기화: 매 시 정각마다 실행
 function scheduleXerpSync() {
   const now = new Date();
-  const next930 = new Date(now);
-  next930.setHours(9, 30, 0, 0);
-  if (now >= next930) next930.setDate(next930.getDate() + 1);
+  const nextHour = new Date(now);
+  nextHour.setHours(now.getHours() + 1, 0, 0, 0);
 
-  const msUntil = next930 - now;
-  console.log(`[XERP 동기화] 다음 실행: ${next930.toLocaleString('ko-KR')} (${Math.round(msUntil / 60000)}분 후)`);
+  const msUntil = nextHour - now;
+  console.log(`[XERP 동기화] 다음 실행: ${nextHour.toLocaleString('ko-KR')} (${Math.round(msUntil / 60000)}분 후) — 이후 매 시 정각 반복`);
 
   setTimeout(async () => {
     await refreshXerpCache();
     setInterval(async () => {
       await refreshXerpCache();
-    }, 24 * 60 * 60 * 1000);
+    }, 60 * 60 * 1000);
   }, msUntil);
 }
 
