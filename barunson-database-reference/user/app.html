@@ -2013,6 +2013,14 @@ function closeMegaMenu() { /* no-op */ }
         <div class="hm-icon" style="background:#fff7ed;color:#ea580c">🔄</div>
         <div><div class="hm-name">입출고 현황</div><div class="hm-desc">입고/출고 내역 조회</div></div>
       </div>
+      <div class="hm-item" data-page="sales-qty" onclick="showPage('sales-qty')">
+        <div class="hm-icon" style="background:#eff6ff;color:#2563eb">📈</div>
+        <div><div class="hm-name">판매수량</div><div class="hm-desc">제품별 월별 고객주문 수량</div></div>
+      </div>
+      <div class="hm-item" data-page="shipment-qty" onclick="showPage('shipment-qty')">
+        <div class="hm-icon" style="background:#f0fdf4;color:#16a34a">📤</div>
+        <div><div class="hm-name">출고수량</div><div class="hm-desc">제품별 월별 창고 실출고</div></div>
+      </div>
     </div>
 
     <!-- 생산관리 -->
@@ -2469,6 +2477,28 @@ function closeMegaMenu() { /* no-op */ }
         <tbody id="shipTb"></tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PAGE: 판매수량 / 출고수량 (제품별 월별 피봇) -->
+<!-- ============================================================ -->
+<div class="page" id="page-sales-qty">
+  <div style="background:#f8fafc;border:1px solid var(--border-light);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);line-height:1.7">
+    <b>판매수량</b>: 고객 주문 기반 (XERP <code>ERP_SalesData</code>) — 제품별 월별 합산. 월평균은 선택 기간 ÷ 개월수.
+  </div>
+  <div class="qm-toolbar" data-qty-type="sales"></div>
+  <div class="table-container">
+    <div class="table-wrap" id="qmWrap-sales" style="max-height:calc(100vh - 280px)"></div>
+  </div>
+</div>
+<div class="page" id="page-shipment-qty">
+  <div style="background:#f8fafc;border:1px solid var(--border-light);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);line-height:1.7">
+    <b>출고수량</b>: 창고 실출고 기반 (XERP <code>mmInoutItem</code> InoutGubun=SO) — 제품별 월별 합산. 월평균은 선택 기간 ÷ 개월수.
+  </div>
+  <div class="qm-toolbar" data-qty-type="shipment"></div>
+  <div class="table-container">
+    <div class="table-wrap" id="qmWrap-shipment" style="max-height:calc(100vh - 280px)"></div>
   </div>
 </div>
 
@@ -10072,6 +10102,8 @@ function showPage(page, opts){
   if(page==='product-mgmt') loadProductMgmt();
   if(page==='delivery-schedule') loadDeliverySchedule();
   if(page==='shipments') { initShipDates(); loadShipments(); }
+  if(page==='sales-qty')    { _qmRenderToolbar('sales');    if (!_qmState.sales.data)    _qmLoad('sales'); }
+  if(page==='shipment-qty') { _qmRenderToolbar('shipment'); if (!_qmState.shipment.data) _qmLoad('shipment'); }
   if(page==='inventory-ledger') { initInvLedgerDates(); loadInventoryLedger(); }
   if(page==='post-process') loadPostProcess();
   if(page==='defects') loadDefects();
@@ -21009,6 +21041,168 @@ function exportShipmentsExcel() {
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `입출고현황_${fromVal}_${toVal}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+// ===== 판매수량 / 출고수량 (제품별 월별 피봇) =====
+const _qmState = {
+  sales:    { from: null, to: null, search: '', data: null, loading: false },
+  shipment: { from: null, to: null, search: '', data: null, loading: false }
+};
+function _qmDefaultRange() {
+  const today = new Date();
+  const to = today.getFullYear() * 100 + (today.getMonth() + 1);
+  const fromD = new Date(today); fromD.setMonth(fromD.getMonth() - 11);
+  const from = fromD.getFullYear() * 100 + (fromD.getMonth() + 1);
+  return { from: String(from), to: String(to) };
+}
+function _qmFmtMonth(yyyymm) {
+  return yyyymm.slice(0, 4) + '-' + yyyymm.slice(4, 6);
+}
+function _qmRenderToolbar(type) {
+  const tb = document.querySelector(`.qm-toolbar[data-qty-type="${type}"]`);
+  if (!tb) return;
+  const st = _qmState[type];
+  if (!st.from || !st.to) { const d = _qmDefaultRange(); st.from = d.from; st.to = d.to; }
+  tb.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <label style="font-size:12px;font-weight:600">기간</label>
+      <input type="month" class="qm-from" value="${_qmFmtMonth(st.from)}" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px">
+      <span style="font-size:12px">~</span>
+      <input type="month" class="qm-to" value="${_qmFmtMonth(st.to)}" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px">
+      <button class="btn btn-sm" onclick="_qmLoad('${type}')" style="font-size:11px">조회</button>
+      <button class="btn btn-sm" onclick="_qmSetRange('${type}',3)" style="font-size:11px">3개월</button>
+      <button class="btn btn-sm" onclick="_qmSetRange('${type}',6)" style="font-size:11px">6개월</button>
+      <button class="btn btn-sm" onclick="_qmSetRange('${type}',12)" style="font-size:11px">12개월</button>
+      <button class="btn btn-sm" onclick="_qmSetRange('${type}',24)" style="font-size:11px">24개월</button>
+      <div style="flex:1"></div>
+      <input type="text" class="qm-search" placeholder="제품코드/품목명 검색" oninput="_qmOnSearch('${type}',this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;width:200px">
+      <button class="btn btn-sm" onclick="_qmExport('${type}')" style="font-size:11px;background:#27ae60;color:#fff">엑셀 다운로드</button>
+    </div>
+    <div class="qm-info" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
+  `;
+  tb.querySelector('.qm-from').addEventListener('change', e => { st.from = e.target.value.replace('-',''); });
+  tb.querySelector('.qm-to').addEventListener('change', e => { st.to = e.target.value.replace('-',''); });
+}
+function _qmSetRange(type, months) {
+  const today = new Date();
+  const to = today.getFullYear() * 100 + (today.getMonth() + 1);
+  const fromD = new Date(today); fromD.setMonth(fromD.getMonth() - (months - 1));
+  const from = fromD.getFullYear() * 100 + (fromD.getMonth() + 1);
+  _qmState[type].from = String(from);
+  _qmState[type].to = String(to);
+  _qmRenderToolbar(type);
+  _qmLoad(type);
+}
+function _qmOnSearch(type, val) {
+  _qmState[type].search = val.toLowerCase().trim();
+  _qmRenderTable(type);
+}
+async function _qmLoad(type) {
+  const st = _qmState[type];
+  if (st.loading) return;
+  st.loading = true;
+  const wrap = document.getElementById('qmWrap-' + type);
+  if (wrap) wrap.innerHTML = '<div style="padding:30px;text-align:center;color:#888">조회 중...</div>';
+  try {
+    const r = await fetch(`/api/qty/monthly?type=${type}&from=${st.from}&to=${st.to}`, {
+      headers: { 'Authorization': 'Bearer ' + (window._token || localStorage.getItem('token') || '') }
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || '조회 실패');
+    st.data = j.data;
+    _qmRenderTable(type);
+  } catch (e) {
+    if (wrap) wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#ef4444">조회 실패: ${e.message}</div>`;
+  } finally {
+    st.loading = false;
+  }
+}
+function _qmRenderTable(type) {
+  const st = _qmState[type];
+  const wrap = document.getElementById('qmWrap-' + type);
+  if (!wrap || !st.data) return;
+  const data = st.data;
+  const months = data.months || [];
+  let products = data.products || [];
+  if (st.search) {
+    products = products.filter(p =>
+      (p.code || '').toLowerCase().includes(st.search) ||
+      (p.name || '').toLowerCase().includes(st.search) ||
+      (p.brand || '').toLowerCase().includes(st.search)
+    );
+  }
+  const fmtNum = n => (n || 0).toLocaleString();
+  const monthHeaders = months.map(m => `<th style="text-align:right;min-width:80px">${_qmFmtMonth(m)}</th>`).join('');
+  const tbody = products.map((p, i) => {
+    const cells = months.map(m => `<td class="n">${fmtNum(p.byMonth[m] || 0)}</td>`).join('');
+    return `<tr>
+      <td style="text-align:center;color:#999">${i + 1}</td>
+      <td style="font-weight:600">${p.code}</td>
+      <td>${p.name || ''}</td>
+      <td>${p.brand || ''}</td>
+      <td>${p.origin || ''}</td>
+      ${cells}
+      <td class="n" style="font-weight:700;background:#f0fdf4">${fmtNum(p.total)}</td>
+      <td class="n" style="font-weight:700;background:#eff6ff;color:#2563eb">${fmtNum(p.monthlyAvg)}</td>
+    </tr>`;
+  }).join('');
+  // 합계행
+  const totals = months.map(m => `<th class="n" style="background:#f8fafc">${fmtNum(data.total.byMonth[m] || 0)}</th>`).join('');
+  const totalRow = `<tr style="position:sticky;bottom:0;background:#f1f5f9;font-weight:700">
+    <th colspan="5" style="text-align:right;background:#f1f5f9">합계</th>
+    ${totals}
+    <th class="n" style="background:#dcfce7">${fmtNum(data.total.grand)}</th>
+    <th class="n" style="background:#dbeafe;color:#2563eb">${fmtNum(data.total.monthlyAvg)}</th>
+  </tr>`;
+  wrap.innerHTML = `
+    <table>
+      <thead><tr style="position:sticky;top:0;background:#fff;z-index:1">
+        <th style="min-width:40px">#</th>
+        <th style="min-width:100px">제품코드</th>
+        <th style="min-width:160px">품목명</th>
+        <th style="min-width:80px">브랜드</th>
+        <th style="min-width:60px">생산지</th>
+        ${monthHeaders}
+        <th style="text-align:right;min-width:80px;background:#f0fdf4">합계</th>
+        <th style="text-align:right;min-width:80px;background:#eff6ff">월평균</th>
+      </tr></thead>
+      <tbody>${tbody}</tbody>
+      <tfoot>${totalRow}</tfoot>
+    </table>
+  `;
+  const info = document.querySelector(`.qm-toolbar[data-qty-type="${type}"] .qm-info`);
+  if (info) info.textContent = `${products.length}/${(data.products||[]).length}개 제품 · 기간 ${_qmFmtMonth(data.from)} ~ ${_qmFmtMonth(data.to)} (${months.length}개월) · 전체 합계 ${fmtNum(data.total.grand)} · 월평균 ${fmtNum(data.total.monthlyAvg)}`;
+}
+function _qmExport(type) {
+  const st = _qmState[type];
+  if (!st.data) { alert('먼저 조회하세요'); return; }
+  const data = st.data;
+  const months = data.months || [];
+  let products = data.products || [];
+  if (st.search) {
+    products = products.filter(p =>
+      (p.code || '').toLowerCase().includes(st.search) ||
+      (p.name || '').toLowerCase().includes(st.search) ||
+      (p.brand || '').toLowerCase().includes(st.search)
+    );
+  }
+  const headers = ['#','제품코드','품목명','브랜드','생산지', ...months.map(_qmFmtMonth), '합계', '월평균'];
+  const rows = products.map((p,i) => [
+    i + 1, p.code, p.name || '', p.brand || '', p.origin || '',
+    ...months.map(m => p.byMonth[m] || 0),
+    p.total, p.monthlyAvg
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => {
+    const s = String(v == null ? '' : v).replace(/"/g, '""');
+    return /[",\n]/.test(s) ? `"${s}"` : s;
+  }).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  const label = type === 'sales' ? '판매수량' : '출고수량';
+  link.download = `${label}_${st.from}_${st.to}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
 }

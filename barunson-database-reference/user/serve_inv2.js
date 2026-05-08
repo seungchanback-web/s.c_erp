@@ -3911,6 +3911,8 @@ const ALL_PAGES = [
   { id: 'inventory', name: '재고현황', group: '재고' },
   { id: 'warehouse', name: '창고별 재고', group: '재고' },
   { id: 'shipments', name: '입출고 현황', group: '재고' },
+  { id: 'sales-qty', name: '판매수량', group: '재고' },
+  { id: 'shipment-qty', name: '출고수량', group: '재고' },
   // 생산
   { id: 'production-req', name: '생산요청', group: '생산' },
   { id: 'production-stock', name: '생산재고', group: '생산' },
@@ -3979,23 +3981,23 @@ const ALL_PAGES = [
 // 역할 기본 권한 맵 (개별 permissions가 없을 때 fallback)
 const ROLE_PERMISSIONS = {
   admin: ['*'],  // 모든 권한
-  purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'inventory-ledger', 'auto-order', 'create-po', 'po-list', 'os-register',
+  purchase: ['dashboard', 'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'inventory-ledger', 'auto-order', 'create-po', 'po-list', 'os-register',
     'delivery-schedule', 'receipts', 'invoices', 'notes', 'product-mgmt', 'bom', 'mrp', 'post-process', 'defects',
     'closing', 'report', 'po-mgmt', 'china-shipment', 'mat-purchase', 'tasks', 'meeting-log', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'cost-mgmt', 'board', 'audit-log', 'exec-dashboard', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'work-order', 'lot-tracking',
     'approval', 'sales-order', 'budget', 'notification', 'safety-stock', 'cycle-count', 'mfg-cost', 'procurement', 'vendor-performance'],
-  production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'inventory-ledger', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking',
+  production: ['dashboard', 'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'inventory-ledger', 'production-req', 'mrp', 'bom', 'post-process', 'defects', 'product-mgmt', 'notes', 'production-stock', 'tasks', 'approval', 'lot-tracking',
     'process-routing', 'equipment', 'mfg-cost', 'safety-stock', 'work-order'],
-  logistics: ['dashboard', 'inventory', 'warehouse', 'shipments', 'inventory-ledger', 'receipts', 'delivery-schedule', 'shipping', 'lot-tracking',
+  logistics: ['dashboard', 'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'inventory-ledger', 'receipts', 'delivery-schedule', 'shipping', 'lot-tracking',
     'safety-stock', 'cycle-count', 'barcode', 'tasks', 'notes', 'board', 'notification', 'customer-orders'],
   sales_team: ['dashboard', 'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'sales-order', 'customer-orders', 'shipping',
-    'inventory', 'warehouse', 'shipments', 'ar-ap', 'invoices', 'tasks', 'notes', 'board', 'notification', 'exec-dashboard', 'analytics', 'report'],
+    'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'ar-ap', 'invoices', 'tasks', 'notes', 'board', 'notification', 'exec-dashboard', 'analytics', 'report'],
   accounting: ['dashboard', 'invoices', 'mat-purchase', 'cost-mgmt', 'closing', 'chart-of-accounts', 'journal', 'general-ledger',
     'trial-balance', 'financial-statements', 'ar-ap', 'tax-invoice', 'budget', 'mfg-cost', 'vat-report', 'journal-auto',
     'sales', 'sales-barun', 'sales-dd', 'sales-gift', 'tasks', 'notes', 'board', 'notification', 'approval', 'exec-dashboard'],
-  packaging: ['dashboard', 'inventory', 'warehouse', 'shipments', 'production-req', 'production-stock', 'work-order', 'bom',
+  packaging: ['dashboard', 'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'production-req', 'production-stock', 'work-order', 'bom',
     'post-process', 'lot-tracking', 'receipts', 'tasks', 'notes', 'board', 'notification'],
-  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
+  viewer: ['dashboard', 'inventory', 'warehouse', 'shipments', 'sales-qty', 'shipment-qty', 'po-list', 'notes', 'sales', 'sales-barun', 'sales-gift', 'cost-mgmt', 'board', 'customer-orders', 'shipping',
     'chart-of-accounts', 'journal', 'general-ledger', 'trial-balance', 'financial-statements', 'ar-ap'],
 };
 
@@ -16466,6 +16468,143 @@ async function handleRequest(req, res) {
     result.summary = { total_sales: totalSales, total_orders: totalOrders, avg_daily_sales: result.rows.length > 0 ? Math.round(totalSales / result.rows.length) : 0, days: result.rows.length };
     result.cachedAt = new Date().toISOString();
     ok(res, result); return;
+  }
+
+  // ── GET /api/qty/monthly ──
+  // 제품별 × 월별 피봇 (판매수량 / 출고수량 메뉴 공용)
+  // type=sales       → XERP ERP_SalesData (h_date, b_OrderNum) 고객주문 기반
+  // type=shipment    → XERP mmInoutItem (InoutDate, InoutQty, InoutGubun='SO') 창고 실출고 기반
+  // 기간: from / to (YYYYMM, 미지정 시 최근 12개월)
+  if (pathname === '/api/qty/monthly' && method === 'GET') {
+    const token = extractToken(req); const decoded = token ? verifyToken(token) : null;
+    if (!decoded) { fail(res, 401, '인증이 필요합니다'); return; }
+    const type = (parsed.searchParams.get('type') || 'shipment').toLowerCase();
+    if (type !== 'sales' && type !== 'shipment') { fail(res, 400, 'type는 sales 또는 shipment'); return; }
+
+    // 기간 파라미터 (YYYYMM). 미지정 시 최근 12개월.
+    const yyyymmRe = /^\d{6}$/;
+    const today = new Date();
+    const defaultTo = today.getFullYear() * 100 + (today.getMonth() + 1);
+    const defaultFromD = new Date(today); defaultFromD.setMonth(defaultFromD.getMonth() - 11);
+    const defaultFrom = defaultFromD.getFullYear() * 100 + (defaultFromD.getMonth() + 1);
+    const fromParam = parsed.searchParams.get('from') || String(defaultFrom);
+    const toParam = parsed.searchParams.get('to') || String(defaultTo);
+    if (!yyyymmRe.test(fromParam) || !yyyymmRe.test(toParam)) { fail(res, 400, 'from/to는 YYYYMM 형식'); return; }
+    if (fromParam > toParam) { fail(res, 400, 'from이 to보다 큼'); return; }
+
+    // 날짜 범위 (YYYYMMDD): from월 1일 ~ to월 마지막일
+    const fromYYYYMMDD = fromParam + '01';
+    const toYear = parseInt(toParam.slice(0, 4));
+    const toMonth = parseInt(toParam.slice(4, 6));
+    const lastDay = new Date(toYear, toMonth, 0).getDate(); // toMonth 의 마지막 일
+    const toYYYYMMDD = toParam + String(lastDay).padStart(2, '0');
+
+    // months 배열 생성 (YYYYMM, 오름차순)
+    const months = [];
+    {
+      let y = parseInt(fromParam.slice(0, 4));
+      let m = parseInt(fromParam.slice(4, 6));
+      while (y * 100 + m <= parseInt(toParam)) {
+        months.push(String(y) + String(m).padStart(2, '0'));
+        m++; if (m > 12) { m = 1; y++; }
+      }
+    }
+
+    try {
+      const pool = await ensureXerpPool();
+      if (!pool) { fail(res, 503, 'XERP 풀 미연결'); return; }
+
+      const sqlText = type === 'sales' ? `
+        SELECT RTRIM(b_goodCode) AS product_code,
+               SUBSTRING(h_date, 1, 6) AS yyyymm,
+               ISNULL(SUM(b_OrderNum), 0) AS qty
+        FROM ERP_SalesData WITH (NOLOCK)
+        WHERE h_date >= @s AND h_date <= @e
+          AND b_goodCode IS NOT NULL AND LTRIM(RTRIM(b_goodCode)) <> ''
+        GROUP BY RTRIM(b_goodCode), SUBSTRING(h_date, 1, 6)
+      ` : `
+        SELECT RTRIM(ItemCode) AS product_code,
+               SUBSTRING(InoutDate, 1, 6) AS yyyymm,
+               ISNULL(SUM(InoutQty), 0) AS qty
+        FROM mmInoutItem WITH (NOLOCK)
+        WHERE InoutDate >= @s AND InoutDate <= @e
+          AND InoutGubun = 'SO'
+          AND SiteCode = '${XERP_SITE_CODE}'
+          AND ItemCode IS NOT NULL AND LTRIM(RTRIM(ItemCode)) <> ''
+        GROUP BY RTRIM(ItemCode), SUBSTRING(InoutDate, 1, 6)
+      `;
+
+      const r = await pool.request()
+        .input('s', sql.NVarChar(16), fromYYYYMMDD)
+        .input('e', sql.NVarChar(16), toYYYYMMDD)
+        .query(sqlText);
+
+      // 피봇: code → {yyyymm: qty, ...}
+      const byCode = new Map();
+      for (const row of r.recordset) {
+        const code = (row.product_code || '').trim();
+        if (!code) continue;
+        const ym = row.yyyymm;
+        const q = Number(row.qty) || 0;
+        let ent = byCode.get(code);
+        if (!ent) { ent = { code, byMonth: {}, total: 0 }; byCode.set(code, ent); }
+        ent.byMonth[ym] = (ent.byMonth[ym] || 0) + q;
+        ent.total += q;
+      }
+
+      // 품목명/브랜드 매핑 (로컬 products 테이블 우선, 없으면 코드만)
+      const codes = [...byCode.keys()];
+      const nameMap = {};
+      try {
+        const safeCodes = codes.filter(c => /^[A-Za-z0-9_\-]+$/.test(c));
+        if (safeCodes.length > 0) {
+          const placeholders = safeCodes.map(() => '?').join(',');
+          const rows = await db.prepare(
+            `SELECT product_code, product_name, brand, origin FROM products WHERE product_code IN (${placeholders})`
+          ).all(...safeCodes);
+          for (const row of rows) {
+            nameMap[row.product_code] = { name: row.product_name || '', brand: row.brand || '', origin: row.origin || '' };
+          }
+        }
+      } catch (_) {}
+
+      // 응답 구성: 월평균 = total / months.length (요청 기간 기준), total 내림차순 정렬
+      const monthCount = months.length || 1;
+      const products = [];
+      const totalByMonth = {};
+      for (const m of months) totalByMonth[m] = 0;
+      let grandTotal = 0;
+      for (const ent of byCode.values()) {
+        const info = nameMap[ent.code] || {};
+        const monthlyAvg = Math.round(ent.total / monthCount);
+        products.push({
+          code: ent.code,
+          name: info.name || ent.code,
+          brand: info.brand || '',
+          origin: info.origin || '',
+          byMonth: ent.byMonth,
+          total: ent.total,
+          monthlyAvg
+        });
+        for (const m of months) totalByMonth[m] += (ent.byMonth[m] || 0);
+        grandTotal += ent.total;
+      }
+      products.sort((a, b) => b.total - a.total);
+
+      ok(res, {
+        type,
+        from: fromParam,
+        to: toParam,
+        months,
+        products,
+        total: { byMonth: totalByMonth, grand: grandTotal, monthlyAvg: Math.round(grandTotal / monthCount) },
+        product_count: products.length
+      });
+    } catch (e) {
+      console.error('[/api/qty/monthly] error:', e.message);
+      fail(res, 500, '월별 수량 조회 실패: ' + e.message);
+    }
+    return;
   }
 
   // ── GET /api/sales/monthly ──
