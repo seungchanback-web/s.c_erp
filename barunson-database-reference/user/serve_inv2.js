@@ -7248,6 +7248,126 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ── /api/debug/dd-snap-diag ─────────────────────────────────────────
+  // 디얼디어(legal_entity='dd') 가용재고 0 이슈 전용 진단.
+  // 1) 로컬 inventory_snapshot.dd 행 통계 (current_stock 분포, monthly_out, sync 시각, site_code)
+  // 2) 로컬 products.dd 행 통계 (product_name/spec/origin 빈값 비율)
+  // 3) XERP mmInventory 의 ItemCode LIKE 'DD%' live 분포 (sync 잡과 동일 조건)
+  // 인증 없음 (다른 /api/debug/* 패턴 동일).
+  if (pathname === '/api/debug/dd-snap-diag' && method === 'GET') {
+    const out = { ts: new Date().toISOString() };
+    try {
+      // 1) inventory_snapshot 의 dd 행
+      const snapStat = await db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN current_stock > 0 THEN 1 ELSE 0 END) AS rows_pos,
+               SUM(CASE WHEN current_stock = 0 OR current_stock IS NULL THEN 1 ELSE 0 END) AS rows_zero,
+               COALESCE(SUM(current_stock), 0) AS sum_stock,
+               COALESCE(SUM(monthly_out), 0) AS sum_monthly_out,
+               MIN(synced_at) AS sync_min,
+               MAX(synced_at) AS sync_max
+        FROM inventory_snapshot
+        WHERE legal_entity = 'dd'
+      `).get();
+      out.snapshot_dd_summary = snapStat;
+
+      // 2) site_code 분포
+      out.snapshot_dd_site_distribution = await db.prepare(`
+        SELECT COALESCE(site_code, '(null)') AS site_code,
+               COUNT(*) AS rows, COALESCE(SUM(current_stock), 0) AS sum_stock
+        FROM inventory_snapshot
+        WHERE legal_entity = 'dd'
+        GROUP BY site_code
+      `).all();
+
+      // 3) 재고 상위 10개
+      out.snapshot_dd_top10 = await db.prepare(`
+        SELECT product_code, item_name, current_stock, monthly_out, site_code, synced_at
+        FROM inventory_snapshot
+        WHERE legal_entity = 'dd'
+        ORDER BY current_stock DESC
+        LIMIT 10
+      `).all();
+
+      // 4) products 의 dd 행 통계
+      const prodStat = await db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN product_name IS NULL OR product_name = '' THEN 1 ELSE 0 END) AS empty_name,
+               SUM(CASE WHEN spec IS NULL OR spec = '' THEN 1 ELSE 0 END) AS empty_spec,
+               SUM(CASE WHEN origin IS NULL OR origin = '' THEN 1 ELSE 0 END) AS empty_origin
+        FROM products
+        WHERE product_code LIKE 'DD%' OR origin = 'DD' OR legal_entity = 'dd'
+      `).get();
+      out.products_dd_summary = prodStat;
+
+      // 5) products dd origin 분포
+      out.products_dd_origin_distribution = await db.prepare(`
+        SELECT COALESCE(origin, '(null)') AS origin, COUNT(*) AS rows
+        FROM products
+        WHERE product_code LIKE 'DD%' OR origin = 'DD' OR legal_entity = 'dd'
+        GROUP BY origin
+      `).all();
+
+      // 6) XERP mmInventory live 진단 — sync 잡(serve_inv2.js:6360)과 동일 필터
+      if (typeof xerpPool !== 'undefined' && xerpPool) {
+        try {
+          const r1 = await xerpPool.request().query(`
+            SELECT COUNT(DISTINCT RTRIM(ItemCode)) AS dd_codes,
+                   COUNT(*) AS dd_rows,
+                   COALESCE(SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END), 0) AS sum_qty,
+                   SUM(CASE WHEN OhQty > 0 THEN 1 ELSE 0 END) AS rows_with_qty
+            FROM mmInventory WITH (NOLOCK)
+            WHERE ItemCode LIKE 'DD%'
+          `);
+          out.xerp_mminventory_dd_summary = r1.recordset[0];
+
+          const r2 = await xerpPool.request().query(`
+            SELECT RTRIM(SiteCode) AS site_code, RTRIM(WhCode) AS wh_code,
+                   COUNT(*) AS rows, COUNT(DISTINCT RTRIM(ItemCode)) AS items,
+                   COALESCE(SUM(CASE WHEN OhQty > 0 THEN OhQty ELSE 0 END), 0) AS qty
+            FROM mmInventory WITH (NOLOCK)
+            WHERE ItemCode LIKE 'DD%'
+            GROUP BY RTRIM(SiteCode), RTRIM(WhCode)
+            ORDER BY qty DESC
+          `);
+          out.xerp_dd_site_warehouse = r2.recordset;
+
+          const r3 = await xerpPool.request().query(`
+            SELECT TOP 10 RTRIM(SiteCode) AS site_code, RTRIM(WhCode) AS wh_code,
+                   RTRIM(ItemCode) AS item_code, OhQty
+            FROM mmInventory WITH (NOLOCK)
+            WHERE ItemCode LIKE 'DD%' AND OhQty > 0
+            ORDER BY OhQty DESC
+          `);
+          out.xerp_dd_top10 = r3.recordset;
+        } catch (e) {
+          out.xerp_query_error = e.message;
+        }
+      } else {
+        out.xerp_pool = 'not_connected';
+      }
+
+      // 7) 진단 요약 — 어디서 깨졌는지 자동 분류
+      const sn = out.snapshot_dd_summary || {};
+      const xs = out.xerp_mminventory_dd_summary || {};
+      const ps = out.products_dd_summary || {};
+      const verdict = [];
+      if ((sn.total || 0) === 0)              verdict.push('snapshot.dd 행 자체가 0건 → sync 잡이 한 번도 dd 를 적재하지 못함');
+      if ((sn.sum_stock || 0) === 0 && (sn.total || 0) > 0)
+                                              verdict.push('snapshot.dd 행은 있으나 current_stock 합계 0 → sync 가 0 으로 덮어씀');
+      if ((xs.sum_qty || 0) === 0)            verdict.push('XERP mmInventory 의 DD% 합계 0 → XERP 측 데이터가 0 (외부 변동)');
+      if ((xs.dd_codes || 0) === 0)           verdict.push('XERP mmInventory 에 DD% prefix 자체가 없음 → 품목코드 prefix 변경 가능성');
+      if ((ps.empty_name || 0) > (ps.total || 0) * 0.5)
+                                              verdict.push('products.dd 의 product_name 절반 이상 빈값 → dd_master.json import 실패');
+      out.verdict = verdict.length ? verdict : ['특이사항 없음 — 화면 매핑 코드 또는 캐시 문제 가능성'];
+
+      ok(res, out);
+    } catch (e) {
+      fail(res, 500, 'DD 진단 실패: ' + e.message + ' / partial=' + JSON.stringify(out));
+    }
+    return;
+  }
+
   if (pathname === '/api/debug/xerp-match' && method === 'GET') {
     const code = (parsed.searchParams.get('code') || '').trim();
     if (!code) { fail(res, 400, 'code 파라미터 필요'); return; }
