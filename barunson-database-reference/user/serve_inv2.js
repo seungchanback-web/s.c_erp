@@ -4343,7 +4343,30 @@ Object.assign(routeCtx, {
   xerpInventoryCache: typeof xerpInventoryCache !== 'undefined' ? xerpInventoryCache : null,
   getXerpPool: () => typeof xerpPool !== 'undefined' ? xerpPool : null,
   getDdPool: () => typeof ddPool !== 'undefined' ? ddPool : null,
+  setXerpPool: (p) => { xerpPool = p; },
   ensureXerpPool: typeof ensureXerpPool !== 'undefined' ? ensureXerpPool : null,
+  connectXERP: typeof connectXERP !== 'undefined' ? connectXERP : null,
+  resetXerpReconnectAttempts: () => { if (typeof xerpReconnectAttempts !== 'undefined') xerpReconnectAttempts = 0; },
+  get xerpReconnectTimer() { return typeof xerpReconnectTimer !== 'undefined' ? xerpReconnectTimer : null; },
+  set xerpReconnectTimer(v) { if (typeof xerpReconnectTimer !== 'undefined') xerpReconnectTimer = v; },
+  xerpConfig: typeof xerpConfig !== 'undefined' ? xerpConfig : {},
+  barShopConfig: typeof barShopConfig !== 'undefined' ? barShopConfig : {},
+  ddConfig: typeof ddConfig !== 'undefined' ? ddConfig : {},
+  envVars: typeof envVars !== 'undefined' ? envVars : {},
+  dotenvPath: typeof dotenvPath !== 'undefined' ? dotenvPath : '',
+  XERP_SITE_CODE: typeof XERP_SITE_CODE !== 'undefined' ? XERP_SITE_CODE : 'BK10',
+  XERP_INV_WH_LIST: typeof XERP_INV_WH_LIST !== 'undefined' ? XERP_INV_WH_LIST : [],
+  APP_VERSION: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '0.0.0',
+  APP_VERSION_DATE: typeof APP_VERSION_DATE !== 'undefined' ? APP_VERSION_DATE : '',
+  _startTime: typeof _startTime !== 'undefined' ? _startTime : Date.now(),
+  // Auto-order helpers
+  sendPOEmail: typeof sendPOEmail !== 'undefined' ? sendPOEmail : null,
+  resolveVendor: typeof resolveVendor !== 'undefined' ? resolveVendor : null,
+  runAutoOrderScheduler: typeof runAutoOrderScheduler !== 'undefined' ? runAutoOrderScheduler : null,
+  runShipmentEmailCheck: typeof runShipmentEmailCheck !== 'undefined' ? runShipmentEmailCheck : null,
+  ORIGIN_LEAD_TIME: typeof ORIGIN_LEAD_TIME !== 'undefined' ? ORIGIN_LEAD_TIME : { '중국': 50, '한국': 7, '더기프트': 14 },
+  _hasEntity: typeof _hasEntity !== 'undefined' ? _hasEntity : {},
+  __dir: typeof __dir !== 'undefined' ? __dir : __dirname,
 });
 
 // ── legal_entity 2차 ALTER (뒤늦게 CREATE 된 trade_document/defects/batch_master/work_orders 대응) ──
@@ -4415,6 +4438,35 @@ try {
   if (reportEngine.router) moduleRouters.push(reportEngine.router);
   console.log('✅ 모듈 로드: report-engine (' + (reportEngine.router?.count || 0) + ' routes)');
 } catch(e) { console.log('⚠️ report-engine 모듈 미로드:', e.message); }
+
+try {
+  const admin = require('./routes/admin');
+  if (admin.router) moduleRouters.push(admin.router);
+  console.log('✅ 모듈 로드: admin (' + (admin.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ admin 모듈 미로드:', e.message); }
+
+try {
+  const vendors = require('./routes/vendors');
+  if (vendors.router) moduleRouters.push(vendors.router);
+  console.log('✅ 모듈 로드: vendors (' + (vendors.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ vendors 모듈 미로드:', e.message); }
+
+try {
+  const autoOrder = require('./routes/auto-order');
+  if (autoOrder.router) moduleRouters.push(autoOrder.router);
+  console.log('✅ 모듈 로드: auto-order (' + (autoOrder.router?.count || 0) + ' routes)');
+} catch(e) { console.log('⚠️ auto-order 모듈 미로드:', e.message); }
+
+// ── 추가 모듈 로드 (Step 1 리팩토링) ──
+const _newModules = ['auth','products','inventory','po','vendor-portal','accounting','post-process','sales','bom-mrp','reports','manufacturing','china'];
+for (const modName of _newModules) {
+  try {
+    const mod = require(`./routes/${modName}`);
+    if (mod.initTables) mod.initTables();
+    if (mod.router) moduleRouters.push(mod.router);
+    console.log(`✅ 모듈 로드: ${modName} (${mod.router?.count || 0} routes)`);
+  } catch(e) { console.log(`⚠️ ${modName} 모듈 미로드: ${e.message}`); }
+}
 
 console.log(`📦 총 ${moduleRouters.reduce((s,r) => s + r.count, 0)}개 모듈 라우트 등록`);
 
