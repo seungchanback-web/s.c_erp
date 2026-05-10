@@ -4320,6 +4320,7 @@ Object.assign(routeCtx, {
   DEPT_GUBUN_LABELS: typeof DEPT_GUBUN_LABELS !== 'undefined' ? DEPT_GUBUN_LABELS : {},
   BRAND_LABELS: typeof BRAND_LABELS !== 'undefined' ? BRAND_LABELS : {},
   bcrypt, jwt, sql, nodemailer, fs, path,
+  _jwtSecret: typeof JWT_SECRET !== 'undefined' ? JWT_SECRET : 'dev-secret',
   _smtpTransporter: typeof smtpTransporter !== 'undefined' ? smtpTransporter : null,
   SMTP_FROM: typeof SMTP_FROM !== 'undefined' ? SMTP_FROM : '',
   xerpInventoryCache: typeof xerpInventoryCache !== 'undefined' ? xerpInventoryCache : null,
@@ -4440,7 +4441,7 @@ try {
 } catch(e) { console.log('⚠️ auto-order 모듈 미로드:', e.message); }
 
 // ── 추가 모듈 로드 (Step 1 리팩토링) ──
-const _newModules = ['auth','products','inventory','po','vendor-portal','accounting','post-process','sales','bom-mrp','reports','manufacturing','china'];
+const _newModules = ['auth','products','inventory','po','vendor-portal','accounting','post-process','sales','bom-mrp','reports','manufacturing','china','wms-integration'];
 for (const modName of _newModules) {
   try {
     const mod = require(`./routes/${modName}`);
