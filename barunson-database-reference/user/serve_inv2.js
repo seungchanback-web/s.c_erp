@@ -3885,12 +3885,18 @@ async function createNotification(userId, type, title, message, link) {
 // JWT 시크릿 (서버 고유 — 최초 생성 후 파일 저장)
 const JWT_SECRET_PATH = path.join(DATA_DIR, '.jwt_secret');
 let JWT_SECRET;
-try {
-  JWT_SECRET = fs.readFileSync(JWT_SECRET_PATH, 'utf8').trim();
-} catch {
-  JWT_SECRET = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(JWT_SECRET_PATH, JWT_SECRET, 'utf8');
-  console.log('JWT 시크릿 키 생성 완료');
+if (process.env.JWT_SECRET) {
+  // 환경변수 우선 — sc-erp-nestjs와 동일 시크릿 공유 (Strangler Fig 호환)
+  JWT_SECRET = process.env.JWT_SECRET;
+  console.log('JWT 시크릿: 환경변수(JWT_SECRET) 사용');
+} else {
+  try {
+    JWT_SECRET = fs.readFileSync(JWT_SECRET_PATH, 'utf8').trim();
+  } catch {
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(JWT_SECRET_PATH, JWT_SECRET, 'utf8');
+    console.log('JWT 시크릿 키 생성 완료');
+  }
 }
 const JWT_EXPIRES = '24h';
 
@@ -3956,7 +3962,14 @@ function signToken(user) {
 }
 
 function verifyToken(token) {
-  try { return jwt.verify(token, JWT_SECRET); }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    // sc-erp-nestjs 호환: sub(UUID) → userId로 정규화
+    if (decoded && !decoded.userId && decoded.sub) {
+      decoded.userId = decoded.sub;
+    }
+    return decoded;
+  }
   catch { return null; }
 }
 
